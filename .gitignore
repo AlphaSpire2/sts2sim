@@ -1,0 +1,3 @@
+/target/
+.cargo/config.toml
+*.sts2pgn

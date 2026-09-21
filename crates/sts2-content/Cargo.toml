@@ -1,0 +1,26 @@
+[package]
+name = "sts2-content"
+description = "Pinned STS2 content implementations and conformance scenarios"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sts2-core = { path = "../sts2-core" }
+sts2-engine = { path = "../sts2-engine" }
+sts2-rng = { path = "../sts2-rng" }
+
+[dev-dependencies]
+criterion.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sts2-replay = { path = "../sts2-replay" }
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "hot_paths"
+harness = false

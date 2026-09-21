@@ -1,0 +1,24 @@
+[package]
+name = "sts2-cli"
+description = "Playable command-line interface for sts2sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sts2sim"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+clap_complete.workspace = true
+serde_json.workspace = true
+sts2-content = { path = "../sts2-content" }
+sts2-core = { path = "../sts2-core" }
+sts2-engine = { path = "../sts2-engine" }
+sts2-replay = { path = "../sts2-replay" }
+
+[lints]
+workspace = true

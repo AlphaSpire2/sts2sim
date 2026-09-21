@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "compatibility_id": "sts2-v0.107.1-59260271-models-3954186980",
+  "game": {
+    "version": "v0.107.1",
+    "commit": "59260271",
+    "model_id_hash": 3954186980
+  },
+  "support_policy": {
+    "player_counts": [
+      1
+    ],
+    "game_modes": [
+      "standard",
+      "custom"
+    ],
+    "gameplay_affecting_mods": false
+  }
+}
