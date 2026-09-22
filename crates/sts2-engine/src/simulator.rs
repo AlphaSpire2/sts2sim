@@ -29031,7 +29031,7 @@ fn sorted_pile_cards(cards: &[crate::CardInstance]) -> Vec<crate::PileCard> {
             face: crate::CardFace::of(card),
         })
         .collect();
-    views.sort_by_cached_key(|view| serde_json::to_string(view).expect("a card view serializes"));
+    sort_card_views(&mut views, |view| &view.fingerprint.model_id);
     views
 }
 
@@ -29235,10 +29235,10 @@ impl<'a> DecisionKeyView<'a> {
                 // A bundle names its cards by their place on the screen, so
                 // a bundled screen keeps its order.
                 if bundles.is_empty() {
-                    sort_card_views(&mut candidates);
+                    sort_card_views(&mut candidates, |view| &view.fingerprint.model_id);
                 }
                 let mut picked = key_handle_views(picked);
-                sort_card_views(&mut picked);
+                sort_card_views(&mut picked, |view| &view.fingerprint.model_id);
                 Self::ChooseCards {
                     choice_id,
                     identity,
@@ -29257,10 +29257,30 @@ impl<'a> DecisionKeyView<'a> {
     }
 }
 
-/// The canonical order every card set in the key is sorted into: by the
-/// serialized card, the same order [`sorted_pile_cards`] draws.
-fn sort_card_views<T: serde::Serialize>(views: &mut [T]) {
-    views.sort_by_cached_key(|view| serde_json::to_vec(view).expect("a card view serializes"));
+/// The canonical JSON order, with full serialization only for model ties.
+/// Every supported view starts with `fingerprint.model_id`, so its serialized
+/// model ID decides the order before any other field. Serialize that prefix
+/// too: `ModelId` permits characters whose JSON escaping changes their order.
+fn sort_card_views<T: serde::Serialize>(views: &mut [T], model_id: impl Fn(&T) -> &ModelId) {
+    if views.len() < 2 {
+        return;
+    }
+    views.sort_by_cached_key(|view| {
+        serde_json::to_vec(model_id(view)).expect("a model id serializes")
+    });
+    let mut start = 0;
+    while start < views.len() {
+        let mut end = start + 1;
+        while end < views.len() && model_id(&views[start]) == model_id(&views[end]) {
+            end += 1;
+        }
+        if end - start > 1 {
+            views[start..end].sort_by_cached_key(|view| {
+                serde_json::to_vec(view).expect("a card view serializes")
+            });
+        }
+        start = end;
+    }
 }
 
 /// The hand as a set of faces with their previews, matched to the cards by
@@ -29285,7 +29305,7 @@ fn key_hand_views<'a>(
             face: card.face,
         })
         .collect();
-    sort_card_views(&mut views);
+    sort_card_views(&mut views, |view| &view.fingerprint.model_id);
     views
 }
 
@@ -29336,7 +29356,7 @@ fn sorted_pile_card_views(cards: &[crate::CardInstance]) -> Vec<PileCardView<'_>
             face: crate::CardFace::of(card),
         })
         .collect();
-    views.sort_by_cached_key(|view| serde_json::to_string(view).expect("a card view serializes"));
+    sort_card_views(&mut views, |view| &view.fingerprint.model_id);
     views
 }
 
@@ -30285,5 +30305,83 @@ fn enchant_fingerprint(
             ));
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod card_view_sort_tests {
+    use super::{KeyHandCardView, KeyPreviewView, PileCardView, sort_card_views};
+    use crate::{CardFace, ContentRegistry, PileCard};
+    use sts2_core::ModelId;
+
+    /// Compare the complete serialized output against the original full
+    /// JSON sort, not just model order or a key computed by the same path.
+    fn assert_json_order<T: serde::Serialize>(
+        mut views: Vec<T>,
+        model_id: impl Fn(&T) -> &ModelId,
+    ) {
+        let mut expected: Vec<_> = views
+            .iter()
+            .map(|view| serde_json::to_vec(view).unwrap())
+            .collect();
+        expected.sort();
+        sort_card_views(&mut views, model_id);
+        let actual: Vec<_> = views
+            .iter()
+            .map(|view| serde_json::to_vec(view).unwrap())
+            .collect();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn model_prefix_sort_preserves_full_json_order_for_every_card_view() {
+        // Prefixes, escaped names, and Unicode cannot be ordered by ModelId
+        // alone. Duplicate models exercise every field after the prefix,
+        // including numbers whose JSON order differs from numeric order.
+        let registry = ContentRegistry::default();
+        let mut cards = Vec::new();
+        for entry in ["A", "AA", "A!", "A\n", "A\"", "A\\", "é", "Z"] {
+            for amount in [2, 10, 0] {
+                let mut fingerprint = registry.fresh_card(&ModelId::new("CARD", entry).unwrap());
+                fingerprint.upgrade_level = amount;
+                cards.push(PileCard {
+                    fingerprint,
+                    face: CardFace {
+                        damage_bonus: i32::from(amount),
+                        ..CardFace::default()
+                    },
+                });
+            }
+        }
+        cards.reverse();
+        assert_json_order(cards.clone(), |view| &view.fingerprint.model_id);
+        assert_json_order(
+            cards
+                .iter()
+                .map(|card| PileCardView {
+                    fingerprint: &card.fingerprint,
+                    face: card.face.clone(),
+                })
+                .collect(),
+            |view| &view.fingerprint.model_id,
+        );
+        let hand: Vec<_> = cards
+            .iter()
+            .flat_map(|card| {
+                [None, Some(2), Some(10)].map(|damage| KeyHandCardView {
+                    fingerprint: &card.fingerprint,
+                    face: card.face.clone(),
+                    preview: damage.map(|damage| KeyPreviewView {
+                        damage: Some(damage),
+                        block: None,
+                        aimed_damage: &[],
+                        multi_target_damage: None,
+                    }),
+                })
+            })
+            .collect();
+        assert_json_order(hand, |view| &view.fingerprint.model_id);
+        assert_json_order(vec![cards[0].clone()], |view| &view.fingerprint.model_id);
+        assert_json_order(Vec::<PileCard>::new(), |view| &view.fingerprint.model_id);
     }
 }
