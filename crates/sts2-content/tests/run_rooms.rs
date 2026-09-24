@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 
+#[path = "run_rooms/replay_storage.rs"]
+mod replay_storage;
+
 use sts2_engine::{
     ActMap, ActRoomPools, Action, ActiveRoom, CombatRoomDefinition, DecisionContext, EnemySpawn,
     EventEffect, EventOption, MapCoord, MapPoint, MapPointType, RelicGrabBagState, RoomAt,

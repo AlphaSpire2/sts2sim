@@ -1,6 +1,6 @@
 [package]
 name = "sts2-replay"
-description = "Streaming STS2PGN Format v1 parser and canonical projection digests"
+description = "Streaming STS2PGN v1/v2 reader with gzip and lossless observation deltas"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+flate2.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
 sha2.workspace = true
 sts2-core = { path = "../sts2-core" }
 sts2-engine = { path = "../sts2-engine" }

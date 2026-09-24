@@ -119,6 +119,12 @@ field that differs:
 cargo run -p sts2-cli -- replay run.sts2pgn
 ```
 
+Replay accepts FormatVersion 1 and 2, including `.sts2pgn.gz` files directly.
+Gzip is detected from the file's contents, so no decompression command or
+temporary file is needed. Version-two deltas are expanded and their full-state
+digests checked before comparison; unchanged fields remain part of each
+observation. Action-only decision scripts keep their existing format.
+
 ```text
 seed          N3Z9EE2CXB
 records       1102 read, 373 actions applied

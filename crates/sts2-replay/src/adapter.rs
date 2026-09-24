@@ -48,7 +48,7 @@ pub enum AdapterOutcome {
     Ignored(TimelineRole),
 }
 
-/// Drives a simulator from Format v1 action records. Timeline-only records are
+/// Drives a simulator from decoded STS2PGN action records. Timeline-only records are
 /// validated and ignored; unsupported initiating records fail at their sequence.
 #[derive(Clone, Debug)]
 pub struct ReplayAdapter {

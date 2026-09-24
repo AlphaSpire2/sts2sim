@@ -65,6 +65,7 @@ impl ReplayReport {
 /// Replays `input` against a run generated from its own `Seed` header,
 /// comparing every settled recorded observation against simulated state.
 pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
+    let input = sts2_replay::decode_input(input)?;
     let mut parser = Parser::new(input).map_err(|error| CliError::Replay(error.to_string()))?;
     validate_compatibility(&parser).map_err(|error| CliError::Replay(error.to_string()))?;
     let seed = parser

@@ -237,12 +237,39 @@ A recording is either finished or a prefix. A finished run opens at
 header and the terminal line. A prefix stops without finishing: the recorder
 writes `Result "*"` when it opens the file and rewrites it only at a clean
 finalisation, so a run whose recording was never finalised keeps `*` and has
-no terminal line. A prefix is a Format v1 shape, not a damaged file. It is
+no terminal line. Both supported format versions allow prefixes. A prefix is
 authoritative for exactly the records it carries — every settled observation
 in it is as binding as one in a finished run — and it asserts nothing about
 how the run ended. Replaying one is a prefix conformance claim: only its
 recorded checkpoints constrain replay, and a simulated terminal that follows
 from settling the final recorded input is neither asserted nor rejected.
+
+The reader accepts STS2PGN FormatVersion 1 and 2 with Projection version 1.
+Plain and gzip input use the same streaming replay path; gzip is detected by
+its magic bytes, including concatenated members, and decompression errors are
+reported when encountered. The CLI does not create decompressed copies.
+
+FormatVersion 2 is a storage encoding. A `state.delta` references the immediately
+previous recorded observation's sequence. Its object-key `set` and `remove`
+operations reconstruct a complete `state.observe`, retaining the original
+sequence, correlation, context, digest, and unknown fields. Arrays are replaced
+whole; null and removal remain distinct. Invalid bases, paths, envelopes, or
+full-state digests are errors. A decoding error ends the parser rather than
+allowing later records to use an invalid baseline.
+
+The baseline is cleared by `run.start`, `run.resume`, `room.enter`, and `act.enter`.
+The following observation must be full, as must observations whose context names
+one of those boundaries. This baseline always belongs to the recording; it
+never initializes or repairs simulated state. Resume continues to restore the
+simulator's own saved snapshot and count rewound actions. Comparison covers the
+whole expanded observation, including fields absent from the delta patch.
+
+Canonical numeric tokens are retained without passing through floating point.
+Version-two digest verification matches the recorder's UTF-16 ordinal property
+ordering and System.Text.Json string escaping. Existing version-one input and
+action-only decision scripts remain supported. Only an incomplete JSON payload
+on the final unterminated line is ignored as an interrupted append; complete
+malformed records and invalid deltas are still errors.
 
 A recording's local profile is a run-defining input, so each one resolves to a
 registered unlock preset under

@@ -1,15 +1,23 @@
-//! Streaming STS2PGN Format v1 parsing and Projection v1 canonical digests.
+//! Streaming STS2PGN v1/v2 parsing and Projection v1 canonical digests.
 
 mod adapter;
+mod canonical;
 mod conformance;
+mod delta;
+mod input;
+mod json;
+
+#[cfg(test)]
+mod storage_tests;
+
+pub use input::decode_input;
 
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::io::{self, BufRead, Write};
 
-use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
-use serde_json::{Map, Number, Value};
+use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use sts2_core::{CompatibilityManifest, ModIdentity};
 use sts2_rng::canonicalize_seed;
@@ -22,7 +30,7 @@ pub use conformance::{
     record_role,
 };
 
-/// One losslessly decoded Format v1 header. Unknown keys remain in this list.
+/// One losslessly decoded STS2PGN header. Unknown keys remain in this list.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Header {
     pub key: String,
@@ -44,12 +52,15 @@ pub enum Event {
     Terminal(String),
 }
 
-/// Streaming parser. It retains only headers, one input line, and the current event.
+/// Streaming parser, retaining headers, one line, and one recorded-state baseline.
+/// Version-two deltas are verified and returned as complete state.observe records.
 pub struct Parser<R> {
     reader: R,
     headers: Vec<Header>,
-    pending: Option<String>,
+    pending: Option<(String, bool)>,
     line_number: usize,
+    delta: Option<delta::Decoder>,
+    failed: bool,
 }
 
 impl<R: BufRead> Parser<R> {
@@ -65,6 +76,7 @@ impl<R: BufRead> Parser<R> {
                 break;
             }
             line_number += 1;
+            let complete = line.ends_with('\n');
             trim_line_ending(&mut line);
             if line.is_empty() {
                 if headers.is_empty() {
@@ -75,7 +87,7 @@ impl<R: BufRead> Parser<R> {
             if line.starts_with('[') {
                 headers.push(parse_header(&line, line_number)?);
             } else {
-                pending = Some(line);
+                pending = Some((line, complete));
                 break;
             }
         }
@@ -85,11 +97,33 @@ impl<R: BufRead> Parser<R> {
                 ReplayErrorKind::MissingHeaders,
             ));
         }
+        let versions: Vec<_> = headers
+            .iter()
+            .filter(|header| header.key == "FormatVersion")
+            .collect();
+        if versions.len() > 1 {
+            return Err(ReplayError::new(
+                line_number,
+                ReplayErrorKind::DuplicateHeader,
+            ));
+        }
+        let delta = match versions.first().map(|header| header.value.as_str()) {
+            Some("1") | None => None,
+            Some("2") => Some(delta::Decoder::default()),
+            _ => {
+                return Err(ReplayError::new(
+                    line_number,
+                    ReplayErrorKind::UnsupportedFormat,
+                ));
+            }
+        };
         Ok(Self {
             reader,
             headers,
             pending,
             line_number,
+            delta,
+            failed: false,
         })
     }
 
@@ -108,7 +142,7 @@ impl<R: BufRead> Parser<R> {
 
     fn read_event(&mut self) -> Result<Option<Event>, ReplayError> {
         loop {
-            let line = if let Some(line) = self.pending.take() {
+            let (line, complete) = if let Some(line) = self.pending.take() {
                 line
             } else {
                 let mut line = String::new();
@@ -117,8 +151,9 @@ impl<R: BufRead> Parser<R> {
                     return Ok(None);
                 }
                 self.line_number += 1;
+                let complete = line.ends_with('\n');
                 trim_line_ending(&mut line);
-                line
+                (line, complete)
             };
             if line.is_empty() {
                 continue;
@@ -140,18 +175,40 @@ impl<R: BufRead> Parser<R> {
                         ReplayErrorKind::InvalidRecord,
                     ));
                 }
-                let payload = parse_json(json, self.line_number)?;
+                let payload = match parse_json(json, self.line_number) {
+                    Ok(payload) => payload,
+                    Err(_)
+                        if !complete
+                            && serde_json::from_str::<&serde_json::value::RawValue>(json)
+                                .is_err_and(|error| error.is_eof()) =>
+                    {
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
                 if !payload.is_object() {
                     return Err(ReplayError::new(
                         self.line_number,
                         ReplayErrorKind::RecordPayloadNotObject,
                     ));
                 }
-                return Ok(Some(Event::Record(Record {
+                let record = Record {
                     sequence,
                     kind: kind.to_owned(),
                     payload,
-                })));
+                };
+                let record = if let Some(decoder) = &mut self.delta {
+                    decoder.decode(record, self.line_number)?
+                } else {
+                    if kind == "state.delta" {
+                        return Err(ReplayError::new(
+                            self.line_number,
+                            ReplayErrorKind::UnsupportedFormat,
+                        ));
+                    }
+                    record
+                };
+                return Ok(Some(Event::Record(record)));
             }
             // `*` is the open terminal Format v1 writes until a clean
             // finalization rewrites it: an interrupted recording ends on it,
@@ -175,7 +232,12 @@ impl<R: BufRead> Iterator for Parser<R> {
     type Item = Result<Event, ReplayError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.read_event().transpose()
+        if self.failed {
+            return None;
+        }
+        let result = self.read_event().transpose();
+        self.failed = matches!(result, Some(Err(_)));
+        result
     }
 }
 
@@ -211,104 +273,7 @@ fn parse_header(line: &str, line_number: usize) -> Result<Header, ReplayError> {
 }
 
 fn parse_json(input: &str, line_number: usize) -> Result<Value, ReplayError> {
-    let mut deserializer = serde_json::Deserializer::from_str(input);
-    let value = NoDuplicateValue::deserialize(&mut deserializer)
-        .map_err(|error| ReplayError::json(line_number, error))?
-        .0;
-    deserializer
-        .end()
-        .map_err(|error| ReplayError::json(line_number, error))?;
-    Ok(value)
-}
-
-struct NoDuplicateValue(Value);
-
-impl<'de> Deserialize<'de> for NoDuplicateValue {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(ValueVisitor)
-    }
-}
-
-struct ValueVisitor;
-
-impl<'de> Visitor<'de> for ValueVisitor {
-    type Value = NoDuplicateValue;
-
-    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON value without duplicate object keys")
-    }
-
-    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
-        Ok(NoDuplicateValue(Value::Bool(value)))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateValue(Value::Number(Number::from(value))))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
-        Ok(NoDuplicateValue(Value::Number(Number::from(value))))
-    }
-
-    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Number::from_f64(value)
-            .map(Value::Number)
-            .map(NoDuplicateValue)
-            .ok_or_else(|| E::custom("non-finite JSON number"))
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        self.visit_string(value.to_owned())
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Self::Value, E> {
-        Ok(NoDuplicateValue(Value::String(value)))
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(NoDuplicateValue(Value::Null))
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(NoDuplicateValue(Value::Null))
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let mut values = Vec::new();
-        while let Some(value) = sequence.next_element::<NoDuplicateValue>()? {
-            values.push(value.0);
-        }
-        Ok(NoDuplicateValue(Value::Array(values)))
-    }
-
-    fn visit_map<A>(self, mut object: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut values = Map::new();
-        while let Some(key) = object.next_key::<String>()? {
-            if values.contains_key(&key) {
-                return Err(serde::de::Error::custom(format_args!(
-                    "duplicate JSON key {key:?}"
-                )));
-            }
-            let value = object.next_value::<NoDuplicateValue>()?;
-            values.insert(key, value.0);
-        }
-        Ok(NoDuplicateValue(Value::Object(values)))
-    }
+    json::parse(input, line_number)
 }
 
 /// Validates required headers against the pinned compatibility manifest.
@@ -325,12 +290,11 @@ pub fn validate_compatibility<R: BufRead>(parser: &Parser<R>) -> Result<(), Repl
         "STS2PGN",
         ReplayErrorKind::UnsupportedFormat,
     )?;
-    require_header(
-        parser,
-        "FormatVersion",
-        "1",
-        ReplayErrorKind::UnsupportedFormat,
-    )?;
+    match parser.header("FormatVersion") {
+        Some("1" | "2") => {}
+        None => return Err(ReplayError::new(0, ReplayErrorKind::MissingRequiredHeader)),
+        Some(_) => return Err(ReplayError::new(0, ReplayErrorKind::UnsupportedFormat)),
+    }
     let manifest = CompatibilityManifest::pinned()
         .map_err(|_| ReplayError::new(0, ReplayErrorKind::ManifestMismatch))?;
     require_header(
@@ -480,6 +444,7 @@ pub fn validate_stream<R: BufRead>(
         .header("Result")
         .expect("compatibility validation requires Result")
         .to_owned();
+    let version_two = parser.header("FormatVersion") == Some("2");
     let mut summary = ValidationSummary::default();
     let mut expected_sequence = 1;
     let mut terminal_seen = false;
@@ -495,7 +460,9 @@ pub fn validate_stream<R: BufRead>(
                 expected_sequence += 1;
                 summary.record_count += 1;
                 if record.kind == "state.observe" {
-                    validate_observation(&record)?;
+                    if !version_two {
+                        validate_observation(&record)?;
+                    }
                     summary.observation_count += 1;
                 }
             }
@@ -517,7 +484,8 @@ pub fn validate_stream<R: BufRead>(
     Ok(summary)
 }
 
-/// Validates a Projection v1 observation's embedded digest.
+/// Validates a Projection v1 observation's embedded digest, accepting both the
+/// legacy Rust encoding and the C# recorder's encoding of canonical wire values.
 pub fn validate_observation(record: &Record) -> Result<(), ReplayError> {
     if record.kind != "state.observe" {
         return Err(ReplayError::new(0, ReplayErrorKind::NotObservation));
@@ -537,7 +505,7 @@ pub fn validate_observation(record: &Record) -> Result<(), ReplayError> {
         .and_then(Value::as_str)
         .ok_or_else(|| ReplayError::new(0, ReplayErrorKind::InvalidObservation))?;
     let actual = projection_digest(state)?;
-    if expected == actual {
+    if expected == actual || canonical::validate(record).is_ok() {
         Ok(())
     } else {
         Err(ReplayError::new(0, ReplayErrorKind::DigestMismatch))
@@ -713,6 +681,8 @@ pub enum ReplayErrorKind {
     UnsupportedProjection,
     DigestMismatch,
     InvalidCorrelation,
+    InvalidDelta,
+    InvalidDeltaBase,
 }
 
 impl Display for ReplayErrorKind {
@@ -742,6 +712,8 @@ impl Display for ReplayErrorKind {
             Self::UnsupportedProjection => "unsupported_projection",
             Self::DigestMismatch => "digest_mismatch",
             Self::InvalidCorrelation => "invalid_correlation",
+            Self::InvalidDelta => "invalid_delta",
+            Self::InvalidDeltaBase => "invalid_delta_base",
         };
         formatter.write_str(code)
     }
@@ -804,6 +776,19 @@ mod tests {
             .replace("[Mods \"[]\"]", &REFERENCE_STACK.replace("0.6.0", "0.8.0"));
         let parser = Parser::new(Cursor::new(input)).unwrap();
         validate_compatibility(&parser).unwrap();
+    }
+
+    #[test]
+    fn format_two_uses_the_same_build_and_mode_compatibility_checks() {
+        let input = minimal("", "{}").replace("[FormatVersion \"1\"]", "[FormatVersion \"2\"]");
+        validate_compatibility(&Parser::new(Cursor::new(&input)).unwrap()).unwrap();
+        let unsupported = input.replace("59260271", "unsupported");
+        assert_eq!(
+            validate_compatibility(&Parser::new(Cursor::new(unsupported)).unwrap())
+                .unwrap_err()
+                .kind,
+            ReplayErrorKind::UnsupportedBuild
+        );
     }
 
     #[test]
