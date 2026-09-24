@@ -271,6 +271,14 @@ action-only decision scripts remain supported. Only an incomplete JSON payload
 on the final unterminated line is ignored as an interrupted append; complete
 malformed records and invalid deltas are still errors.
 
+The CLI freezes simulation at the first divergence but continues decoding the
+recording to EOF. Its JSON report's `recorded_end` contains floor, current/max HP,
+deck size and relic count from the final decoded observation, or null if that
+observation lacks usable stats (including an observation-free recording). This
+summary describes recorded state and never changes simulation. `records` counts
+the entire decoded stream; action, comparison and resume counters stop at the
+first divergence. A malformed tail or invalid delta still fails the replay.
+
 A recording's local profile is a run-defining input, so each one resolves to a
 registered unlock preset under
 [`manifests/unlock-presets/`](../manifests/unlock-presets), matched on the

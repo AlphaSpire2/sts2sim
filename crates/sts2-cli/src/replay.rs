@@ -25,6 +25,9 @@ pub struct ReplayReport {
     pub dropped_room_entries: usize,
     pub uncovered_fields: Vec<String>,
     pub recorded_terminal: Option<String>,
+    /// Stats from the last decoded observation, including observations after
+    /// divergence. These describe the recording, never simulated state.
+    pub recorded_end: Option<Value>,
     pub simulated_terminal: Option<String>,
     /// How many times the recording picked the run back up off its save file.
     pub resumes: usize,
@@ -109,12 +112,21 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
     let mut adapter: Option<ReplayAdapter> = None;
     let mut records = 0;
     let mut divergence = None;
+    let mut recorded_end = None;
     for event in &mut parser {
         let event = event.map_err(|error| CliError::Replay(error.to_string()))?;
         let Event::Record(record) = event else {
             continue;
         };
         records += 1;
+        if record.kind == "state.observe" {
+            recorded_end = observation_end(&record.payload);
+        }
+        // Keep decoding and validating the recording to summarize its actual
+        // end, but preserve the simulator and counters at the first mismatch.
+        if divergence.is_some() {
+            continue;
+        }
         let adapter = match adapter.as_mut() {
             Some(adapter) => adapter,
             None => adapter.insert(
@@ -125,7 +137,7 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
         if let Err(error) = adapter.accept(&record) {
             if error.code == AdapterErrorCode::StateDivergence {
                 divergence = Some(Box::new(error));
-                break;
+                continue;
             }
             return Err(CliError::Replay(error.to_string()));
         }
@@ -147,6 +159,7 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
         dropped_room_entries: adapter.dropped_room_entries(),
         uncovered_fields: adapter.uncovered_fields().iter().cloned().collect(),
         recorded_terminal,
+        recorded_end,
         simulated_terminal: adapter
             .simulator()
             .state()
@@ -156,6 +169,18 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
         rewound_actions: adapter.rewound_actions(),
         divergence,
     })
+}
+
+fn observation_end(payload: &Value) -> Option<Value> {
+    let state = payload.get("state")?;
+    let player = state.get("players")?.get(0)?;
+    Some(json!({
+        "floor": state.get("run")?.get("total_floor")?.as_u64()?,
+        "hp": player.get("current_hp")?.as_i64()?,
+        "max_hp": player.get("max_hp")?.as_i64()?,
+        "deck": player.get("deck")?.as_array()?.len(),
+        "relics": player.get("relics")?.as_array()?.len(),
+    }))
 }
 
 /// Generates the run a recording was played on: its seed, plus the registered
@@ -287,6 +312,7 @@ fn write_json<W: Write>(report: &ReplayReport, output: &mut W) -> Result<(), Cli
         "dropped_room_entries": report.dropped_room_entries,
         "uncovered_fields": report.uncovered_fields,
         "recorded_terminal": report.recorded_terminal,
+        "recorded_end": report.recorded_end,
         "simulated_terminal": report.simulated_terminal,
         "resumes": report.resumes,
         "rewound_actions": report.rewound_actions,
@@ -421,6 +447,141 @@ fn render_side(value: Option<&Value>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
+
+    fn opening(version: u8) -> (String, Value) {
+        let mut sim = sts2_content::standard_ironclad_run_at("ABC", 0).unwrap();
+        let start = sts2_replay::observation::render(&sim);
+        let mut text = format!(
+            "[Format \"STS2PGN\"]\n[FormatVersion \"{version}\"]\n\
+             [RecorderVersion \"test\"]\n[RunId \"synthetic\"]\n\
+             [GameVersion \"v0.107.1\"]\n[GameCommit \"59260271\"]\n\
+             [ModelIdHash \"3954186980\"]\n[Seed \"ABC\"]\n\
+             [Mode \"STANDARD\"]\n[Ascension \"0\"]\n\
+             [Players \"[{{\\\"slot\\\":\\\"p0\\\",\\\"character\\\":\\\"IRONCLAD\\\"}}]\"]\n\
+             [Mods \"[]\"]\n[Result \"*\"]\n\n"
+        );
+        writeln!(text, "1 run.start {}", json!({"data":{"state":start}})).unwrap();
+        let action = sim
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, sts2_engine::Action::ChooseEvent { .. }))
+            .unwrap()
+            .clone();
+        let sts2_engine::Action::ChooseEvent {
+            index,
+            ref option_id,
+        } = action
+        else {
+            unreachable!()
+        };
+        writeln!(
+            text,
+            "2 event.choose {}",
+            json!({"data":{"option_index":index,"option_id":option_id}})
+        )
+        .unwrap();
+        sim.step(action).unwrap();
+        (text, sts2_replay::observation::render(&sim))
+    }
+
+    fn observe(text: &mut String, sequence: u64, state: &Value) {
+        writeln!(
+            text,
+            "{sequence} state.observe {}",
+            json!({
+                "after":sequence-1,"context":"action.settled","projection_version":1,
+                "digest":sts2_replay::projection_digest(state).unwrap(),"state":state
+            })
+        )
+        .unwrap();
+    }
+
+    fn diverging_run(version: u8) -> String {
+        let (mut text, mut state) = opening(version);
+        state["players"][0]["current_hp"] = json!(1);
+        observe(&mut text, 3, &state);
+        // This input settles observation 3 and stops the simulator. Later
+        // actions must not run, but the resumed recording must still decode.
+        text.push_str("4 event.advance {}\n5 combat.play_card {}\n6 run.resume {}\n");
+        state["players"][0]["current_hp"] = json!(11);
+        observe(&mut text, 7, &state);
+        state["players"][0]["current_hp"] = json!(7);
+        state["run"]["total_floor"] = json!(20);
+        if version == 1 {
+            observe(&mut text, 8, &state);
+        } else {
+            writeln!(
+                text,
+                "8 state.delta {}",
+                json!({
+                    "base":7,
+                    "patch":[["set",["players"],state["players"]],["set",["run","total_floor"],20]],
+                    "observation":{"after":7,"context":"action.settled","projection_version":1,
+                        "digest":sts2_replay::projection_digest(&state).unwrap()}
+                })
+            )
+            .unwrap();
+        }
+        text
+    }
+
+    #[test]
+    fn final_stats_follow_deltas_and_reload_boundaries_after_first_divergence() {
+        for version in [1, 2] {
+            let report = replay(diverging_run(version).as_bytes()).unwrap();
+            assert!(!report.matched());
+            assert_eq!(report.divergence.as_ref().unwrap().record_sequence, 3);
+            assert_eq!(report.applied_actions, 1);
+            assert_eq!(report.compared_observations, 0);
+            assert_eq!(report.resumes, 0);
+            assert_eq!(report.records, 8);
+            let end = report.recorded_end.as_ref().unwrap();
+            assert_eq!(end["floor"], 20);
+            assert_eq!(end["hp"], 7);
+            let mut json = Vec::new();
+            write_report(&report, &mut json, true, false).unwrap();
+            let json: Value = serde_json::from_slice(&json).unwrap();
+            assert_eq!(&json["recorded_end"], end);
+        }
+    }
+
+    #[test]
+    fn invalid_delta_after_divergence_is_still_an_error() {
+        let text = diverging_run(2).replace("\"base\":7", "\"base\":999");
+        assert!(
+            replay(text.as_bytes())
+                .unwrap_err()
+                .to_string()
+                .contains("invalid_delta_base")
+        );
+    }
+
+    #[test]
+    fn an_unusable_final_observation_does_not_reuse_earlier_stats() {
+        let mut text = diverging_run(2);
+        observe(&mut text, 9, &json!({"scope":"unknown"}));
+        let report = replay(text.as_bytes()).unwrap();
+        assert!(report.divergence.is_some());
+        assert!(report.recorded_end.is_none());
+    }
+
+    #[test]
+    fn matched_and_observation_free_runs_report_their_recorded_end() {
+        for version in [1, 2] {
+            let (mut text, state) = opening(version);
+            let report = replay(text.as_bytes()).unwrap();
+            assert!(report.matched());
+            assert!(report.recorded_end.is_none());
+            observe(&mut text, 3, &state);
+            let report = replay(text.as_bytes()).unwrap();
+            assert!(report.matched());
+            assert_eq!(
+                report.recorded_end,
+                observation_end(&json!({"state":state}))
+            );
+        }
+    }
 
     #[test]
     fn an_incomplete_prefix_makes_no_terminal_claim() {
@@ -432,6 +593,7 @@ mod tests {
             dropped_room_entries: 0,
             uncovered_fields: Vec::new(),
             recorded_terminal: Some("*".to_owned()),
+            recorded_end: None,
             simulated_terminal: Some("DEFEAT".to_owned()),
             resumes: 0,
             rewound_actions: 0,
