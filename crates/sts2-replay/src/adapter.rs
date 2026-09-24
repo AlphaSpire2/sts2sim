@@ -9,9 +9,10 @@ use sts2_engine::{
     Transition,
 };
 
-use crate::{Record, TimelineRole, TimelineValidator};
+use crate::{Record, TimelineRole, TimelineValidator, TraceProfile, VerificationLevel};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AdapterErrorCode {
     MalformedRecord,
     IllegalAction,
@@ -55,6 +56,7 @@ pub struct ReplayAdapter {
     simulator: Simulator,
     timeline: TimelineValidator,
     verify_observations: bool,
+    profile: Option<TraceProfile>,
     last_matching_checkpoint: Option<u64>,
     compared_observations: usize,
     applied_actions: usize,
@@ -87,6 +89,7 @@ impl ReplayAdapter {
             simulator,
             timeline: TimelineValidator::default(),
             verify_observations: false,
+            profile: None,
             last_matching_checkpoint: None,
             compared_observations: 0,
             applied_actions: 0,
@@ -104,6 +107,16 @@ impl ReplayAdapter {
             resumes: 0,
             rewound_actions: 0,
         }
+    }
+
+    /// Select verification from validated trace identity, shared by every consumer.
+    #[must_use]
+    pub fn for_profile(simulator: Simulator, profile: TraceProfile) -> Self {
+        let mut adapter = Self::new(simulator);
+        adapter.profile = Some(profile);
+        adapter.verify_observations =
+            profile.verification_level() == VerificationLevel::RecordedState;
+        adapter
     }
 
     /// How many times the recording picked the run back up off its save file.
@@ -231,6 +244,11 @@ impl ReplayAdapter {
         reason = "one arm per record kind the format carries"
     )]
     pub fn accept(&mut self, record: &Record) -> Result<AdapterOutcome, AdapterError> {
+        if let Some(profile) = self.profile {
+            profile.validate_record(record).map_err(|error| {
+                Self::error(record, AdapterErrorCode::MalformedRecord, error.to_string())
+            })?;
+        }
         let role = self.timeline.accept(record).map_err(|error| {
             Self::error(record, AdapterErrorCode::MalformedRecord, error.to_string())
         })?;

@@ -123,7 +123,18 @@ Replay accepts FormatVersion 1 and 2, including `.sts2pgn.gz` files directly.
 Gzip is detected from the file's contents, so no decompression command or
 temporary file is needed. Version-two deltas are expanded and their full-state
 digests checked before comparison; unchanged fields remain part of each
-observation. Action-only decision scripts keep their existing format.
+observation. Replay also accepts action scripts: `[Profile "script"]` selects
+action consistency checks, while `[Profile "recording"]` enables comparison
+against authoritative observations. Older files infer their profile from
+`Producer` or `RecorderVersion`. Unknown or conflicting profiles are rejected.
+
+A script checks whether its actions and available identity fingerprints can be
+reproduced. An illegal action is a divergence from the script's expectations;
+it does not by itself prove whether the script or the simulator is wrong. Scripts
+never establish agreement with real-game state, even if they contain observations.
+Their reports warn about this limit and say `ACCEPTED` when every action was
+accepted. Scripts require `Mode CUSTOM`, a valid `Producer`, and terminal `*`;
+they cannot carry `run.resume` or `run.finish`.
 
 ```text
 seed          N3Z9EE2CXB
@@ -135,8 +146,8 @@ uncovered     10 recorded fields the renderer does not emit (--uncovered lists t
 MATCH: every compared observation agreed
 ```
 
-The exit code is zero on a match and non-zero on any divergence, so it drops
-straight into a script. On a divergence the report names the differing field,
+The exit code is zero when replay succeeds and non-zero on a mismatch or error,
+so it drops straight into a script. On a divergence the report names the differing field,
 its recorded and simulated values, and the last observation that agreed.
 
 A trace that was saved and quit mid-run replays as it is: its `Result` still
@@ -155,6 +166,15 @@ its own and still needs its prefix replayed first.
 `--uncovered` lists the recorded fields the observation renderer does not emit
 yet — deliberate gaps, not silent ones. `--json` prints the whole report as
 JSON.
+
+JSON reports include `succeeded` and a shared `verification` object with `profile`,
+`level` (`action_consistency` or `recorded_state`), `compared_observations`,
+`outcome`, `failure_kind`, and `warning`. Outcomes distinguish `actions_accepted`,
+`observations_matched`, `diverged`, `terminal_mismatch`, `invalid_input`, and
+`unsupported_content`. `matched` is true only when authoritative observations
+were compared and agreed and no action or terminal mismatch occurred. A recording
+with zero comparisons also warns and cannot report `matched: true`. The terminal
+token takes precedence over a stale Result header.
 
 This command is how conformance is checked. The test suite proves rules in
 isolation and never replays a recording, because a recording is authoritative

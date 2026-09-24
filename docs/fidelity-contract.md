@@ -201,6 +201,24 @@ list is a bug.
 
 ## Errors and fidelity claims
 
+`sts2-replay` distinguishes trace identity from verification strength. `Profile`
+is `recording` or `script`; absent headers use the legacy producer convention.
+Conflicting profile/producer declarations and unknown profiles are rejected.
+Both profiles undergo the same build and supported-run compatibility checks,
+with profile-specific required headers. Scripts need a `Producer`, `Mode CUSTOM`,
+and terminal `*`, but not recorder identity, run ID, or a mod list.
+
+Action scripts can be replayed to check action legality and identity fingerprints.
+An illegal action establishes a disagreement with the script's expectations,
+not which implementation is wrong. Success means actions accepted, not agreement
+with game observations. Observation records in scripts cannot confer authority.
+Script replay carries an explicit warning and `action_consistency` verification
+level in both human and machine reports. Recordings use `recorded_state` and
+report actual comparison coverage; a recording with zero comparisons is also
+unverified. The shared outcome distinguishes input errors and unsupported content
+from gameplay divergence. Report consumers must use this evidence alongside any
+success exit code when making conformance claims.
+
 Compatibility is checked before gameplay interpretation. Stable error classes
 are:
 

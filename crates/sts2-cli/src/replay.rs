@@ -1,10 +1,11 @@
-//! Differential replay of a recorded STS2PGN file against the simulator.
+//! Replay recordings or decision scripts, reporting the evidence actually checked.
 
 use std::io::{BufRead, Write};
 
 use serde_json::{Value, json};
 use sts2_replay::{
-    AdapterError, AdapterErrorCode, Event, Parser, ReplayAdapter, validate_compatibility,
+    AdapterError, Event, Parser, ReplayAdapter, ReplayVerification, TraceProfile,
+    validate_compatibility,
 };
 
 use crate::CliError;
@@ -12,10 +13,10 @@ use crate::CliError;
 /// How many differing fields a divergence report prints before summarizing.
 const DIFFERENCE_LIMIT: usize = 20;
 
-/// What a differential replay found. `diverged` is the only failing outcome;
-/// everything else is reported even on a clean run.
+/// Replay results and the shared assessment of their verification strength.
 #[derive(Debug)]
 pub struct ReplayReport {
+    pub verification: ReplayVerification,
     pub seed: String,
     pub records: u64,
     pub applied_actions: usize,
@@ -39,43 +40,31 @@ pub struct ReplayReport {
 }
 
 impl ReplayReport {
-    /// True when the recording and the simulation agreed on everything the
-    /// renderer covers, and both reached the same terminal.
+    /// True when authoritative observations were compared and agreed, with no
+    /// action failure or terminal mismatch. Scripts can succeed without matching.
     #[must_use]
     pub fn matched(&self) -> bool {
-        self.divergence.is_none() && self.terminals_agree()
-    }
-
-    fn terminals_agree(&self) -> bool {
-        match (&self.recorded_terminal, &self.simulated_terminal) {
-            // Format v1 writes `*` while a recording is open and rewrites it
-            // only at a clean finalization. A trace that still says `*` is a
-            // prefix and makes no assertion about what settling its last input
-            // would eventually do, so only its recorded checkpoints constrain
-            // replay. An abandoned trace does assert that the player walked
-            // away from a still-live run.
-            (Some(recorded), _) if recorded == "*" => true,
-            (Some(recorded), simulated) if recorded.eq_ignore_ascii_case("ABANDONED") => {
-                simulated.is_none()
-            }
-            (Some(recorded), Some(simulated)) => recorded.eq_ignore_ascii_case(simulated),
-            (None, None) => true,
-            _ => false,
-        }
+        self.verification.verified()
     }
 }
 
 /// Replays `input` against a run generated from its own `Seed` header,
 /// comparing every settled recorded observation against simulated state.
+#[allow(
+    clippy::too_many_lines,
+    reason = "streaming replay and its evidence are assembled in one pass"
+)]
 pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
     let input = sts2_replay::decode_input(input)?;
     let mut parser = Parser::new(input).map_err(|error| CliError::Replay(error.to_string()))?;
-    validate_compatibility(&parser).map_err(|error| CliError::Replay(error.to_string()))?;
+    let profile =
+        validate_compatibility(&parser).map_err(|error| CliError::Replay(error.to_string()))?;
     let seed = parser
         .header("Seed")
         .expect("compatibility validation requires Seed")
         .to_owned();
-    let recorded_terminal = parser.header("Result").map(str::to_owned);
+    let mut recorded_terminal = parser.header("Result").map(str::to_owned);
+    let mut terminal_token = None;
     // The level the run was played at is a generation input the recording
     // states outright, so the run is generated at it rather than at the
     // baseline. `validate_compatibility` has already checked that the header
@@ -114,11 +103,18 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
     let mut recorded_end = None;
     for event in &mut parser {
         let event = event.map_err(|error| CliError::Replay(error.to_string()))?;
-        let Event::Record(record) = event else {
-            continue;
+        if terminal_token.is_some() {
+            return Err(CliError::Replay("data after terminal result".to_owned()));
+        }
+        let record = match event {
+            Event::Record(record) => record,
+            Event::Terminal(token) => {
+                terminal_token = Some(token);
+                continue;
+            }
         };
         records += 1;
-        if record.kind == "state.observe" {
+        if profile == TraceProfile::Recording && record.kind == "state.observe" {
             recorded_end = observation_end(&record.payload);
         }
         // Keep decoding and validating the recording to summarize its actual
@@ -128,18 +124,20 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
         }
         let adapter = match adapter.as_mut() {
             Some(adapter) => adapter,
-            None => adapter.insert(
-                ReplayAdapter::new(recorded_run(&seed, ascension, mode, &record)?)
-                    .verifying_observations(),
-            ),
+            None => adapter.insert(ReplayAdapter::for_profile(
+                recorded_run(&seed, ascension, mode, &record)?,
+                profile,
+            )),
         };
         if let Err(error) = adapter.accept(&record) {
-            if error.code == AdapterErrorCode::StateDivergence {
-                divergence = Some(Box::new(error));
-                continue;
-            }
-            return Err(CliError::Replay(error.to_string()));
+            divergence = Some(Box::new(error));
         }
+    }
+    profile
+        .validate_terminal(terminal_token.as_deref())
+        .map_err(|error| CliError::Replay(error.to_string()))?;
+    if terminal_token.is_some() {
+        recorded_terminal = terminal_token;
     }
     let mut adapter = adapter
         .ok_or_else(|| CliError::Replay("recording carries no records to replay".to_owned()))?;
@@ -150,7 +148,19 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
             divergence = Some(Box::new(error));
         }
     }
+    let simulated_terminal = adapter
+        .simulator()
+        .state()
+        .terminal
+        .map(|result| format!("{result:?}").to_uppercase());
+    let verification = profile.assess(
+        adapter.compared_observations(),
+        divergence.as_ref().map(|error| error.code),
+        recorded_terminal.as_deref(),
+        simulated_terminal.as_deref(),
+    );
     Ok(ReplayReport {
+        verification,
         seed,
         records,
         applied_actions: adapter.applied_actions(),
@@ -159,11 +169,7 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
         uncovered_fields: adapter.uncovered_fields().iter().cloned().collect(),
         recorded_terminal,
         recorded_end,
-        simulated_terminal: adapter
-            .simulator()
-            .state()
-            .terminal
-            .map(|result| format!("{result:?}").to_uppercase()),
+        simulated_terminal,
         resumes: adapter.resumes(),
         rewound_actions: adapter.rewound_actions(),
         divergence,
@@ -290,6 +296,7 @@ fn write_json<W: Write>(report: &ReplayReport, output: &mut W) -> Result<(), Cli
                 .collect::<Vec<_>>()
         });
         json!({
+            "failure_kind": error.code,
             "record": error.record_sequence,
             "kind": error.record_kind,
             "detail": error.detail,
@@ -301,6 +308,8 @@ fn write_json<W: Write>(report: &ReplayReport, output: &mut W) -> Result<(), Cli
         })
     });
     let value = json!({
+        "verification": report.verification,
+        "succeeded": report.verification.succeeded(),
         "seed": report.seed,
         "records": report.records,
         "applied_actions": report.applied_actions,
@@ -325,6 +334,14 @@ fn write_text<W: Write>(
     output: &mut W,
     uncovered: bool,
 ) -> Result<(), CliError> {
+    writeln!(
+        output,
+        "profile       {}",
+        report.verification.profile.as_str()
+    )?;
+    if let Some(warning) = report.verification.warning {
+        writeln!(output, "WARNING: {warning}")?;
+    }
     writeln!(output, "seed          {}", report.seed)?;
     writeln!(
         output,
@@ -381,13 +398,18 @@ fn write_text<W: Write>(
     }
     if let Some(error) = &report.divergence {
         write_divergence(error, output)?;
-    } else if !report.matched() {
+    } else if !report.verification.succeeded() {
         writeln!(
             output,
             "\nMISMATCH: the recording and the simulation ended differently"
         )?;
-    } else {
+    } else if report.matched() {
         writeln!(output, "\nMATCH: every compared observation agreed")?;
+    } else {
+        writeln!(
+            output,
+            "\nACCEPTED: all actions accepted; recorded state not verified"
+        )?;
     }
     Ok(())
 }
@@ -395,8 +417,8 @@ fn write_text<W: Write>(
 fn write_divergence<W: Write>(error: &AdapterError, output: &mut W) -> Result<(), CliError> {
     writeln!(
         output,
-        "\nDIVERGENCE at record {} ({})",
-        error.record_sequence, error.record_kind
+        "\n{:?} at record {} ({})",
+        error.code, error.record_sequence, error.record_kind
     )?;
     let Some(divergence) = &error.divergence else {
         writeln!(output, "  {}", error.detail)?;
@@ -676,7 +698,8 @@ mod tests {
         for version in [1, 2] {
             let (mut text, state) = opening(version);
             let report = replay(text.as_bytes()).unwrap();
-            assert!(report.matched());
+            assert!(!report.matched());
+            assert!(report.verification.succeeded());
             assert!(report.recorded_end.is_none());
             observe(&mut text, 3, &state);
             let report = replay(text.as_bytes()).unwrap();
@@ -691,6 +714,7 @@ mod tests {
     #[test]
     fn an_incomplete_prefix_makes_no_terminal_claim() {
         let report = ReplayReport {
+            verification: TraceProfile::Recording.assess(1, None, Some("*"), Some("DEFEAT")),
             seed: "PREFIX".to_owned(),
             records: 1,
             applied_actions: 1,
@@ -705,5 +729,112 @@ mod tests {
             divergence: None,
         };
         assert!(report.matched());
+    }
+
+    fn script(version: u8, action: &str) -> String {
+        let (text, _) = opening(version);
+        let (headers, body) = text.split_once("\n\n").unwrap();
+        let headers = headers
+            .lines()
+            .filter(|line| {
+                !["RecorderVersion", "RunId", "Mods", "Result"]
+                    .iter()
+                    .any(|key| line.starts_with(&format!("[{key} ")))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("STANDARD", "CUSTOM");
+        let start = body.lines().next().unwrap();
+        format!("{headers}\n[Profile \"script\"]\n[Producer \"test/1\"]\n\n{start}\n{action}*\n")
+    }
+
+    #[test]
+    fn scripts_report_action_consistency_in_text_and_json_for_both_versions_and_legacy_headers() {
+        for version in [1, 2] {
+            for legacy in [false, true] {
+                let mut text = script(version, "");
+                if legacy {
+                    text = text.replace("[Profile \"script\"]\n", "");
+                }
+                let report = replay(text.as_bytes()).unwrap();
+                assert!(report.verification.succeeded());
+                assert!(!report.matched());
+                assert_eq!(report.compared_observations, 0);
+                let mut output = Vec::new();
+                write_report(&report, &mut output, true, false).unwrap();
+                let json: Value = serde_json::from_slice(&output).unwrap();
+                assert_eq!(json["verification"]["profile"], "script");
+                assert_eq!(json["verification"]["level"], "action_consistency");
+                assert_eq!(json["verification"]["outcome"], "actions_accepted");
+                assert_eq!(json["matched"], false);
+                output.clear();
+                write_report(&report, &mut output, false, false).unwrap();
+                let text = String::from_utf8(output).unwrap();
+                assert!(text.contains("WARNING: Action-script replay"));
+                assert!(text.contains("ACCEPTED:"));
+                assert!(!text.contains("MATCH:"));
+            }
+        }
+    }
+
+    #[test]
+    fn script_failure_reports_distinguish_divergence_malformed_input_and_unsupported_content() {
+        use sts2_replay::{AdapterErrorCode, ReplayOutcome};
+        for (action, code, outcome) in [
+            (
+                "2 combat.end_turn {}\n",
+                AdapterErrorCode::IllegalAction,
+                ReplayOutcome::Diverged,
+            ),
+            (
+                "2 map.choose {}\n",
+                AdapterErrorCode::MalformedRecord,
+                ReplayOutcome::InvalidInput,
+            ),
+            (
+                "2 future.action {}\n",
+                AdapterErrorCode::UnsupportedContent,
+                ReplayOutcome::UnsupportedContent,
+            ),
+            (
+                "2 run.resume {}\n",
+                AdapterErrorCode::MalformedRecord,
+                ReplayOutcome::InvalidInput,
+            ),
+        ] {
+            let report = replay(script(1, action).as_bytes()).unwrap();
+            assert!(!report.verification.succeeded());
+            assert_eq!(report.verification.outcome, outcome);
+            assert_eq!(report.verification.failure_kind, Some(code));
+            assert_eq!(report.divergence.unwrap().record_sequence, 2);
+        }
+    }
+
+    #[test]
+    fn script_observations_are_never_authoritative() {
+        let mut observation = String::new();
+        observe(
+            &mut observation,
+            2,
+            &json!({"scope":"unknown", "not_game_state":true}),
+        );
+        let report = replay(script(1, &observation).as_bytes()).unwrap();
+        assert!(report.verification.succeeded());
+        assert!(!report.matched());
+        assert_eq!(report.compared_observations, 0);
+        assert!(report.recorded_end.is_none());
+    }
+
+    #[test]
+    fn script_terminal_and_profile_conflicts_are_rejected() {
+        let text = script(1, "");
+        for invalid in [
+            text.trim_end_matches("*\n").to_owned(),
+            text.replace("*\n", "VICTORY\n"),
+            text.replace("[Profile \"script\"]", "[Profile \"recording\"]"),
+            text + "2 event.choose {}\n",
+        ] {
+            assert!(replay(invalid.as_bytes()).is_err());
+        }
     }
 }

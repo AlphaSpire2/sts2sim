@@ -2244,6 +2244,14 @@ over the recorded snapshot of the gap rather than comparing it.
 
 ## Projection rendering and observation matching
 
+The replay crate owns `TraceProfile` resolution, compatibility checks for both
+recordings and scripts, and `ReplayVerification` evidence and outcome reporting.
+`validate_compatibility` returns the resolved profile; consumers pass it to
+`ReplayAdapter::for_profile` instead of inspecting producer headers themselves.
+The simulator CLI and AlphaSpire use the same implementation. AlphaSpire retains
+its policy evaluation, search, and generated decisions. Scripts run without
+authoritative observation comparison and report action consistency only.
+
 The replay crate renders engine state into the recorded Projection v1 shape and
 compares the two, so a replay can be checked against every recorded observation
 rather than only against the actions it accepts. The renderer emits only what

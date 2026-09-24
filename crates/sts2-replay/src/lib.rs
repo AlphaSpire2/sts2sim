@@ -6,6 +6,9 @@ mod conformance;
 mod delta;
 mod input;
 mod json;
+mod profile;
+
+pub use profile::{ReplayOutcome, ReplayVerification, TraceProfile, VerificationLevel};
 
 #[cfg(test)]
 mod storage_tests;
@@ -277,13 +280,14 @@ fn parse_json(input: &str, line_number: usize) -> Result<Value, ReplayError> {
 }
 
 /// Validates required headers against the pinned compatibility manifest.
-pub fn validate_compatibility<R: BufRead>(parser: &Parser<R>) -> Result<(), ReplayError> {
+pub fn validate_compatibility<R: BufRead>(parser: &Parser<R>) -> Result<TraceProfile, ReplayError> {
     let mut seen = BTreeSet::new();
     for header in parser.headers() {
         if !seen.insert(&header.key) {
             return Err(ReplayError::new(0, ReplayErrorKind::DuplicateHeader));
         }
     }
+    let profile = TraceProfile::from_headers(parser.headers())?;
     require_header(
         parser,
         "Format",
@@ -315,7 +319,7 @@ pub fn validate_compatibility<R: BufRead>(parser: &Parser<R>) -> Result<(), Repl
         &manifest.game.model_id_hash.to_string(),
         ReplayErrorKind::UnsupportedBuild,
     )?;
-    validate_run_headers(parser)?;
+    validate_run_headers(parser, profile)?;
 
     let mode = parser
         .header("Mode")
@@ -349,12 +353,8 @@ pub fn validate_compatibility<R: BufRead>(parser: &Parser<R>) -> Result<(), Repl
         return Err(ReplayError::new(0, ReplayErrorKind::UnsupportedMode));
     }
 
-    let loaded_mods: Vec<ModIdentity> = serde_json::from_str(
-        parser
-            .header("Mods")
-            .ok_or_else(|| ReplayError::new(0, ReplayErrorKind::MissingRequiredHeader))?,
-    )
-    .map_err(|error| ReplayError::json(0, error))?;
+    let loaded_mods: Vec<ModIdentity> = serde_json::from_str(parser.header("Mods").unwrap_or("[]"))
+        .map_err(|error| ReplayError::json(0, error))?;
     // A `Mods` header states which mods were loaded, in whatever order the
     // loader enumerated them. Any mod may be loaded; ids and versions are
     // never compared. What refuses a recording is a mod that declares itself
@@ -367,22 +367,41 @@ pub fn validate_compatibility<R: BufRead>(parser: &Parser<R>) -> Result<(), Repl
     {
         return Err(ReplayError::new(0, ReplayErrorKind::UnsupportedMod));
     }
-    Ok(())
+    Ok(profile)
 }
 
-fn validate_run_headers<R: BufRead>(parser: &Parser<R>) -> Result<(), ReplayError> {
-    for key in [
-        "RecorderVersion",
-        "RunId",
-        "Seed",
-        "Ascension",
-        "Players",
-        "Mods",
-        "Result",
-    ] {
+fn validate_run_headers<R: BufRead>(
+    parser: &Parser<R>,
+    profile: TraceProfile,
+) -> Result<(), ReplayError> {
+    let required = match profile {
+        TraceProfile::Recording => ["RecorderVersion", "RunId", "Mods", "Result"].as_slice(),
+        TraceProfile::Script => ["Producer"].as_slice(),
+    };
+    for key in ["Seed", "Ascension", "Players", "Mode"]
+        .into_iter()
+        .chain(required.iter().copied())
+    {
         if parser.header(key).is_none_or(str::is_empty) {
             return Err(ReplayError::new(0, ReplayErrorKind::MissingRequiredHeader));
         }
+    }
+    if profile == TraceProfile::Script {
+        let producer = parser
+            .header("Producer")
+            .expect("required header was checked");
+        if !producer.split_once('/').is_some_and(|(name, version)| {
+            !name.is_empty()
+                && !version.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+                && !version.chars().any(|c| c.is_whitespace() || c == '/')
+        }) {
+            return Err(ReplayError::new(0, ReplayErrorKind::InvalidHeader));
+        }
+        require_header(parser, "Mode", "CUSTOM", ReplayErrorKind::UnsupportedMode)?;
+        profile.validate_terminal(Some(parser.header("Result").unwrap_or("*")))?;
     }
     let canonical_seed = parser.header("Seed").expect("required header was checked");
     if canonicalize_seed(canonical_seed) != canonical_seed {
@@ -439,11 +458,8 @@ pub struct ValidationSummary {
 pub fn validate_stream<R: BufRead>(
     parser: &mut Parser<R>,
 ) -> Result<ValidationSummary, ReplayError> {
-    validate_compatibility(parser)?;
-    let expected_terminal = parser
-        .header("Result")
-        .expect("compatibility validation requires Result")
-        .to_owned();
+    let profile = validate_compatibility(parser)?;
+    let expected_terminal = parser.header("Result").unwrap_or("*").to_owned();
     let version_two = parser.header("FormatVersion") == Some("2");
     let mut summary = ValidationSummary::default();
     let mut expected_sequence = 1;
@@ -451,6 +467,7 @@ pub fn validate_stream<R: BufRead>(
     for event in parser {
         match event? {
             Event::Record(record) => {
+                profile.validate_record(&record)?;
                 if terminal_seen {
                     return Err(ReplayError::new(0, ReplayErrorKind::DataAfterTerminal));
                 }
@@ -478,6 +495,7 @@ pub fn validate_stream<R: BufRead>(
     if summary.terminal.is_none() {
         return Err(ReplayError::new(0, ReplayErrorKind::MissingTerminal));
     }
+    profile.validate_terminal(summary.terminal.as_deref())?;
     if summary.terminal.as_deref() != Some(expected_terminal.as_str()) {
         return Err(ReplayError::new(0, ReplayErrorKind::TerminalMismatch));
     }
@@ -579,6 +597,7 @@ where
     W: Write,
     I: IntoIterator<Item = Event>,
 {
+    let profile = TraceProfile::from_headers(headers)?;
     for header in headers {
         writeln!(
             writer,
@@ -587,6 +606,9 @@ where
             serde_json::to_string(&header.value).map_err(|error| ReplayError::json(0, error))?
         )
         .map_err(ReplayError::io)?;
+    }
+    if !headers.iter().any(|header| header.key == "Profile") {
+        writeln!(writer, "[Profile \"{}\"]", profile.as_str()).map_err(ReplayError::io)?;
     }
     writer.write_all(b"\n").map_err(ReplayError::io)?;
     for event in events {
@@ -661,6 +683,10 @@ pub enum ReplayErrorKind {
     InvalidJson,
     MissingHeaders,
     InvalidHeader,
+    InvalidProfile,
+    ConflictingProfile,
+    InvalidScriptRecord,
+    InvalidScriptResult,
     DuplicateHeader,
     HeaderAfterBody,
     MissingRequiredHeader,
@@ -692,6 +718,10 @@ impl Display for ReplayErrorKind {
             Self::InvalidJson => "invalid_json",
             Self::MissingHeaders => "missing_headers",
             Self::InvalidHeader => "invalid_header",
+            Self::InvalidProfile => "invalid_profile",
+            Self::ConflictingProfile => "conflicting_profile",
+            Self::InvalidScriptRecord => "invalid_script_record",
+            Self::InvalidScriptResult => "invalid_script_result",
             Self::DuplicateHeader => "duplicate_header",
             Self::HeaderAfterBody => "header_after_body",
             Self::MissingRequiredHeader => "missing_required_header",

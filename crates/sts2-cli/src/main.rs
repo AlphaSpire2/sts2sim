@@ -49,9 +49,9 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Replay a recording against the simulator; exits non-zero on any mismatch
+    /// Replay a recording or action script; scripts check actions without verifying recorded state
     Replay {
-        /// Recording (.sts2pgn trace) to replay
+        /// Recording or script (.sts2pgn or .sts2pgn.gz) to replay
         recording: PathBuf,
         /// Print the report as JSON instead of text
         #[arg(long)]
@@ -161,7 +161,7 @@ fn replay(
     let stdout = io::stdout();
     let mut output = stdout.lock();
     sts2_cli::write_report(&report, &mut output, json, uncovered)?;
-    Ok(if report.matched() {
+    Ok(if report.verification.succeeded() {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
