@@ -92,8 +92,7 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
             )
         })?;
     require_ironclad(&parser)?;
-    // The mode is a lobby fact the projection compares, not a generation
-    // input: a custom run is a standard run whose seed was typed in.
+    // Standard mode applies boss discovery; custom mode keeps the rolled boss.
     // `validate_compatibility` has already refused any mode the manifest
     // does not support.
     let mode = if parser
@@ -183,16 +182,9 @@ fn observation_end(payload: &Value) -> Option<Value> {
     }))
 }
 
-/// Generates the run a recording was played on: its seed, plus the registered
-/// unlock preset whose generation inputs the opening `run.start` projects.
-///
-/// Epoch and encounter history are generation inputs, so a recording played on
-/// a profile no registered preset carries is refused rather than replayed
-/// against the nearest one. The prior-run count is not one, past a first run,
-/// so the preset lookup ignores it — but the recording's own count is what the
-/// run carries and projects, since the observations compare it exactly. This
-/// reads the recording's declared configuration, not its state: nothing here
-/// repairs simulated state.
+/// Generates from the recorded unlocks and run-start profile inputs. Legacy
+/// recordings omit act discovery; those assume every act was discovered.
+/// These are generation inputs, never a repair of simulated state.
 fn recorded_run(
     seed: &str,
     ascension: u8,
@@ -213,17 +205,21 @@ fn recorded_run(
         })?;
     let unlocks: sts2_core::UnlockState = serde_json::from_value(projected.clone())
         .map_err(|error| CliError::Replay(format!("invalid_replay: unlock state: {error}")))?;
-    let preset = sts2_core::UnlockPresetManifest::matching(&unlocks)
-        .map_err(|error| CliError::Replay(error.to_string()))?
-        .ok_or_else(|| {
-            CliError::Replay(format!(
-                "unsupported_mode: the recorded profile ({} prior runs, {} encounters seen, \
-                 {} epochs revealed) is not a registered unlock preset",
-                unlocks.number_of_runs,
-                unlocks.encounters_seen.len(),
-                unlocks.epochs.len()
-            ))
-        })?;
+    let profile = match first.payload.pointer("/data/profile") {
+        Some(profile) => serde_json::from_value(profile.clone()).map_err(|error| {
+            CliError::Replay(format!("invalid_replay: profile inputs: {error}"))
+        })?,
+        None => sts2_core::ProfileInputs {
+            discovered_acts: sts2_content::implemented_act_ids(),
+        },
+    };
+    let preset = sts2_core::UnlockPresetManifest {
+        schema_version: 1,
+        preset_id: "recorded_profile".to_owned(),
+        compatibility_id: sts2_core::PINNED_COMPATIBILITY_ID.to_owned(),
+        unlocks,
+        profile,
+    };
     // The character the run was played as is what the recording's own opening
     // state names, and it is what the run is generated for.
     let character = first
@@ -448,6 +444,115 @@ fn render_side(value: Option<&Value>) -> String {
 mod tests {
     use super::*;
     use std::fmt::Write as _;
+
+    fn profile_start() -> sts2_replay::Record {
+        let preset = sts2_core::UnlockPresetManifest::pinned().unwrap();
+        sts2_replay::Record {
+            sequence: 1,
+            kind: "run.start".to_owned(),
+            payload: json!({"data":{"state":{"players":[{
+                "character_model":"CHARACTER.IRONCLAD", "unlocks":preset.unlocks
+            }]}}}),
+        }
+    }
+
+    #[test]
+    fn recorded_encounter_history_generates_an_unregistered_profile() {
+        let mut start = profile_start();
+        start.payload["data"]["state"]["players"][0]["unlocks"]["encounters_seen"] =
+            json!(["ENCOUNTER.WATERFALL_GIANT_BOSS"]);
+        let sim = recorded_run("X7JFABM2QS", 10, sts2_engine::RunMode::Standard, &start).unwrap();
+        let run = sim.state().run.as_ref().unwrap();
+        assert_eq!(run.acts[0].boss.to_string(), "ENCOUNTER.SOUL_FYSH_BOSS");
+        assert_eq!(
+            run.acts[1].boss.to_string(),
+            "ENCOUNTER.THE_INSATIABLE_BOSS"
+        );
+        assert_eq!(run.acts[2].boss.to_string(), "ENCOUNTER.QUEEN_BOSS");
+        assert_ne!(run.acts[2].second_boss.as_ref(), Some(&run.acts[2].boss));
+        assert_eq!(
+            run.unlocks.encounters_seen,
+            ["ENCOUNTER.WATERFALL_GIANT_BOSS"]
+        );
+        let restored: sts2_engine::RunConfig =
+            serde_json::from_value(serde_json::to_value(&run.config).unwrap()).unwrap();
+        restored.validate().unwrap();
+        assert_eq!(restored, run.config);
+        assert_eq!(restored.unlock_profile.unwrap().unlocks, run.unlocks);
+    }
+
+    #[test]
+    fn explicit_empty_discovery_is_distinct_from_legacy_all_discovered() {
+        let mut start = profile_start();
+        let legacy = recorded_run("N3Z9EE2CXB", 0, sts2_engine::RunMode::Standard, &start).unwrap();
+        assert_eq!(
+            legacy.state().run.as_ref().unwrap().acts[0]
+                .act_model
+                .to_string(),
+            "ACT.OVERGROWTH"
+        );
+        start.payload["data"]["profile"] = json!({"discovered_acts":[]});
+        let undiscovered =
+            recorded_run("N3Z9EE2CXB", 0, sts2_engine::RunMode::Standard, &start).unwrap();
+        assert_eq!(
+            undiscovered.state().run.as_ref().unwrap().acts[0]
+                .act_model
+                .to_string(),
+            "ACT.UNDERDOCKS"
+        );
+        start.payload["data"]["profile"] = json!({"discovered_acts":["ACT.UNDERDOCKS"]});
+        let discovered =
+            recorded_run("N3Z9EE2CXB", 0, sts2_engine::RunMode::Standard, &start).unwrap();
+        assert_eq!(
+            discovered.state().run.as_ref().unwrap().acts,
+            legacy.state().run.as_ref().unwrap().acts
+        );
+    }
+
+    #[test]
+    fn custom_runs_keep_the_rolled_bosses_despite_unseen_history() {
+        let mut start = profile_start();
+        let veteran = recorded_run("ABC", 10, sts2_engine::RunMode::Custom, &start).unwrap();
+        start.payload["data"]["state"]["players"][0]["unlocks"]["encounters_seen"] = json!([]);
+        let unseen = recorded_run("ABC", 10, sts2_engine::RunMode::Custom, &start).unwrap();
+        assert_eq!(
+            veteran.state().run.as_ref().unwrap().acts,
+            unseen.state().run.as_ref().unwrap().acts
+        );
+    }
+
+    #[test]
+    fn malformed_profile_inputs_are_not_replaced_with_the_legacy_assumption() {
+        for profile in [
+            json!(null),
+            json!({}),
+            json!({"discovered_acts":null}),
+            json!({"discovered_acts":["not an id"]}),
+        ] {
+            let mut start = profile_start();
+            start.payload["data"]["profile"] = profile;
+            let error = recorded_run("ABC", 0, sts2_engine::RunMode::Standard, &start)
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains("invalid_replay: profile inputs"));
+        }
+    }
+
+    #[test]
+    fn unsupported_content_profiles_fail_explicitly() {
+        let mut start = profile_start();
+        start.payload["data"]["state"]["players"][0]["unlocks"]["number_of_runs"] = json!(0);
+        let error = recorded_run("ABC", 0, sts2_engine::RunMode::Standard, &start)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("first-run generation"));
+        let mut start = profile_start();
+        start.payload["data"]["state"]["players"][0]["unlocks"]["epochs"] = json!([]);
+        let error = recorded_run("ABC", 0, sts2_engine::RunMode::Standard, &start)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("all pinned epochs"));
+    }
 
     fn opening(version: u8) -> (String, Value) {
         let mut sim = sts2_content::standard_ironclad_run_at("ABC", 0).unwrap();

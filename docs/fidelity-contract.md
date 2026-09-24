@@ -56,7 +56,8 @@ Other inputs return `unsupported_build`, `unsupported_mode`, or
 | `ascension` | Exact level, zero through ten |
 | `modifiers` | Ordered exact gameplay modifier set; empty in the supported mode |
 | `act_one` | The lobby's act-one setting: `random`, `overgrowth`, or `underdocks` |
-| `unlock_preset` | The registered unlock preset the run is generated against |
+| `unlock_preset` | The profile name; resolved through the registry when no explicit profile is supplied |
+| `unlock_profile` | Optional complete manifest of the unlock state and profile inputs used for generation |
 
 `act_one` is run-defining because act one is rolled rather than fixed: the
 setting either names the act outright or leaves the roll standing, and the seed
@@ -68,37 +69,36 @@ other field from the baseline: the pinned compatibility id, standard mode, one
 player, no modifiers, `random` act one, and the unlock preset `v0107_1_veteran`.
 A seed alone makes no parity claim; the baseline is what makes it one.
 
-### Unlock presets
+### Unlock profiles and presets
 
-An unlock preset is the one registered generation environment of the pinned
-build: a profile past its first run, all 57 patch epochs revealed, every
-boss-discovery encounter seen. Its `unlocks` block states exactly what
-generation reads and no more, each to exactly the depth generation reads it:
+The registered veteran preset is the default for seed-only runs. Replay builds
+an explicit `recorded_profile` manifest from
+`run.start.data.state.players[0].unlocks`, preserving epochs, encountered models,
+and the exact prior-run count. It does not require a registered preset match.
+Generated runs retain the complete manifest in `RunConfig.unlock_profile`, so
+serialization preserves the actual generation inputs rather than only a name.
+Its schema, compatibility identity, and profile name must agree with the config.
+Older configurations without that field still resolve their registered name.
 
-- the revealed epochs, exactly, since pools, alternate acts, and ancients
-  filter through them;
-- the twelve boss-discovery encounters, since the only thing the seen-encounter
-  list changes in a run is which boss an act rolls: a boss the profile has
-  never seen is taken, in the act's discovery order, ahead of the rolled one;
-- the prior-run count, which generation only ever asks one question of —
-  whether the profile has finished a run before — so the preset's count is
-  simply nonzero.
+Content generation currently requires all 57 pinned epochs (compared as a set)
+and a nonzero prior-run count. Other epoch sets and first-run profiles fail with
+an explicit unsupported-content diagnostic: their pool filtering and tutorial
+rules are not yet implemented. Encounter histories and discovered-act sets may
+differ freely from the veteran preset.
 
-Every profile meeting that gate generates identically and resolves to this one
-preset; profiles that differ past it — by count past a first run, or by
-encounters no discovery list names — are one configuration. A replay carries
-the recording's own count and encounter list through for the projection.
+In standard mode, each act's rolled boss is replaced by the first unseen boss
+in that act's discovery order. This consumes no additional RNG and happens
+before Double Boss chooses its second boss. Custom mode keeps the rolled boss.
+Non-boss history entries and the exact nonzero run count remain projection data.
 
-A preset also carries the profile inputs generation reads that a recording does
-not project. That is `profile.discovered_acts`: an unlocked alternate act
-the profile has never seen is taken without a roll, so which acts a profile has
-already seen decides both the act list and where the act-selection stream
-stands. The veteran preset lists both opening acts as discovered. That is
-derived rather than recorded: a profile that had not discovered the Underdocks
-could only ever open there, and a run played on this environment opens in
-whichever act its act-selection roll names. A mismatch here cannot be detected
-when a preset is matched; it surfaces as an act-selection divergence at the
-first replayed record.
+Recorder 0.10.1 supplies `run.start.data.profile.discovered_acts`, captured when
+the new run is constructed from the same profile used by act selection. An
+explicit empty list means no acts were discovered. When `data.profile` is
+absent, replay assumes every supported act was discovered, as a documented
+legacy fallback. Present but malformed metadata fails rather than invoking the
+fallback. An unlocked, undiscovered alternate act is selected without a roll;
+the legacy assumption can therefore produce an act-selection divergence for
+older recordings of profiles that had not discovered it.
 
 ## Meaning of equal state
 
@@ -279,7 +279,8 @@ summary describes recorded state and never changes simulation. `records` counts
 the entire decoded stream; action, comparison and resume counters stop at the
 first divergence. A malformed tail or invalid delta still fails the replay.
 
-A recording's local profile is a run-defining input, so each one resolves to a
-registered unlock preset under
-[`manifests/unlock-presets/`](../manifests/unlock-presets), matched on the
-generation inputs the preset section above names.
+A recording's local profile is a run-defining input. Replay constructs an
+explicit profile from its recorded unlocks and optional discovery metadata,
+subject to the content limits and legacy fallback described above. Registered
+presets under [`manifests/unlock-presets/`](../manifests/unlock-presets) remain
+defaults for callers that supply only a profile name.

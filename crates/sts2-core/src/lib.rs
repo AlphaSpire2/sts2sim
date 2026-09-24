@@ -350,7 +350,7 @@ impl CompatibilityManifest {
 ///   against, the Overgrowth act, the reward sets a room offers, Lasting
 ///   Candy, and the relic a treasure room holds — so two profiles past their
 ///   first run generate identically whatever their counts.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UnlockPresetManifest {
     pub schema_version: u32,
     pub preset_id: String,
@@ -388,9 +388,9 @@ pub const BOSS_DISCOVERY_ENCOUNTERS: [&str; 12] = [
     "ENCOUNTER.AEONGLASS_BOSS",
 ];
 
-/// Profile facts a run reads that the recorded `unlocks` projection does not
-/// carry: which acts the profile has already seen, which decides whether an
-/// unlocked alternate act is taken outright or rolled for.
+/// Profile facts outside the `unlocks` projection. New recordings carry these
+/// in `run.start.data.profile`: discovered acts decide whether an unlocked
+/// alternate act is taken outright or rolled for.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProfileInputs {
     pub discovered_acts: Vec<ModelId>,
@@ -441,9 +441,9 @@ impl UnlockPresetManifest {
 
     /// The registered preset whose generation inputs are this state's.
     ///
-    /// A recording projects its unlock state and nothing else about the local
-    /// profile, so this is how a recorded run names the preset it was played
-    /// on. Two states are one generation environment when the pinned build's
+    /// This optional registry lookup considers only unlock state; replay
+    /// constructs its explicit manifest directly. Two states are one unlock
+    /// environment when the pinned build's
     /// reads cannot tell them apart: the revealed epochs must match exactly,
     /// the prior-run count only as first-run-or-not, and the seen-encounter
     /// lists only on the seen-status of [`BOSS_DISCOVERY_ENCOUNTERS`] — the
@@ -452,10 +452,9 @@ impl UnlockPresetManifest {
     /// state's own count and encounter list, because a run generated on the
     /// answer projects what the profile recorded, not what the preset's own
     /// recording happened to carry. The answer also supplies
-    /// `profile.discovered_acts`, which no recording projects, so a mismatch
-    /// there cannot be detected here. A state whose generation inputs no
-    /// preset carries is not approximated to the nearest one: there is no
-    /// preset, and the caller refuses the input.
+    /// `profile.discovered_acts`, which this lookup does not compare. A state
+    /// whose unlock inputs no preset carries returns `None`; it is not
+    /// approximated to the nearest registered profile.
     pub fn matching(unlocks: &UnlockState) -> Result<Option<Self>, ManifestError> {
         let seen = |state: &UnlockState, boss: &str| {
             state.encounters_seen.iter().any(|entry| entry == boss)

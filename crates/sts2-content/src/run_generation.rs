@@ -384,6 +384,17 @@ pub fn act_room_pools_for(
     character: &ModelId,
     ascension: u8,
 ) -> Result<UpFrontGeneration, EngineError> {
+    act_room_pools_with_history(seed, act_ids, character, ascension, None)
+}
+
+/// `None` keeps the rolled bosses (custom mode or the veteran baseline).
+pub(crate) fn act_room_pools_with_history(
+    seed: &str,
+    act_ids: &[ModelId],
+    character: &ModelId,
+    ascension: u8,
+    encounters_seen: Option<&[String]>,
+) -> Result<UpFrontGeneration, EngineError> {
     let acts = act_ids
         .iter()
         .map(|act_id| {
@@ -424,10 +435,19 @@ pub fn act_room_pools_for(
             let normal_encounters: Vec<ModelId> =
                 drawn.into_iter().map(|entry| model(entry.id)).collect();
             let elite_encounters = draw_encounters(rng, act.elite, 15);
-            let boss = model(act.bosses[random_index(rng, act.bosses.len())]);
+            let mut boss = model(act.bosses[random_index(rng, act.bosses.len())]);
             let mut ancient_candidates = act.ancients.to_vec();
             ancient_candidates.extend(&act_shared_ancients[index]);
             let ancient = model(ancient_candidates[random_index(rng, ancient_candidates.len())]);
+            // The game rolls rooms first, then applies discovery without any
+            // draws. Double Boss excludes this final boss, not the original roll.
+            if let Some(seen) = encounters_seen {
+                if let Some(unseen) = sts2_core::BOSS_DISCOVERY_ENCOUNTERS.iter().find(|boss| {
+                    act.bosses.contains(boss) && !seen.iter().any(|entry| entry == **boss)
+                }) {
+                    boss = model(unseen);
+                }
+            }
             // Under Double Boss the last act of the run draws a second boss
             // out of the ones it did not already roll, on the same up-front
             // stream and immediately after that act's own rooms. Every earlier
@@ -470,4 +490,47 @@ pub fn act_room_pools_for(
 fn random_index_inclusive_zero(rng: &mut Rng, length: usize) -> usize {
     rng.next_int(i32::try_from(length + 1).expect("pinned list fits game integer"))
         .expect("inclusive-zero range is nonempty") as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn boss_discovery_keeps_rng_and_other_rooms_and_precedes_double_boss() {
+        let character = model("CHARACTER.IRONCLAD");
+        for act in &ACTS {
+            let ids = [model(act.id)];
+            let baseline = act_room_pools_with_history("ABC", &ids, &character, 10, None).unwrap();
+            let order: Vec<_> = sts2_core::BOSS_DISCOVERY_ENCOUNTERS
+                .iter()
+                .filter(|boss| act.bosses.contains(boss))
+                .copied()
+                .collect();
+            for seen_count in 0..=order.len() {
+                let seen: Vec<_> = order[..seen_count]
+                    .iter()
+                    .map(|boss| (*boss).to_owned())
+                    .collect();
+                let generated =
+                    act_room_pools_with_history("ABC", &ids, &character, 10, Some(&seen)).unwrap();
+                let expected = order
+                    .get(seen_count)
+                    .map_or_else(|| baseline.acts[0].boss.clone(), |boss| model(boss));
+                let rooms = &generated.acts[0];
+                assert_eq!(rooms.boss, expected);
+                assert_ne!(rooms.second_boss.as_ref(), Some(&expected));
+                assert_eq!(generated.up_front_counter, baseline.up_front_counter);
+                assert_eq!(generated.shared_relics, baseline.shared_relics);
+                assert_eq!(generated.player_relics, baseline.player_relics);
+                assert_eq!(rooms.normal_encounters, baseline.acts[0].normal_encounters);
+                assert_eq!(rooms.elite_encounters, baseline.acts[0].elite_encounters);
+                assert_eq!(rooms.events, baseline.acts[0].events);
+                assert_eq!(rooms.ancient, baseline.acts[0].ancient);
+                if seen_count == order.len() {
+                    assert_eq!(generated, baseline);
+                }
+            }
+        }
+    }
 }

@@ -34,6 +34,35 @@ fn incomplete_or_conflicting_run_identity_is_rejected() {
     );
 }
 
+#[test]
+fn explicit_profiles_validate_their_identity_and_old_configs_still_resolve() {
+    let mut config = RunConfig::fixture_baseline("ABC");
+    let old = serde_json::to_value(&config).unwrap();
+    assert!(old.get("unlock_profile").is_none());
+    serde_json::from_value::<RunConfig>(old)
+        .unwrap()
+        .validate()
+        .unwrap();
+    config.unlock_preset = "recorded_profile".to_owned();
+    assert!(config.validate().is_err());
+    let mut profile = sts2_core::UnlockPresetManifest::pinned().unwrap();
+    profile.preset_id.clone_from(&config.unlock_preset);
+    config.unlock_profile = Some(profile.clone());
+    config.validate().unwrap();
+    for (schema_version, compatibility_id, preset_id) in [
+        (2, PINNED_COMPATIBILITY_ID, "recorded_profile"),
+        (1, "other-build", "recorded_profile"),
+        (1, PINNED_COMPATIBILITY_ID, "other-profile"),
+    ] {
+        let mut invalid = profile.clone();
+        invalid.schema_version = schema_version;
+        invalid.compatibility_id = compatibility_id.to_owned();
+        invalid.preset_id = preset_id.to_owned();
+        config.unlock_profile = Some(invalid);
+        assert!(config.validate().is_err());
+    }
+}
+
 /// The highest ascension the build will start a run at is ten, so every level
 /// the character select screen offers is a run this simulator generates and
 /// eleven is not a run at all.

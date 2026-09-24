@@ -7,9 +7,8 @@ use sts2_engine::{
 };
 use sts2_rng::{PlayerRngSet, RunRngSet, RunStream};
 
-use crate::{
-    UpFrontGeneration, act_room_pools_for, id, select_acts, standard_act_map, standard_neow_page,
-};
+use crate::run_generation::act_room_pools_with_history;
+use crate::{UpFrontGeneration, id, select_acts, standard_act_map, standard_neow_page};
 
 fn starter_card(model_id: &str) -> CardFingerprint {
     let mut card = CardFingerprint::base(id(model_id));
@@ -212,8 +211,7 @@ pub fn standard_run_on_preset_at(
 }
 
 /// The same run generated in a named lobby mode. `Custom` is the lobby that
-/// accepts a chosen seed, and generates exactly as `Standard` does; the mode
-/// is carried because the run's own record names the lobby it was played in.
+/// accepts a chosen seed and skips the standard mode's boss-discovery overrides.
 pub fn run_on_preset_at(
     seed: &str,
     character: &sts2_core::ModelId,
@@ -235,9 +233,8 @@ pub fn run_on_preset_at(
 /// The same run generated against a named unlock preset.
 ///
 /// The local profile is a run-defining input the seed does not carry: the
-/// epoch and encounter lists change generation, so a profile that has seen
-/// more is a different run configuration and resolves to its own registered
-/// preset. The prior-run count is carried as profile state and, past a first
+/// epoch and encounter lists change generation. Explicit manifests need not be
+/// registered. The prior-run count is carried as profile state and, past a first
 /// run, changes nothing generation reads.
 pub fn standard_ironclad_run_on_preset(
     seed: &str,
@@ -265,6 +262,29 @@ fn generate_up_front(
     config: &RunConfig,
     unlock_preset: &UnlockPresetManifest,
 ) -> Result<UpFrontGeneration, EngineError> {
+    // Content pools currently implement the full-epoch, post-first-run rules.
+    // Accept independent encounter/discovery histories without silently making
+    // a fresh or partially unlocked profile use veteran content.
+    let baseline = UnlockPresetManifest::pinned().map_err(|error| {
+        EngineError::new(ErrorCode::InternalInvariant).with_detail("profile", error.to_string())
+    })?;
+    let epochs = |unlocks: &sts2_core::UnlockState| {
+        unlocks
+            .epochs
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    if epochs(&unlock_preset.unlocks) != epochs(&baseline.unlocks) {
+        return Err(EngineError::new(ErrorCode::UnsupportedContent).with_detail(
+            "profile",
+            "content pools require all pinned epochs revealed",
+        ));
+    }
+    if unlock_preset.unlocks.number_of_runs == 0 {
+        return Err(EngineError::new(ErrorCode::UnsupportedContent)
+            .with_detail("profile", "first-run generation rules are not implemented"));
+    }
     let selection = select_acts(
         seed,
         config.act_one,
@@ -277,11 +297,13 @@ fn generate_up_front(
             .with_detail("model_id", selection.character.to_string())
             .with_detail("location", "run generation: character"));
     }
-    act_room_pools_for(
+    act_room_pools_with_history(
         seed,
         &selection.acts,
         &selection.character,
         config.ascension,
+        (config.mode == sts2_engine::RunMode::Standard)
+            .then_some(unlock_preset.unlocks.encounters_seen.as_slice()),
     )
 }
 
@@ -404,6 +426,7 @@ fn build_run_against(
     config.act_one = act_one;
     config.players[0].character = character.clone();
     config.unlock_preset.clone_from(&unlock_preset.preset_id);
+    config.unlock_profile = Some(unlock_preset.clone());
     config.validate()?;
     let generated = generate_up_front(seed, &config, unlock_preset)?;
     // Which character the run is actually played as is the act selection's

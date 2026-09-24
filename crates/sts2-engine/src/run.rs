@@ -72,6 +72,10 @@ pub struct RunConfig {
     /// candidate each at this baseline, so only act one has a setting.
     pub act_one: ActOneSetting,
     pub unlock_preset: String,
+    /// Explicit generation inputs, including profiles supplied by a replay.
+    /// Older configurations resolve `unlock_preset` through the registry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unlock_profile: Option<sts2_core::UnlockPresetManifest>,
 }
 
 impl RunConfig {
@@ -89,6 +93,7 @@ impl RunConfig {
             modifiers: Vec::new(),
             act_one: ActOneSetting::Random,
             unlock_preset: FIXTURE_UNLOCK_PRESET.to_owned(),
+            unlock_profile: None,
         }
     }
 
@@ -142,10 +147,17 @@ impl RunConfig {
                 EngineError::new(ErrorCode::InvalidConfig).with_detail("field", "modifiers")
             );
         }
-        // Any registered preset is a run configuration this simulator
-        // generates for; an unregistered name is not silently resolved to the
-        // nearest profile.
-        if sts2_core::UnlockPresetManifest::with_id(&self.unlock_preset).is_err() {
+        // An explicit profile carries its own inputs. A name alone must still
+        // resolve through the registry; it never implies a default profile.
+        let valid_profile = self.unlock_profile.as_ref().map_or_else(
+            || sts2_core::UnlockPresetManifest::with_id(&self.unlock_preset).is_ok(),
+            |profile| {
+                profile.schema_version == 1
+                    && profile.compatibility_id == self.compatibility_id
+                    && profile.preset_id == self.unlock_preset
+            },
+        );
+        if !valid_profile {
             return Err(EngineError::new(ErrorCode::InvalidConfig)
                 .with_detail("field", "unlock_preset")
                 .with_detail("value", self.unlock_preset.clone()));

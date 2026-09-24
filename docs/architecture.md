@@ -1244,8 +1244,9 @@ one draw per such player off the same stream, over the game's whole character
 list rather than an unlocked subset. So the act list, the profile's discovered
 acts, and the act-one setting are all run-defining inputs that a seed does not
 carry: the setting is `act_one` on `RunConfig`, and discovered acts are a
-profile input of the unlock preset, sitting beside the recorded `unlocks` rather
-than inside it because a recording does not project them.
+profile input of the explicit manifest. Recorder 0.10.1 supplies them in
+`run.start.data.profile.discovered_acts`, separate from the unlock projection.
+Older recordings omit that metadata and assume all supported acts discovered.
 
 An act the room tables here do not cover, or a rolled character this baseline
 has no loadout for, stops as unsupported content naming the model rather than
@@ -2296,8 +2297,11 @@ ended. What goes uncovered is metrics, mechanics no registered content uses, and
 keys whose recorded value is null. A recording this baseline cannot replay to
 its end is reported by the record it stops at and the model it names, which
 makes an unfinished recording a measurement rather than an absence. A recording
-built on a profile no unlock preset matches, or in a mode this baseline does not
-support, has no run to replay against and is refused rather than compared.
+built on an unsupported content profile (a first run or a different epoch set),
+or in an unsupported mode, is refused. Other encounter and act-discovery
+histories are taken directly from the recording's generation inputs; a
+registered preset match is not required. Standard mode applies boss discovery
+after room rolls and before the second-boss draw; custom mode skips it.
 
 Because a recording is authoritative for exactly one build of a game that is
 still changing, conformance runs outside the test suite: a curated collection of
