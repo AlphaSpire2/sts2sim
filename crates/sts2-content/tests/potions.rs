@@ -11,6 +11,46 @@ use sts2_rng::RunStream;
 
 const SEED: &str = "POTIONS";
 
+#[test]
+fn a_potion_choice_does_not_suspend_back_attack_intent_modifiers() {
+    use sts2_engine::{Effect, PowerType};
+
+    for (facing, crusher_damage, rocket_damage) in [(0, 18, 3), (1, 12, 4)] {
+        let simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.KAISER_CRAB_BOSS"))
+            .player_hp(80, 80)
+            .energy(3, 3)
+            .potions(vec![Some(id("POTION.ATTACK_POTION"))])
+            .enemy(1, id("MONSTER.CRUSHER"), 209, 209, "THRASH_MOVE")
+            .enemy(2, id("MONSTER.ROCKET"), 199, 199, "TARGETING_RETICLE_MOVE")
+            .power(0, id("POWER.SURROUNDED_POWER"), 1, PowerType::Debuff)
+            .power(1, id("POWER.BACK_ATTACK_LEFT_POWER"), 1, PowerType::Buff)
+            .power(2, id("POWER.BACK_ATTACK_RIGHT_POWER"), 1, PowerType::Buff)
+            .build(sts2_content::standard_registry())
+            .unwrap();
+        let mut state = simulator.state().clone();
+        state.combat.as_mut().unwrap().creatures[0].powers[0].counter = facing;
+        let mut simulator =
+            Simulator::from_scenario(state, sts2_content::standard_registry()).unwrap();
+        drink(&mut simulator, "POTION.ATTACK_POTION");
+        let combat = simulator.state().combat.as_ref().unwrap();
+        assert!(combat.suspended_choice.is_some());
+        assert_eq!(combat.creatures[0].powers[0].counter, facing);
+        for (creature, damage) in [(1, crusher_damage), (2, rocket_damage)] {
+            assert_eq!(
+                combat.creatures[creature].intent.as_ref().unwrap().intents[0].damage,
+                Some(damage)
+            );
+        }
+        assert!(
+            !combat
+                .queue
+                .iter()
+                .any(|effect| matches!(effect, Effect::RunRemaining(_))),
+            "a damage preview must not add continuations to the potion's queue"
+        );
+    }
+}
+
 fn id(value: &str) -> sts2_core::ModelId {
     value.parse().expect("static model ID")
 }

@@ -1114,6 +1114,10 @@ fn a_battleworn_dummy_fights_the_setting_it_was_put_on_and_pays_for_the_win() {
 /// decision being the map's.
 fn assert_only_the_map_is_left(simulator: &Simulator) {
     assert!(option_ids(simulator).is_empty(), "the page is finished");
+    assert_eq!(
+        sts2_replay::observation::render(simulator)["choices"]["events"],
+        serde_json::json!([])
+    );
     assert!(
         matches!(
             simulator.decision(),
@@ -1128,6 +1132,133 @@ fn assert_only_the_map_is_left(simulator: &Simulator) {
             .iter()
             .all(|action| matches!(action, Action::ChooseMap { .. })),
         "nothing but the map is offered: {actions:?}"
+    );
+}
+
+fn won_dummy_before_treasure() -> Simulator {
+    let mut simulator = Visit::new("EVENT.BATTLEWORN_DUMMY")
+        .deck(&["CARD.STRIKE_IRONCLAD", "CARD.DEFEND_IRONCLAD"])
+        .enter();
+    choose(
+        &mut simulator,
+        "BATTLEWORN_DUMMY.pages.INITIAL.options.SETTING_2",
+    );
+    let mut won = leave_the_enemy_on_one(&simulator);
+    while won
+        .legal_actions()
+        .iter()
+        .any(|action| matches!(action, Action::PlayCard { .. }))
+    {
+        play_something(&mut won);
+    }
+    let mut state = won.state().clone();
+    let run = state.run.as_mut().unwrap();
+    let map = &mut run.maps[run.current_act];
+    let next = MapCoord { col: 0, row: 2 };
+    map.height = 3;
+    map.boss = next;
+    map.points.last_mut().unwrap().children.push(next);
+    map.points.push(MapPoint {
+        coord: next,
+        point_type: MapPointType::Treasure,
+        children: Vec::new(),
+        can_modify: true,
+    });
+    Simulator::from_generated_state(state, sts2_content::standard_registry()).unwrap()
+}
+
+#[test]
+fn a_dummy_exit_precedes_resume_but_its_settled_rewards_are_still_verified() {
+    use serde_json::json;
+    use sts2_replay::{AdapterErrorCode, Record, ReplayAdapter, observation::render};
+
+    let won = won_dummy_before_treasure();
+    // The parent remains visible at the child's exit, before Resume upgrades
+    // the deck and finishes the event. No recorded fixture is needed.
+    let mut exiting = won.state().clone();
+    exiting.combat = None;
+    exiting.run.as_mut().unwrap().pushed_room = None;
+    let exiting =
+        Simulator::from_generated_state(exiting, sts2_content::standard_registry()).unwrap();
+    let before_resume = render(&exiting);
+    let mut adapter = ReplayAdapter::new(won).verifying_observations();
+    adapter
+        .accept(&Record {
+            sequence: 1,
+            kind: "room.proceed".into(),
+            payload: json!({"data": {}}),
+        })
+        .unwrap();
+    adapter
+        .accept(&Record {
+            sequence: 2,
+            kind: "room.exit".into(),
+            payload: json!({"data": {"stack_depth": 2}}),
+        })
+        .unwrap();
+    adapter
+        .accept(&Record {
+            sequence: 3,
+            kind: "state.observe".into(),
+            payload: json!({"after": 2, "context": "room.exit", "state": before_resume}),
+        })
+        .unwrap();
+    adapter.verify_pending_observation().unwrap();
+    assert_eq!(adapter.dropped_room_entries(), 1);
+    assert_eq!(adapter.compared_observations(), 0);
+    let settled = render(adapter.simulator());
+    assert_eq!(settled["players"][0]["deck"][0]["upgrade_level"], 1);
+    assert_eq!(settled["players"][0]["deck"][1]["upgrade_level"], 1);
+    assert_eq!(settled["choices"]["events"], json!([]));
+    adapter
+        .accept(&Record {
+            sequence: 4,
+            kind: "state.observe".into(),
+            payload: json!({"after": 1, "context": "action.settled", "state": settled}),
+        })
+        .unwrap();
+    adapter.verify_pending_observation().unwrap();
+    assert_eq!(adapter.compared_observations(), 1);
+    // A wrong reward in a settled observation must remain a divergence.
+    let mut incorrect = settled;
+    incorrect["players"][0]["deck"][0]["upgrade_level"] = json!(0);
+    let mut incorrect_adapter = adapter.clone();
+    incorrect_adapter
+        .accept(&Record {
+            sequence: 5,
+            kind: "state.observe".into(),
+            payload: json!({"after": 1, "context": "action.settled", "state": incorrect}),
+        })
+        .unwrap();
+    assert_eq!(
+        incorrect_adapter
+            .verify_pending_observation()
+            .unwrap_err()
+            .code,
+        AdapterErrorCode::StateDivergence
+    );
+    adapter
+        .accept(&Record {
+            sequence: 5,
+            kind: "map.choose".into(),
+            payload: json!({"data": {"col": 0, "row": 2}}),
+        })
+        .unwrap();
+    let mut next_room = render(adapter.simulator());
+    assert_eq!(next_room["choices"]["events"], json!([]));
+    // An ordinary room exit after a different action is not exempt, even
+    // when the preceding room happened to resume an event.
+    next_room["players"][0]["deck"][0]["upgrade_level"] = json!(0);
+    adapter
+        .accept(&Record {
+            sequence: 6,
+            kind: "state.observe".into(),
+            payload: json!({"after": 5, "context": "room.exit", "state": next_room}),
+        })
+        .unwrap();
+    assert_eq!(
+        adapter.verify_pending_observation().unwrap_err().code,
+        AdapterErrorCode::StateDivergence
     );
 }
 

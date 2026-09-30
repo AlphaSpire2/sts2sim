@@ -1710,6 +1710,26 @@ fn a_mummified_hand_frees_a_card_for_a_power() {
     assert_eq!(bash.energy_cost, 0);
 }
 
+#[test]
+fn a_mummified_hand_can_select_a_curse_without_changing_its_negative_cost() {
+    let mut simulator = fight_tough(
+        &["RELIC.MUMMIFIED_HAND"],
+        &[("CARD.INFLAME", 0), ("CARD.CLUMSY", 0)],
+    );
+    play(&mut simulator, "CARD.INFLAME");
+    let hand = &simulator.state().combat.as_ref().unwrap().player.piles.hand;
+    assert_eq!(hand.len(), 1);
+    assert_eq!(hand[0].fingerprint.model_id, id("CARD.CLUMSY"));
+    assert!(
+        !hand[0].temporary_costs.is_empty(),
+        "the fallback selected the curse"
+    );
+    assert_eq!(hand[0].energy_cost, -1);
+    assert!(!simulator.legal_actions().iter().any(|action| {
+        matches!(action, Action::PlayCard { card, .. } if card.fingerprint.model_id == id("CARD.CLUMSY"))
+    }));
+}
+
 /// A card already made free costs nothing as it stands, so the hand frees one
 /// that still costs something.
 #[test]

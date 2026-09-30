@@ -49,6 +49,16 @@ pub enum AdapterOutcome {
     Ignored(TimelineRole),
 }
 
+/// A recorder checkpoint inside a transition the simulator settles in one step.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ObservationStage {
+    #[default]
+    Settled,
+    Handover,
+    FightEntrance,
+    ParentExit,
+}
+
 /// Drives a simulator from decoded STS2PGN action records. Timeline-only records are
 /// validated and ignored; unsupported initiating records fail at their sequence.
 #[derive(Clone, Debug)]
@@ -64,9 +74,11 @@ pub struct ReplayAdapter {
     uncovered: BTreeSet<String>,
     dropped_room_entries: usize,
     mid_handover_observations: usize,
-    pending_is_mid_handover: bool,
+    pending_stage: ObservationStage,
     fight_entrance_observations: usize,
-    pending_is_fight_entrance: bool,
+    /// The proceed that popped a combat room and resumed its parent event.
+    parent_resume_action: Option<u64>,
+    parent_exit_record: Option<u64>,
     cleared_event_pages: usize,
     unwritten_reward_blocks: usize,
     /// The state the build last wrote to its save file, which is where a
@@ -97,9 +109,10 @@ impl ReplayAdapter {
             uncovered: BTreeSet::new(),
             dropped_room_entries: 0,
             mid_handover_observations: 0,
-            pending_is_mid_handover: false,
+            pending_stage: ObservationStage::Settled,
             fight_entrance_observations: 0,
-            pending_is_fight_entrance: false,
+            parent_resume_action: None,
+            parent_exit_record: None,
             cleared_event_pages: 0,
             unwritten_reward_blocks: 0,
             save_point,
@@ -162,10 +175,10 @@ impl ReplayAdapter {
     }
 
     /// How many settled observations were taken between two rooms. Leaving a
-    /// room and entering the next are one step here, so such an observation is
-    /// a state this engine never holds; it is neither compared nor counted as
-    /// compared, but counted here so that a recording stopping short stays
-    /// visible.
+    /// room and entering the next, or resuming its parent, are one step here.
+    /// Such an observation is a state this engine never holds; it is neither
+    /// compared nor counted as compared, but counted here so that a recording
+    /// stopping short stays visible.
     #[must_use]
     pub const fn dropped_room_entries(&self) -> usize {
         self.dropped_room_entries
@@ -398,9 +411,24 @@ impl ReplayAdapter {
         };
         self.applied_actions += 1;
         let before = self.save_marks();
+        let resumes_parent = matches!(action, Action::Proceed)
+            && self.simulator.state().run.as_ref().is_some_and(|run| {
+                run.pushed_room
+                    .as_ref()
+                    .is_some_and(|room| room.resumes_parent)
+            });
         self.simulator
             .step(action.clone())
             .map(|transition| {
+                self.parent_exit_record = None;
+                self.parent_resume_action = (resumes_parent
+                    && self
+                        .simulator
+                        .state()
+                        .run
+                        .as_ref()
+                        .is_some_and(|run| run.pushed_room.is_none()))
+                .then_some(record.sequence);
                 if self.build_saved(&action, before) {
                     self.save_point = Some(self.simulator.snapshot());
                     self.actions_since_save = 0;
@@ -439,7 +467,7 @@ impl ReplayAdapter {
     fn resume(&mut self, record: &Record) -> Result<(), AdapterError> {
         // The last thing the quit session wrote was a stage of a turn
         // handover: the run was quit with the enemy's turn under way.
-        let quit_inside_a_handover = self.pending_is_mid_handover;
+        let quit_inside_a_handover = self.pending_stage == ObservationStage::Handover;
         if self.verify_observations {
             self.pass_over_stage_observation();
             self.verify_pending_observation()?;
@@ -516,15 +544,45 @@ impl ReplayAdapter {
         // the recorder last wrote is a stage of it rather than the state it
         // came to rest in. There is no such intermediate state here — `EndTurn`
         // is one decision and settles whole — so the snapshot is passed over.
-        if self.pending_is_mid_handover {
+        if self.pending_stage == ObservationStage::Handover {
             self.pending_observation = None;
-            self.pending_is_mid_handover = false;
+            self.pending_stage = ObservationStage::Settled;
             self.mid_handover_observations += 1;
         }
-        if self.pending_is_fight_entrance {
+        if self.pending_stage == ObservationStage::FightEntrance {
             self.pending_observation = None;
-            self.pending_is_fight_entrance = false;
+            self.pending_stage = ObservationStage::Settled;
             self.fight_entrance_observations += 1;
+        }
+    }
+
+    fn observation_stage(&self, record: &Record, state: &Value) -> ObservationStage {
+        let context = record.payload.pointer("/context").and_then(Value::as_str);
+        // A pushed combat exits before Resume pays its parent's rewards and
+        // finishes its page. The observation can name either the proceed or
+        // its nested room.exit lifecycle record. Later observations compare
+        // the complete deck, rewards, and event choices as usual.
+        if context == Some("room.exit")
+            && self.parent_resume_action.is_some_and(|action| {
+                record
+                    .payload
+                    .pointer("/after")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|after| after == action || Some(after) == self.parent_exit_record)
+            })
+        {
+            ObservationStage::ParentExit
+        } else if matches!(context, Some("combat.turn.end" | "combat.enemy_turn.start")) {
+            // EndTurn settles the whole handover here, while the recorder
+            // can still be writing one of its stages when the player acts.
+            ObservationStage::Handover
+        } else if context == Some("room.enter")
+            && state.get("combat").is_some_and(|combat| !combat.is_null())
+        {
+            // Input taken during an entrance lands after the turn starts.
+            ObservationStage::FightEntrance
+        } else {
+            ObservationStage::Settled
         }
     }
 
@@ -532,35 +590,24 @@ impl ReplayAdapter {
     /// last observation before an input is the state this engine can hold, and
     /// an input is where the one before it is checked.
     fn settle_observations(&mut self, record: &Record) -> Result<(), AdapterError> {
+        if record.kind == "room.exit"
+            && self.parent_resume_action.is_some()
+            && self.parent_resume_action == self.timeline.last_input()
+            && record
+                .payload
+                .pointer("/data/stack_depth")
+                .and_then(Value::as_u64)
+                .is_some_and(|depth| depth > 1)
+        {
+            self.parent_exit_record = Some(record.sequence);
+        }
         // A single action is observed several times as it settles. The last
         // observation before the next record is the settled state, which is
         // the one this engine can hold.
         if record.kind == "state.observe" {
             if let Some(state) = record.payload.pointer("/state") {
                 self.pending_observation = Some((record.sequence, state.clone()));
-                // A snapshot taken partway along the turn handover is a state
-                // the build passes through rather than one it settles on:
-                // `combat.turn.end` and `combat.enemy_turn.start` are stages of
-                // the chain `EndTurn` runs, and `combat.player_turn.start` is
-                // where it comes to rest. The recorder writes one per stage, so
-                // the last one before the next input is normally the rest —
-                // unless the player acted before the queue drained, and then
-                // the last one is a stage.
-                let context = record.payload.pointer("/context").and_then(Value::as_str);
-                self.pending_is_mid_handover =
-                    matches!(context, Some("combat.turn.end" | "combat.enemy_turn.start"));
-                // A fight's entrance is a stage of its opening in the same way:
-                // the room is entered, the creatures join, and the first turn
-                // starts without anybody being asked, so the recorder writes
-                // the entrance and then the turn start with no input between —
-                // unless the player acted during the entrance itself. The build
-                // takes such an input and holds it until the turn is standing:
-                // a potion drunk during a boss's entrance lands after the hand
-                // is drawn. Entering the room and opening the fight are one
-                // step here, so the entrance is passed over the way a handover
-                // stage is.
-                self.pending_is_fight_entrance = context == Some("room.enter")
-                    && state.get("combat").is_some_and(|combat| !combat.is_null());
+                self.pending_stage = self.observation_stage(record, state);
             }
             return Ok(());
         }
@@ -1056,6 +1103,11 @@ impl ReplayAdapter {
         let Some((sequence, expected)) = self.pending_observation.take() else {
             return Ok(());
         };
+        if self.pending_stage == ObservationStage::ParentExit {
+            self.pending_stage = ObservationStage::Settled;
+            self.dropped_room_entries += 1;
+            return Ok(());
+        }
         if self.applied_actions == 0 {
             return Ok(());
         }

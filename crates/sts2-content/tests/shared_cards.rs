@@ -961,6 +961,25 @@ fn toric_toughness_works_its_block_up_again_for_two_more_turns() {
     }
 }
 
+#[test]
+fn overlapping_toric_toughness_keeps_each_plays_block_and_duration() {
+    for (first, second, first_block, second_block) in [(0, 0, 5, 5), (0, 1, 5, 7), (1, 0, 7, 5)] {
+        let mut draw = vec![("CARD.TORIC_TOUGHNESS", second)];
+        draw.extend(std::iter::repeat_n(("CARD.DEFEND_IRONCLAD", 0), 20));
+        let mut simulator = fight_with_draw(&[("CARD.TORIC_TOUGHNESS", first)], &draw);
+        play(&mut simulator, "CARD.TORIC_TOUGHNESS");
+        end_turn(&mut simulator);
+        assert_eq!(player(&simulator).block, first_block);
+        play(&mut simulator, "CARD.TORIC_TOUGHNESS");
+        end_turn(&mut simulator);
+        assert_eq!(player(&simulator).block, first_block + second_block);
+        end_turn(&mut simulator);
+        assert_eq!(player(&simulator).block, second_block);
+        end_turn(&mut simulator);
+        assert_eq!(player(&simulator).block, 0);
+    }
+}
+
 /// A wish takes any one card out of the draw pile, and its upgrade keeps it in
 /// hand rather than changing what it does.
 #[test]

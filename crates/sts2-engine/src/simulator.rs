@@ -2673,10 +2673,9 @@ impl Simulator {
         // stands finished while the prize is paid. A finished page's proceed
         // button is presentation only — no decision is recorded for it — so
         // the next decision after the prize is the walk onto the map. Keep the
-        // synchronizer snapshot on the old page for this transition, because
-        // the recorder observes the pushed room's exit before the resume
-        // updates the event synchronizer.
-        self.set_active_event_page(&[]);
+        // synchronizer in step with the resumed page. The replay adapter
+        // handles the pushed room's exit observation, which precedes Resume.
+        self.set_event_page(Vec::new());
         for effect in resume {
             self.apply_event_effect(effect)?;
             if self.state.terminal.is_some() {
@@ -9343,21 +9342,6 @@ impl Simulator {
         }
     }
 
-    /// Updates the room's live event page without moving the recorder-facing
-    /// synchronizer snapshot. A pushed combat exits before its parent's
-    /// `Resume` callback runs, so that exit observation still carries the page
-    /// that stood underneath the fight while the next legal decision already
-    /// belongs to the finished page.
-    fn set_active_event_page(&mut self, options: &[crate::EventOption]) {
-        let Some(run) = self.state.run.as_mut() else {
-            return;
-        };
-        if let Some(ActiveRoom::Event { options: page, .. }) = run.active_room.as_mut() {
-            page.clear();
-            page.extend_from_slice(options);
-        }
-    }
-
     fn leave_noncombat_room(&mut self) {
         let run = self.state.run.as_mut().expect("room implies run");
         // The room is left because the event finished, which leaves the event
@@ -15126,7 +15110,7 @@ impl Simulator {
             &card.fingerprint,
             self.content.card_enchantment(&card.fingerprint),
         );
-        if card.costs_x {
+        if card.costs_x || own < 0 {
             return Some(own);
         }
         Some(card.temporary_costs.iter().fold(own, |cost, temporary| {
@@ -22873,6 +22857,25 @@ impl Simulator {
         // A value-modifying pass hands its number straight back and can never
         // stop part-way, so nothing inside one can open a screen.
         let outer_block = self.block_suspension("a modifier pass", true);
+        // A choice already standing belongs to the body that opened it, not
+        // to this synchronous calculation. In particular, intent previews
+        // must not park the rest of a modifier behind that choice.
+        let outer_screen = self.unawaited_screen;
+        let standing = self.standing_choices().next();
+        self.unawaited_screen = standing;
+        let result = self.modifier_pass_listeners(event, tally);
+        self.unawaited_screen = outer_screen;
+        self.suspension_block = outer_block;
+        self.hook_context = outer_context;
+        self.modifier = outer_pass;
+        result
+    }
+
+    fn modifier_pass_listeners(
+        &mut self,
+        event: HookEvent,
+        tally: ModifierTally,
+    ) -> Result<(i64, Vec<Listener>), EngineError> {
         let mut answered = Vec::new();
         let listeners = self.pass_listeners(event)?;
         let turn = self.combat().map_or(1, |combat| combat.player.turn);
@@ -22919,9 +22922,6 @@ impl Simulator {
             .take()
             .expect("the pass is put back where it was taken from")
             .settled_scaled();
-        self.suspension_block = outer_block;
-        self.hook_context = outer_context;
-        self.modifier = outer_pass;
         // The value comes back in the pass's own units: a pass at one scale,
         // which is every caller but the damage chain, hands back the whole
         // number it started with.

@@ -1391,7 +1391,10 @@ fn toric_toughness(block_amount: i32) -> Vec<Command> {
         then: vec![
             buff("POWER.TORIC_TOUGHNESS_POWER", 2),
             Command::Power(PowerCmd::SetCounter {
-                power: sts2_engine::PowerRef::owned(id("POWER.TORIC_TOUGHNESS_POWER")),
+                power: sts2_engine::PowerRef {
+                    owner: CreatureSelector::Owner,
+                    power: sts2_engine::PowerName::JustApplied,
+                },
                 amount: Amount::counting(Count::GainedBlock),
             }),
         ],
