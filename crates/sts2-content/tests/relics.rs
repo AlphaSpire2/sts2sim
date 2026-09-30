@@ -1711,6 +1711,49 @@ fn a_mummified_hand_frees_a_card_for_a_power() {
 }
 
 #[test]
+fn a_mummified_hand_reads_costs_after_void_forms_last_free_play() {
+    for counter in 0..8 {
+        let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+            .player_hp(80, 80)
+            .energy(3, 3)
+            .turn(1, 1)
+            .relics(&[id("RELIC.MUMMIFIED_HAND")])
+            .power(
+                0,
+                id("POWER.VOID_FORM_POWER"),
+                1,
+                sts2_engine::PowerType::Buff,
+            )
+            .rng_counter(RunStream::CombatCardSelection, counter)
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "SHRINKER_MOVE")
+            .card(PileName::Hand, 0, card("CARD.INFLAME", 0), 0)
+            .card(PileName::Hand, 1, card("CARD.BASH", 0), 0)
+            .card(PileName::Hand, 2, card("CARD.STRIKE_IRONCLAD", 0), 0)
+            .build(sts2_content::standard_registry())
+            .unwrap();
+        let mut state = simulator.state().clone();
+        state.combat.as_mut().unwrap().player.piles.hand[1]
+            .temporary_costs
+            .push(sts2_engine::TemporaryCost::free_this_turn());
+        simulator = Simulator::from_scenario(state, sts2_content::standard_registry()).unwrap();
+        play(&mut simulator, "CARD.INFLAME");
+        let combat = simulator.state().combat.as_ref().unwrap();
+        assert_eq!(
+            combat.player.energy, 3,
+            "the power used Void Form's free play"
+        );
+        let hand = &combat.player.piles.hand;
+        assert_eq!(hand[0].temporary_costs.len(), 1, "Bash was already free");
+        assert_eq!(
+            hand[1].temporary_costs.len(),
+            1,
+            "the strike now costs energy and is selected"
+        );
+        assert_eq!(hand[1].energy_cost, 0);
+    }
+}
+
+#[test]
 fn a_mummified_hand_can_select_a_curse_without_changing_its_negative_cost() {
     let mut simulator = fight_tough(
         &["RELIC.MUMMIFIED_HAND"],
@@ -3049,6 +3092,48 @@ fn a_sea_glass_deals_fifteen_of_another_characters_cards() {
             .iter()
             .all(|card| card.fingerprint.upgrade_level == 0),
         "the creation rolls no upgrade at all"
+    );
+
+    // The recorder sends a whole selection, even when the action list only
+    // enumerates single clicks for this large grid.
+    let sts2_engine::DecisionContext::ChooseCards { choice_id, .. } = simulator.decision() else {
+        unreachable!();
+    };
+    let record = sts2_replay::Record {
+        sequence: 1,
+        kind: "choice.index".into(),
+        payload: serde_json::json!({"data": {
+            "choice_id": choice_id.get(), "indexes": [12, 14, 5],
+            "offered": {"options": {"options": candidates.iter().map(|card| {
+                serde_json::json!({"index": card.index, "fingerprint": card.fingerprint})
+            }).collect::<Vec<_>>()}}
+        }}),
+    };
+    for bad in ["duplicate", "fingerprint", "index", "choice"] {
+        let mut invalid = record.clone();
+        match bad {
+            "duplicate" => invalid.payload["data"]["indexes"] = serde_json::json!([12, 12]),
+            "fingerprint" => {
+                invalid.payload["data"]["offered"]["options"]["options"][12]["fingerprint"]["model_id"] =
+                    serde_json::json!("CARD.STRIKE_IRONCLAD");
+            }
+            "index" => invalid.payload["data"]["indexes"] = serde_json::json!([99]),
+            _ => invalid.payload["data"]["choice_id"] = serde_json::json!(choice_id.get() + 1),
+        }
+        let mut adapter = sts2_replay::ReplayAdapter::new(simulator.clone());
+        assert!(adapter.accept(&invalid).is_err(), "reject {bad}");
+        assert_eq!(
+            adapter.simulator().state().run_player.deck,
+            simulator.state().run_player.deck
+        );
+    }
+    let mut adapter = sts2_replay::ReplayAdapter::new(simulator.clone());
+    adapter.accept(&record).unwrap();
+    let added =
+        &adapter.simulator().state().run_player.deck[simulator.state().run_player.deck.len()..];
+    assert_eq!(
+        added.iter().map(|card| &card.model_id).collect::<Vec<_>>(),
+        [12, 14, 5].map(|index| &candidates[index].fingerprint.model_id)
     );
 
     let taken = candidates[0].clone();

@@ -1656,6 +1656,38 @@ fn panache_hits_everything_every_fifth_card() {
     assert_eq!(creature(&simulator, 1).current_hp, 50);
 }
 
+#[test]
+fn overlapping_panaches_initialize_and_advance_their_own_counters() {
+    let mut hand = vec![("CARD.PANACHE", 0), ("CARD.PANACHE", 1)];
+    hand.extend(std::iter::repeat_n(("CARD.DEFEND_IRONCLAD", 0), 6));
+    let mut simulator = scenario(&hand, &[], 200)
+        .build(sts2_content::standard_registry())
+        .unwrap();
+    let counters = |simulator: &Simulator| {
+        creature(simulator, 0)
+            .powers
+            .iter()
+            .filter(|power| power.model_id == id("POWER.PANACHE_POWER"))
+            .map(|power| power.counter)
+            .collect::<Vec<_>>()
+    };
+    play(&mut simulator, "CARD.PANACHE");
+    play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    assert_eq!(counters(&simulator), vec![4]);
+    play(&mut simulator, "CARD.PANACHE");
+    assert_eq!(counters(&simulator), vec![3, 5]);
+    for _ in 0..3 {
+        play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    }
+    assert_eq!(creature(&simulator, 1).current_hp, 190);
+    assert_eq!(counters(&simulator), vec![5, 2]);
+    for _ in 0..2 {
+        play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    }
+    assert_eq!(creature(&simulator, 1).current_hp, 176);
+    assert_eq!(counters(&simulator), vec![3, 5]);
+}
+
 /// A rolling boulder rolls over everything as the turn opens, and rolls harder
 /// every turn.
 #[test]

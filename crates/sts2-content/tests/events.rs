@@ -2405,6 +2405,57 @@ fn a_brain_leechs_rip_is_one_cheaper_with_a_tungsten_rod() {
     assert_eq!(rodded.state().run_player.current_hp, 61 - 4);
 }
 
+#[test]
+fn reloading_a_finished_ordinary_event_rewinds_to_its_entrance() {
+    use serde_json::json;
+    use sts2_replay::{Record, ReplayAdapter, observation::render};
+
+    let entered = Visit::new("EVENT.BRAIN_LEECH").hp(61, 80).enter();
+    let entrance = render(&entered);
+    let mut adapter = ReplayAdapter::new(entered);
+    for attempt in 0..2 {
+        let sequence = attempt * 3 + 1;
+        adapter
+            .accept(&Record {
+                sequence,
+                kind: "event.choose".into(),
+                payload: json!({"data": {"option_index": 1,
+                "option_id": "BRAIN_LEECH.pages.INITIAL.options.RIP"}}),
+            })
+            .unwrap();
+        adapter
+            .accept(&Record {
+                sequence: sequence + 1,
+                kind: "room.proceed".into(),
+                payload: json!({"data": {}}),
+            })
+            .unwrap();
+        assert_eq!(adapter.simulator().state().run_player.current_hp, 56);
+        assert!(
+            render(adapter.simulator())["choices"]["events"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        adapter
+            .accept(&Record {
+                sequence: sequence + 2,
+                kind: "run.resume".into(),
+                payload: json!({"data": {}}),
+            })
+            .unwrap();
+        let restored = render(adapter.simulator());
+        assert_eq!(
+            restored["players"], entrance["players"],
+            "HP and reward rolls rewind"
+        );
+        assert_eq!(
+            restored["choices"], entrance["choices"],
+            "the initial page returns"
+        );
+    }
+}
+
 /// A card reward an event lays out runs the same reward modify passes a
 /// fight's does, so a driftwood lets the brain leech's card offer be
 /// rerolled: the offer's screen carries a reroll beside its skip.

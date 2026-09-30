@@ -616,12 +616,10 @@ pub struct RunState {
     #[serde(default)]
     pub marked_map_coord: Option<MapCoord>,
     pub reward_set: Option<RewardSet>,
-    /// A reward set the player has walked away from, which the *projection*
-    /// still carries. Proceeding from a terminal rewards screen only opens
-    /// the map: the set stays stacked and unreachable until the next map point
-    /// is walked onto and the old room is finally left. Nothing reads it —
-    /// `reward_set` is what "a set is still owed an answer" means, and this
-    /// one is not — so it is kept apart from it.
+    /// A combat reward set beneath the map screen. Proceeding only opens the
+    /// map: the player can close it and claim these rewards until the next
+    /// map point is entered. Unlike `reward_set`, this set permits map travel
+    /// and does not resume an event body when completed.
     #[serde(default)]
     pub dismissed_reward_set: Option<RewardSet>,
     /// A rest-site option taken whose trim the *projection* has not caught up

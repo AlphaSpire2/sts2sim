@@ -1,7 +1,7 @@
 //! Proceeding past a rewards screen is not leaving the room.
 //!
 //! Proceeding from a terminal rewards screen opens the map and does nothing
-//! else. The set stays on the run's own stack of reward sets, unreachable, and
+//! else. The set stays on the run's own stack of reward sets, claimable, and
 //! only leaving the room — the next point walked onto — retires it. The
 //! recorder reads that stack, so a recording carries the set through every
 //! observation between the two.
@@ -97,5 +97,87 @@ fn a_reward_set_survives_the_proceed_and_dies_on_the_next_point() {
         rewards(&simulator).as_array().map(Vec::len),
         Some(0),
         "leaving the room retires it"
+    );
+}
+
+#[test]
+fn a_skipped_card_reward_can_be_reopened_after_proceeding_to_the_map() {
+    let mut simulator = walk_until(fresh_run(), |simulator| {
+        simulator.legal_actions().iter().any(|action| {
+            matches!(action, Action::ClaimReward { fingerprint, .. } if !fingerprint.offered_cards.is_empty())
+        })
+    });
+    let claim = simulator.legal_actions().iter().find(|action| {
+        matches!(action, Action::ClaimReward { fingerprint, .. } if !fingerprint.offered_cards.is_empty())
+    }).unwrap().clone();
+    simulator.step(claim.clone()).unwrap();
+    take(
+        &mut simulator,
+        |action| matches!(action, Action::ChooseCards { cards, .. } if cards.is_empty()),
+        "skip",
+    );
+    take(
+        &mut simulator,
+        |action| matches!(action, Action::Proceed),
+        "proceed",
+    );
+    let deck_size = simulator.state().run_player.deck.len();
+    assert!(simulator.legal_actions().contains(&claim));
+    simulator.step(claim.clone()).unwrap();
+    take(
+        &mut simulator,
+        |action| matches!(action, Action::ChooseCards { cards, .. } if cards.is_empty()),
+        "skip again",
+    );
+    assert!(
+        simulator.legal_actions().contains(&claim),
+        "skipping still leaves the reward available"
+    );
+    simulator.step(claim.clone()).unwrap();
+    take(
+        &mut simulator,
+        |action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()),
+        "take a card",
+    );
+    assert_eq!(simulator.state().run_player.deck.len(), deck_size + 1);
+    assert!(
+        !simulator.legal_actions().contains(&claim),
+        "a reward cannot be taken twice"
+    );
+    while let Some(action) = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ClaimReward { .. }))
+        .cloned()
+    {
+        simulator.step(action).unwrap();
+    }
+    assert!(
+        simulator
+            .state()
+            .run
+            .as_ref()
+            .unwrap()
+            .dismissed_reward_set
+            .is_none()
+    );
+    take(
+        &mut simulator,
+        |action| matches!(action, Action::Proceed),
+        "proceed after the last reward",
+    );
+    take(
+        &mut simulator,
+        |action| matches!(action, Action::ChooseMap { .. }),
+        "next room",
+    );
+    assert!(
+        simulator
+            .state()
+            .run
+            .as_ref()
+            .unwrap()
+            .dismissed_reward_set
+            .is_none()
     );
 }

@@ -2628,8 +2628,8 @@ impl Simulator {
             // The fight's own set outlives the screen the same way. A set is
             // retired only on the way out of the room, and proceeding past a
             // terminal rewards screen does not leave the room — it opens the
-            // map. Nothing here reads the parked set; it is what the projection
-            // still shows until the next point is walked onto.
+            // map. Closing the map lets the player claim its rewards again
+            // until the next point is walked onto.
             if let Some(dismissed) = self
                 .state
                 .combat
@@ -10080,19 +10080,6 @@ impl Simulator {
         Ok(combat.next_power_instance)
     }
 
-    /// Which instance of a model a creature is carrying, for the listener list:
-    /// the first one, which is the only sensible answer where the caller has
-    /// only a model to go on.
-    fn power_instance_id(&self, owner: CreatureCombatId, model_id: &ModelId) -> Option<u64> {
-        self.creature(owner).ok().and_then(|creature| {
-            creature
-                .powers
-                .iter()
-                .find(|power| power.model_id == *model_id)
-                .map(|power| power.instance)
-        })
-    }
-
     /// Which instance a `PowerRef` names: the listening one, the one the
     /// body's own apply just handed back, or none where the caller named a
     /// model — in which case the first instance the creature carries answers.
@@ -10434,7 +10421,7 @@ impl Simulator {
         // The after-applied step belongs to the power itself rather than being a
         // pass over the listener list, so only the power that just landed
         // answers it, and the pass over the whole list follows it.
-        self.run_own_hooks(target, model_id, crate::HookEvent::AfterApplied)?;
+        self.run_own_hooks(target, model_id, instance, crate::HookEvent::AfterApplied)?;
         self.announce_power_amount_changed(target, model_id, landing, applier)
     }
 
@@ -10513,13 +10500,14 @@ impl Simulator {
         &mut self,
         owner: CreatureCombatId,
         model_id: &ModelId,
+        instance: u64,
         event: crate::HookEvent,
     ) -> Result<(), EngineError> {
         let listener = Listener {
             owner,
             source: ListenerSource::Power,
             model_id: model_id.clone(),
-            power_instance: self.power_instance_id(owner, model_id),
+            power_instance: Some(instance),
         };
         let registry = Arc::clone(&self.content);
         let hooks = registry
@@ -14638,12 +14626,12 @@ impl Simulator {
             }
             PowerCmd::ModifyCounter { power, amount } => {
                 let offset = self.resolve_amount(amount, context)?;
-                if let Some((owner, model_id)) = self.resolve_power(power, context)? {
-                    for instance in &mut self.creature_mut(owner)?.powers {
-                        if instance.model_id == model_id {
-                            instance.counter += offset;
-                        }
-                    }
+                if let Some((owner, model_id)) = self.resolve_power(power, context)?
+                    && let Some(at) =
+                        self.power_index_for(owner, &model_id, self.named_instance(power, context))
+                    && let Some(instance) = self.creature_mut(owner)?.powers.get_mut(at)
+                {
+                    instance.counter += offset;
                 }
             }
             PowerCmd::SetCounter { power, amount } => {
@@ -14704,15 +14692,7 @@ impl Simulator {
                 }
             }
             PowerCmd::SetLatch(value) => {
-                if let Some((owner, model_id)) =
-                    self.resolve_power(&crate::PowerRef::listening(), context)?
-                {
-                    for instance in &mut self.creature_mut(owner)?.powers {
-                        if instance.model_id == model_id {
-                            instance.latched = *value;
-                        }
-                    }
-                }
+                self.with_listening_power(context, |instance| instance.latched = *value)?;
             }
             // The three calls a body makes on its own per-play tally. Each acts
             // on the one instance whose listener is running.
@@ -18487,6 +18467,10 @@ impl Simulator {
                 filter,
                 fallback,
             } => {
+                // Costs are read live in the build. A play can exhaust a
+                // global discount before an after-play listener selects a
+                // card, without any intervening decision boundary.
+                self.refresh_card_costs();
                 let candidates = self.pile_cards_passing(*pile, *filter, *fallback)?;
                 let index = self
                     .state
@@ -21819,7 +21803,12 @@ impl Simulator {
     /// Takes a reward set off the table once every reward in it has been
     /// answered — taken, or passed over.
     fn close_settled_reward_set(&mut self, set_id: RewardSetId) -> Result<(), EngineError> {
-        let is_run_reward = self.state.combat.is_none();
+        let is_dismissed_reward =
+            self.state.combat.is_none()
+                && self.state.run.as_ref().is_some_and(|run| {
+                    run.reward_set.is_none() && run.dismissed_reward_set.is_some()
+                });
+        let is_run_reward = self.state.combat.is_none() && !is_dismissed_reward;
         let set = self.current_reward_set_mut()?.ok_or_else(|| {
             EngineError::new(ErrorCode::IllegalAction)
                 .with_detail("refused", "no reward set stands to close")
@@ -21845,6 +21834,12 @@ impl Simulator {
         if is_run_reward {
             let run = self.state.run.as_mut().expect("run reward implies run");
             reward_set_done(run);
+        } else if is_dismissed_reward {
+            self.state
+                .run
+                .as_mut()
+                .expect("dismissed reward implies run")
+                .dismissed_reward_set = None;
         } else {
             self.combat_mut()?.reward_set = None;
         }
@@ -28312,10 +28307,43 @@ impl Simulator {
         actions
     }
 
+    /// Map travel and the room actions that remain available beneath the map.
+    fn map_navigation_actions(&self, destinations: &[crate::MapCoord]) -> Vec<Action> {
+        let mut actions = self.event_shelf_actions(destinations);
+        if let Some(set) = self
+            .state
+            .run
+            .as_ref()
+            .and_then(|run| run.dismissed_reward_set.as_ref())
+        {
+            actions.extend(
+                set.rewards
+                    .iter()
+                    .filter(|reward| !reward.selected && !reward.passed_over)
+                    .map(|reward| Action::ClaimReward {
+                        set_id: set.id,
+                        reward_index: reward.index,
+                        fingerprint: reward.fingerprint.clone(),
+                    }),
+            );
+        }
+        // The room's proceed button can open the map again, including after
+        // its final reward has been claimed.
+        if self.state.run.as_ref().is_some_and(|run| {
+            matches!(
+                run.current_room_type,
+                Some(crate::MapPointType::Monster | crate::MapPointType::Elite)
+            ) || run.pushed_room.is_some()
+        }) {
+            actions.push(Action::Proceed);
+        }
+        actions
+    }
+
     fn compute_run_legal_actions(&self) -> Result<Vec<Action>, EngineError> {
         match &self.decision {
             DecisionContext::MapNavigation { destinations, .. } => {
-                Ok(self.event_shelf_actions(destinations))
+                Ok(self.map_navigation_actions(destinations))
             }
             // A locked option is on the page to be read, not taken: it keeps
             // its place on the page and is left out of what can be chosen.
@@ -28637,7 +28665,11 @@ impl Simulator {
             self.state
                 .run
                 .as_ref()
-                .map(|run| run.reward_set.as_ref())
+                .map(|run| {
+                    run.reward_set
+                        .as_ref()
+                        .or(run.dismissed_reward_set.as_ref())
+                })
                 .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))
         }
     }
@@ -28649,7 +28681,11 @@ impl Simulator {
             self.state
                 .run
                 .as_mut()
-                .map(|run| run.reward_set.as_mut())
+                .map(|run| {
+                    run.reward_set
+                        .as_mut()
+                        .or(run.dismissed_reward_set.as_mut())
+                })
                 .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))
         }
     }

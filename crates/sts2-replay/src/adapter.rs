@@ -857,15 +857,44 @@ impl ReplayAdapter {
                 "a chosen index has no offered card fingerprint",
             ));
         }
-        self.find_action(record, |action| {
-            matches!(action, Action::ChooseCards { choice_id: id, cards }
-                if id.get() == choice_id
-                    && cards.len() == chosen.len()
-                    && cards.iter().zip(&chosen).all(|(card, expected)| {
-                        Some(card.index) == expected.get("index").and_then(Value::as_u64).map(|index| index as usize)
-                            || card_fingerprint_matches(&card.fingerprint, expected)
+        // Large grids expose individual clicks instead of enumerating every
+        // combination. Reconstruct the recorded selection from the standing
+        // candidates and let the engine validate its counts and distinctness.
+        let illegal = || {
+            Self::error(
+                record,
+                AdapterErrorCode::IllegalAction,
+                "record does not match the standing card selection",
+            )
+        };
+        let sts2_engine::DecisionContext::ChooseCards {
+            choice_id: standing,
+            candidates,
+            ..
+        } = self.simulator.decision()
+        else {
+            return Err(illegal());
+        };
+        if standing.get() != choice_id {
+            return Err(illegal());
+        }
+        let cards = indexes
+            .iter()
+            .zip(chosen)
+            .map(|(index, expected)| {
+                candidates
+                    .iter()
+                    .find(|card| {
+                        card.index == *index
+                            && card_fingerprint_matches(&card.fingerprint, expected)
                     })
-                    && cards.iter().map(|card| card.index).eq(indexes.iter().copied()))
+                    .cloned()
+                    .ok_or_else(illegal)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Action::ChooseCards {
+            choice_id: *standing,
+            cards,
         })
     }
 
@@ -1198,6 +1227,9 @@ struct SaveMarks {
 fn ancient_finished(state: &sts2_engine::GameState) -> bool {
     state.run.as_ref().is_some_and(|run| {
         run.current_room_type == Some(MapPointType::Ancient)
+            // Ordinary events share this room type. Only the act's starting
+            // point hosts its Ancient and writes a save on event completion.
+            && run.current_coord == Some(run.map().start)
             && run
                 .begun_event
                 .as_ref()
