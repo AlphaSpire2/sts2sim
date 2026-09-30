@@ -1445,6 +1445,7 @@ mod tests {
                 },
             }),
             can_reroll: false,
+            upgrade_after_generation: false,
             relic_is_wax: false,
         }
     }

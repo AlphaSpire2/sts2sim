@@ -4969,6 +4969,10 @@ impl ChosenCard {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent reward properties, not mutually exclusive states"
+)]
 pub struct RewardFingerprint {
     pub reward_type: String,
     pub model_id: Option<ModelId>,
@@ -4995,6 +4999,11 @@ pub struct RewardFingerprint {
     /// options.
     #[serde(default)]
     pub creation: Option<crate::CardCreation>,
+    /// Upgrade each upgradable card after generation, including on a reroll.
+    /// The Future of Potions attaches this to the reward's `AfterGenerated`
+    /// callback, after the ordinary card-reward modifier passes.
+    #[serde(default)]
+    pub upgrade_after_generation: bool,
     /// Whether the offer may be rerolled, which one relic sets on every card
     /// offer of a set. It is what puts the reroll button on the screen, and
     /// taking it clears the flag, so a reroll is offered once.
@@ -5055,6 +5064,7 @@ impl RewardFingerprint {
             option_count: 0,
             rarity_odds: None,
             creation: None,
+            upgrade_after_generation: false,
             can_reroll: false,
             relic_is_wax: false,
             source: RewardSource::None,

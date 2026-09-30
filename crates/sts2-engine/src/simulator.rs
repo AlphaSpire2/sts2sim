@@ -6964,26 +6964,33 @@ impl Simulator {
                 slot,
                 rarity,
                 card_type,
-                pool,
+                pool: _,
             } => {
                 if let Some(held) = self.state.run_player.potions.get_mut(slot) {
                     *held = None;
                 }
-                let candidates: Vec<ModelId> = pool
-                    .iter()
-                    .filter(|card| card.rarity == rarity && card.card_type == card_type)
-                    .map(|card| card.model_id.clone())
-                    .collect();
-                let mut offered = self.generate_uniform_cards(3, &candidates)?;
-                // The offer is upgraded once it has been generated.
-                for card in &mut offered {
-                    card.upgrade_level = 1;
-                }
-                let mut reward = crate::RewardFingerprint::of("card");
-                reward.offered_cards = offered;
-                reward.option_count = 3;
-                reward.rarity_odds = Some(crate::RarityOdds::Uniform);
-                reward.source = crate::RewardSource::Other;
+                // The game retains these options on the reward, and its
+                // AfterGenerated callback upgrades both the initial offer and
+                // every reroll. A hand-set list loses both pieces of behavior.
+                let creation = crate::CardCreation {
+                    pools: vec![crate::CardPoolRef::OwnCharacter],
+                    filter: CardFilter::OfRarityAndType(rarity, card_type),
+                    odds: crate::RarityOdds::Uniform,
+                    from_an_encounter: false,
+                    count: 3,
+                    flags: crate::CardCreationFlags {
+                        no_upgrade_roll: true,
+                        is_card_reward: true,
+                        no_card_pool_modifications: true,
+                    },
+                };
+                let offered = self.create_card_reward_offer(&creation, true)?;
+                let pools = self.named_pools(&crate::CardPoolRef::OwnCharacter)?;
+                let mut reward = crate::RewardFingerprint::of("card")
+                    .with_cards(offered, pools, creation.odds)
+                    .from_creation(creation)
+                    .from_source(crate::RewardSource::Other);
+                reward.upgrade_after_generation = true;
                 self.offer_custom_rewards(vec![reward])?;
                 finish_room = false;
             }
@@ -18817,6 +18824,10 @@ impl Simulator {
             // A card's rarity is the one its pool hands it, which a card
             // registered as pool metadata alone can still answer.
             CardFilter::OfRarity(rarity) => self.card_rarity(fingerprint) == *rarity,
+            CardFilter::OfRarityAndType(rarity, card_type) => {
+                self.card_rarity(fingerprint) == *rarity
+                    && self.content.card_type_of(fingerprint) == Some(*card_type)
+            }
             // The pool the card is read as standing in, which is its own except
             // for the ten event cards that name a character's. It is not the
             // pool a transform of it rolls against: a quest card stands in a
@@ -21366,15 +21377,21 @@ impl Simulator {
         reward_index: usize,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<(), EngineError> {
-        let creation = self
+        let (creation, upgrade_after_generation) = self
             .current_reward_set()?
             .and_then(|set| set.rewards.get(reward_index))
-            .and_then(|reward| reward.fingerprint.creation.clone())
+            .and_then(|reward| {
+                reward
+                    .fingerprint
+                    .creation
+                    .clone()
+                    .map(|creation| (creation, reward.fingerprint.upgrade_after_generation))
+            })
             .ok_or_else(|| {
                 EngineError::new(ErrorCode::IllegalAction)
                     .with_detail("refused", "no rerollable card reward at that index")
             })?;
-        let cards = self.create_cards(&creation)?;
+        let cards = self.create_card_reward_offer(&creation, upgrade_after_generation)?;
         if let Some(reward) = self
             .current_reward_set_mut()?
             .and_then(|set| set.rewards.get_mut(reward_index))
@@ -26942,6 +26959,25 @@ impl Simulator {
             Some(rng) => rng,
             None => self.state.player_rng.stream_mut(PlayerStream::Rewards),
         }
+    }
+
+    /// Build an offer, then run the reward's post-generation upgrade callback.
+    /// This follows the modifier passes, just as `CardReward.AfterGenerated` does
+    /// in the game, and upgrades only cards that can still be upgraded.
+    fn create_card_reward_offer(
+        &mut self,
+        creation: &crate::CardCreation,
+        upgrade_after_generation: bool,
+    ) -> Result<Vec<crate::CardFingerprint>, EngineError> {
+        let mut cards = self.create_cards(creation)?;
+        if upgrade_after_generation {
+            for card in &mut cards {
+                if self.fingerprint_passes(card, &[CardFilter::Upgradable]) {
+                    card.upgrade_level += 1;
+                }
+            }
+        }
+        Ok(cards)
     }
 
     /// The cards one creation makes, and then the passes a listener answers to

@@ -2315,6 +2315,107 @@ fn a_driftwood_lets_an_events_card_offer_be_rerolled() {
     );
 }
 
+/// The Future of Potions keeps its rarity/type filter and its post-generation
+/// upgrade callback when Driftwood rerolls the offer, including after a state
+/// round trip. No random upgrade roll belongs to either generation.
+#[test]
+fn a_potion_trade_rerolls_filtered_upgraded_cards_once() {
+    use sts2_engine::DecisionContext;
+
+    for potion in [
+        "POTION.BLOCK_POTION",
+        "POTION.LIQUID_BRONZE",
+        "POTION.FAIRY_IN_A_BOTTLE",
+    ] {
+        for driftwood in [false, true] {
+            let relics = if driftwood {
+                vec!["RELIC.DRIFTWOOD", "RELIC.PRISMATIC_SHARD"]
+            } else {
+                Vec::new()
+            };
+            let mut visit = Visit::new("EVENT.THE_FUTURE_OF_POTIONS")
+                .potion(potion)
+                .relics(&relics);
+            visit.potions = 2;
+            let mut simulator = visit.enter();
+            let option = page(&simulator).remove(0);
+            let EventEffect::TradePotionForUpgradedCards {
+                rarity,
+                card_type,
+                pool,
+                ..
+            } = &option.effects[0]
+            else {
+                panic!("the first potion trades for cards");
+            };
+            let allowed: Vec<_> = pool
+                .iter()
+                .filter(|card| card.rarity == *rarity && card.card_type == *card_type)
+                .map(|card| card.model_id.clone())
+                .collect();
+            let before = simulator
+                .state()
+                .player_rng
+                .stream(sts2_rng::PlayerStream::Rewards)
+                .counter();
+            choose(&mut simulator, &option.option_id);
+            let claim = simulator
+                .legal_actions()
+                .iter()
+                .find(|action| {
+                    matches!(action, Action::ClaimReward { fingerprint, .. }
+                    if fingerprint.reward_type == "card")
+                })
+                .cloned()
+                .expect("the traded potion paid a card offer");
+            simulator.step(claim).unwrap();
+            for generation in 1..=if driftwood { 2 } else { 1 } {
+                let DecisionContext::ChooseCards { candidates, .. } = simulator.decision() else {
+                    panic!("the reward holds a card selection");
+                };
+                assert_eq!(candidates.len(), 3);
+                for card in candidates {
+                    assert!(allowed.contains(&card.fingerprint.model_id));
+                    assert_eq!(card.fingerprint.upgrade_level, 1);
+                }
+                let after = simulator
+                    .state()
+                    .player_rng
+                    .stream(sts2_rng::PlayerStream::Rewards)
+                    .counter();
+                assert_eq!(after - before, 3 * generation, "only three card picks");
+                let reroll = simulator
+                    .legal_actions()
+                    .iter()
+                    .find(|action| {
+                        matches!(action, Action::ChooseAlternative { option_id, .. }
+                        if option_id == "reroll")
+                    })
+                    .cloned();
+                if driftwood && generation == 1 {
+                    let portable = serde_json::from_str(
+                        &serde_json::to_string(
+                            &simulator
+                                .project(sts2_engine::ProjectionScope::RunCore)
+                                .unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    simulator =
+                        Simulator::from_portable_state(portable, sts2_content::standard_registry())
+                            .unwrap();
+                    simulator
+                        .step(reroll.expect("Driftwood enables the reroll"))
+                        .expect("the filtered, upgraded offer can be rerolled");
+                } else {
+                    assert!(reroll.is_none(), "no reroll without Driftwood or after use");
+                }
+            }
+        }
+    }
+}
+
 /// The board the crystal sphere stood up.
 fn sphere(simulator: &Simulator) -> sts2_engine::CrystalSphereGame {
     match simulator

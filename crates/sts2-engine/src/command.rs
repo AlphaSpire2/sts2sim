@@ -2190,6 +2190,8 @@ pub enum CardFilter {
     BasicStrikeOrDefend,
     /// The card's rarity is this one.
     OfRarity(CardRarity),
+    /// The rarity and type a potion trades for in The Future of Potions.
+    OfRarityAndType(CardRarity, CardType),
     /// The card is an attack or a power, which is the two-type test a Dual
     /// Wield's screen filter writes out.
     AttackOrPower,
