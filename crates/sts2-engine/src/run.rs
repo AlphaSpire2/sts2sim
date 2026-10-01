@@ -616,10 +616,9 @@ pub struct RunState {
     #[serde(default)]
     pub marked_map_coord: Option<MapCoord>,
     pub reward_set: Option<RewardSet>,
-    /// A combat reward set beneath the map screen. Proceeding only opens the
-    /// map: the player can close it and claim these rewards until the next
-    /// map point is entered. Unlike `reward_set`, this set permits map travel
-    /// and does not resume an event body when completed.
+    /// A combat reward set retained only for replay observations until the next
+    /// map point is entered. Proceed finalizes reward decisions: this set is
+    /// not actionable and cannot resume an event body.
     #[serde(default)]
     pub dismissed_reward_set: Option<RewardSet>,
     /// A rest-site option taken whose trim the *projection* has not caught up

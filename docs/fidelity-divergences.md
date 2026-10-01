@@ -41,6 +41,37 @@ than *"what changes the run"* is also reading it wrongly here, and should read
 the shop offers off the decision context instead, which carries every offer
 unfiltered.
 
+## Reward decisions are final before map navigation
+
+**The build.** Proceeding past terminal combat rewards opens the map without
+leaving the room. The player can close the map and collect remaining rewards;
+the reward synchronizer skips them only when leaving the room. Reopening an
+already open map changes no gameplay state. These rules are in
+`RunManager.ProceedFromTerminalRewardsScreen`, `NMapScreen.Open`, and
+`RewardsSetSynchronizer.BeforeLeavingRoom` in the pinned decomp.
+
+**This simulator.** The agent resolves rewards, proceeds once, and chooses its
+next destination. Map navigation offers neither reward claims nor Proceed.
+Dismissed rewards remain only as replay-observation bookkeeping until the next
+room is entered; they cannot change gameplay. This avoids unlimited map-open
+decisions and reward backtracking. A player can make the same reward selections
+before proceeding, without closing and reopening UI.
+
+**Whether it can reach a conformance claim.** Yes. Replay consumes a redundant
+`room.proceed` only on the map after terminal combat, without changing state or
+RNG and with observation verification still enabled. A recorded `reward.claim`
+for an unclaimed dismissed reward instead fails explicitly as unsupported; it
+is never ignored or reported as conformant. The scenario tests
+`replay_reopening_the_map_preserves_state_rng_and_observation_checks` and
+`replay_cannot_collect_rewards_after_proceeding` exercise these two sequences
+without embedding a recording. Proceeds that finish a room, resume a parent
+event, or lead to an act transition retain their gameplay behavior.
+
+**What would change this.** Supporting human recordings that backtrack for
+rewards would require translation at the replay boundary, preserving reward
+effects, ordering, and RNG. It does not require adding UI navigation decisions
+to the agent's action space.
+
 ## Driftwood and Pael's Wing together are a card reward the build cannot show
 
 **The build.** A card reward carries buttons besides its cards: Skip, when the

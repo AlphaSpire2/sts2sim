@@ -2625,11 +2625,9 @@ impl Simulator {
                 let resume = run.pushed_room.take().map(|room| room.resume);
                 return self.resume_parent_event(resume.unwrap_or_default(), events);
             }
-            // The fight's own set outlives the screen the same way. A set is
-            // retired only on the way out of the room, and proceeding past a
-            // terminal rewards screen does not leave the room — it opens the
-            // map. Closing the map lets the player claim its rewards again
-            // until the next point is walked onto.
+            // Proceed finalizes reward decisions. Retain the fight's set only
+            // for replay observations: the build keeps it on its stack until
+            // the next room is entered, but it is no longer actionable here.
             if let Some(dismissed) = self
                 .state
                 .combat
@@ -21803,12 +21801,7 @@ impl Simulator {
     /// Takes a reward set off the table once every reward in it has been
     /// answered — taken, or passed over.
     fn close_settled_reward_set(&mut self, set_id: RewardSetId) -> Result<(), EngineError> {
-        let is_dismissed_reward =
-            self.state.combat.is_none()
-                && self.state.run.as_ref().is_some_and(|run| {
-                    run.reward_set.is_none() && run.dismissed_reward_set.is_some()
-                });
-        let is_run_reward = self.state.combat.is_none() && !is_dismissed_reward;
+        let is_run_reward = self.state.combat.is_none();
         let set = self.current_reward_set_mut()?.ok_or_else(|| {
             EngineError::new(ErrorCode::IllegalAction)
                 .with_detail("refused", "no reward set stands to close")
@@ -21834,12 +21827,6 @@ impl Simulator {
         if is_run_reward {
             let run = self.state.run.as_mut().expect("run reward implies run");
             reward_set_done(run);
-        } else if is_dismissed_reward {
-            self.state
-                .run
-                .as_mut()
-                .expect("dismissed reward implies run")
-                .dismissed_reward_set = None;
         } else {
             self.combat_mut()?.reward_set = None;
         }
@@ -28307,43 +28294,10 @@ impl Simulator {
         actions
     }
 
-    /// Map travel and the room actions that remain available beneath the map.
-    fn map_navigation_actions(&self, destinations: &[crate::MapCoord]) -> Vec<Action> {
-        let mut actions = self.event_shelf_actions(destinations);
-        if let Some(set) = self
-            .state
-            .run
-            .as_ref()
-            .and_then(|run| run.dismissed_reward_set.as_ref())
-        {
-            actions.extend(
-                set.rewards
-                    .iter()
-                    .filter(|reward| !reward.selected && !reward.passed_over)
-                    .map(|reward| Action::ClaimReward {
-                        set_id: set.id,
-                        reward_index: reward.index,
-                        fingerprint: reward.fingerprint.clone(),
-                    }),
-            );
-        }
-        // The room's proceed button can open the map again, including after
-        // its final reward has been claimed.
-        if self.state.run.as_ref().is_some_and(|run| {
-            matches!(
-                run.current_room_type,
-                Some(crate::MapPointType::Monster | crate::MapPointType::Elite)
-            ) || run.pushed_room.is_some()
-        }) {
-            actions.push(Action::Proceed);
-        }
-        actions
-    }
-
     fn compute_run_legal_actions(&self) -> Result<Vec<Action>, EngineError> {
         match &self.decision {
             DecisionContext::MapNavigation { destinations, .. } => {
-                Ok(self.map_navigation_actions(destinations))
+                Ok(self.event_shelf_actions(destinations))
             }
             // A locked option is on the page to be read, not taken: it keeps
             // its place on the page and is left out of what can be chosen.
@@ -28665,11 +28619,7 @@ impl Simulator {
             self.state
                 .run
                 .as_ref()
-                .map(|run| {
-                    run.reward_set
-                        .as_ref()
-                        .or(run.dismissed_reward_set.as_ref())
-                })
+                .map(|run| run.reward_set.as_ref())
                 .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))
         }
     }
@@ -28681,11 +28631,7 @@ impl Simulator {
             self.state
                 .run
                 .as_mut()
-                .map(|run| {
-                    run.reward_set
-                        .as_mut()
-                        .or(run.dismissed_reward_set.as_mut())
-                })
+                .map(|run| run.reward_set.as_mut())
                 .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))
         }
     }

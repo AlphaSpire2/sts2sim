@@ -1624,7 +1624,15 @@ as for a room's own.
 
 A card reward on a screen is answered or it is not; a screen dismissed with
 cards still on it leaves the reward unanswered rather than completing it, which
-is why a skipped offer is still there when the screen next goes up. And
+is why a skipped offer can be reopened while resolving the current rewards.
+Proceeding to map navigation finalizes those decisions: the map offers neither
+reward claims nor another Proceed. The dismissed combat reward set remains only
+for replay observations until the next room is entered. Replay consumes a
+redundant map-open `room.proceed` without a simulation step, but explicitly
+rejects collecting dismissed rewards as unsupported. This boundary avoids
+agent decisions spent closing and reopening UI; see
+[`fidelity-divergences.md`](fidelity-divergences.md#reward-decisions-are-final-before-map-navigation).
+
 `RewardsCmd::OfferCustom` returns the moment the set is marked skipped, so
 everything behind it — the event finishing among them — runs from there: the
 state after a rewards screen is dismissed is the state the recorder's

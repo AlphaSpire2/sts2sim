@@ -347,9 +347,7 @@ impl ReplayAdapter {
                 .iter()
                 .find(|action| matches!(action, Action::Proceed))
                 .cloned(),
-            "room.proceed" => {
-                Some(self.find_action(record, |action| matches!(action, Action::Proceed))?)
-            }
+            "room.proceed" => self.room_proceed(record)?,
             // Records with no decision behind them.
             //
             // `event.advance` is an ancient's dialogue being clicked through.
@@ -1088,10 +1086,57 @@ impl ReplayAdapter {
         )
     }
 
+    fn room_proceed(&self, record: &Record) -> Result<Option<Action>, AdapterError> {
+        // After terminal combat rewards, the room's button only reopens the
+        // map. Consume that UI record without adding a simulation decision.
+        // A parent event that still needs resuming is not a UI-only proceed.
+        if matches!(
+            self.simulator.decision(),
+            sts2_engine::DecisionContext::MapNavigation { .. }
+        ) && self.simulator.state().run.as_ref().is_some_and(|run| {
+            run.pushed_room
+                .as_ref()
+                .is_none_or(|room| !room.resumes_parent)
+                && (matches!(
+                    run.current_room_type,
+                    Some(MapPointType::Monster | MapPointType::Elite)
+                ) || run.pushed_room.is_some())
+        }) {
+            return Ok(None);
+        }
+        self.find_action(record, |action| matches!(action, Action::Proceed))
+            .map(Some)
+    }
+
     fn reward_claim(&self, record: &Record) -> Result<Action, AdapterError> {
         let recorded_set_id = integer(record, "/data/set_id")?;
         let index = integer(record, "/data/reward_index")? as usize;
         let recorded_reward = value(record, "/data/reward")?;
+        if matches!(
+            self.simulator.decision(),
+            sts2_engine::DecisionContext::MapNavigation { .. }
+        ) && self
+            .simulator
+            .state()
+            .run
+            .as_ref()
+            .and_then(|run| run.dismissed_reward_set.as_ref())
+            .is_some_and(|set| {
+                set.id.get() == recorded_set_id
+                    && set.rewards.iter().any(|reward| {
+                        reward.index == index
+                            && !reward.selected
+                            && !reward.passed_over
+                            && reward_fingerprint_matches(&reward.fingerprint, recorded_reward)
+                    })
+            })
+        {
+            return Err(Self::error(
+                record,
+                AdapterErrorCode::UnsupportedContent,
+                "collecting rewards after proceeding to the map is unsupported; reward decisions are final at Proceed",
+            ));
+        }
         self.find_action(record, |action| {
             matches!(action, Action::ClaimReward { set_id, reward_index, fingerprint }
                 if set_id.get() == recorded_set_id && *reward_index == index
