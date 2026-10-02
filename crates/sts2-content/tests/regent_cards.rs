@@ -1091,7 +1091,7 @@ fn a_particle_wall_keeps_itself_in_hand() {
         count_in(&simulator, PileName::Hand, "CARD.PARTICLE_WALL"),
         1
     );
-    assert!(pile(&simulator, PileName::Discard).is_empty());
+    assert_eq!(pile(&simulator, PileName::Discard), [] as [String; 0]);
 }
 
 /// A shining strike puts itself back on top of the draw pile rather than being
@@ -1135,7 +1135,7 @@ fn a_shining_strike_puts_itself_back_on_the_draw_pile() {
         .first()
         .expect("the Shining Strike returned");
     assert_eq!(returned.energy_cost, 1, "its temporary free cost cleared");
-    assert!(returned.temporary_costs.is_empty());
+    assert_eq!(returned.temporary_costs.as_slice(), []);
 }
 
 /// A kingly kick takes a point off its own cost every time it is drawn, and the

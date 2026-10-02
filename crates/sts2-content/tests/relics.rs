@@ -1057,7 +1057,7 @@ fn an_amethyst_aubergine_adds_gold_to_a_fight() {
 fn a_fight_that_pays_nothing_still_pays_nothing() {
     let mut simulator = run_winning_a_fight(&[], false);
     win_the_fight(&mut simulator);
-    assert!(offered_rewards(&simulator).is_empty());
+    assert_eq!(offered_rewards(&simulator).as_slice(), []);
 }
 
 /// A tiny mailbox puts two potions on the rest site's reward screen, and the
@@ -1084,7 +1084,7 @@ fn a_rest_without_a_mailbox_hands_nothing_over() {
     simulator
         .step(rest_heal(&simulator))
         .expect("the rest applies");
-    assert!(offered_rewards(&simulator).is_empty());
+    assert_eq!(offered_rewards(&simulator).as_slice(), []);
     // The room is still standing — a rest site is left through the map — but
     // nothing is owed on it.
     assert_eq!(
@@ -1583,7 +1583,7 @@ fn a_molten_egg_upgrades_the_attacks_on_offer() {
         .find(|reward| reward.reward_type == "card")
         .expect("a card reward")
         .offered_cards;
-    assert!(!cards.is_empty());
+    assert_ne!(cards.as_slice(), []);
     for card in cards {
         let definition = registry.card(&card.model_id).expect("the card is content");
         if definition.card_type == sts2_engine::CardType::Attack && definition.upgrade.is_some() {
@@ -2049,7 +2049,7 @@ fn a_ghost_seed_haunts_the_starter_cards() {
             )
         })
         .collect();
-    assert!(!starters.is_empty());
+    assert_ne!(starters, [] as [&sts2_engine::CardInstance; 0]);
     assert!(starters.iter().all(|card| card.ethereal));
     // A bash is not a starter and is not haunted.
     assert!(
@@ -3730,7 +3730,7 @@ fn the_ancients_that_add_a_relic_to_a_reward_screen() {
     // The same relic answers nothing in a monster room.
     let mut monster = run_winning(&["RELIC.BLACK_STAR"], MapPointType::Monster);
     win_the_fight(&mut monster);
-    assert!(offered_rewards(&monster).is_empty());
+    assert_eq!(offered_rewards(&monster).as_slice(), []);
 
     let mut boss = run_winning(&["RELIC.LAVA_ROCK"], MapPointType::Boss);
     win_the_fight(&mut boss);
@@ -5775,7 +5775,7 @@ fn a_fresnel_lens_enchants_the_cards_it_meets() {
         .find(|reward| reward.reward_type == "card")
         .expect("a card reward")
         .offered_cards;
-    assert!(!offered.is_empty());
+    assert_ne!(offered.as_slice(), []);
     for card in &offered {
         assert_eq!(enchanted(card), takes_one(card), "{}", card.model_id);
     }
@@ -5810,7 +5810,7 @@ fn a_fresnel_lens_enchants_the_cards_it_meets() {
             _ => None,
         })
         .collect();
-    assert!(!shelved.is_empty());
+    assert_ne!(shelved, [] as [&sts2_engine::CardFingerprint; 0]);
     for card in shelved {
         assert_eq!(enchanted(card), takes_one(card), "{}", card.model_id);
     }
@@ -5840,7 +5840,7 @@ fn a_silver_crucible_upgrades_three_card_rewards() {
         .find(|reward| reward.reward_type == "card")
         .expect("a card reward")
         .offered_cards;
-    assert!(!cards.is_empty());
+    assert_ne!(cards.as_slice(), []);
     for card in &cards {
         let definition = registry.card(&card.model_id).expect("the card is content");
         if definition.upgrade.is_some() {

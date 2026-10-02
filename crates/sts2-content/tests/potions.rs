@@ -912,7 +912,7 @@ fn a_card_waiting_behind_an_auto_played_screen_is_played_after_it() {
         39 - 6,
         "the strike behind the screen landed"
     );
-    assert!(pile(&simulator, PileName::Play).is_empty());
+    assert_eq!(pile(&simulator, PileName::Play), [] as [String; 0]);
     assert_eq!(pile(&simulator, PileName::Draw).len(), 1);
     assert_eq!(pile(&simulator, PileName::Discard).len(), 3);
 }

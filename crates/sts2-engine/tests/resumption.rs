@@ -878,5 +878,5 @@ fn a_resumed_move_that_kills_the_player_ends_the_run_where_it_stands() {
     ));
     assert!(simulator.state().combat.is_none());
     assert_eq!(simulator.state().run_player.current_hp, 0);
-    assert!(simulator.legal_actions().is_empty());
+    assert_eq!(simulator.legal_actions(), []);
 }

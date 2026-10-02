@@ -257,7 +257,7 @@ fn block_energy_discard_and_exhaust_use_real_pile_transitions() {
     assert_eq!(combat.creatures[0].block, 7);
     assert_eq!(combat.player.piles.discard[0].id, CardInstanceId::from(1));
     assert_eq!(combat.player.piles.exhaust[0].id, CardInstanceId::from(2));
-    assert!(combat.player.piles.play.is_empty());
+    assert_eq!(combat.player.piles.play.as_slice(), []);
 }
 
 fn fingerprint(model: &str) -> CardFingerprint {
@@ -305,7 +305,7 @@ fn effects_pause_for_nested_choice_then_resume_once() {
     simulator.step(choice.clone()).unwrap();
     let combat = simulator.state().combat.as_ref().unwrap();
     assert_eq!(combat.creatures[1].current_hp, 16);
-    assert!(combat.player.piles.play.is_empty());
+    assert_eq!(combat.player.piles.play.as_slice(), []);
     assert_eq!(combat.player.piles.discard[0].id, CardInstanceId::from(1));
     assert!(matches!(
         simulator.decision(),
@@ -1140,8 +1140,8 @@ fn a_card_that_acts_at_the_end_of_the_turn_acts_from_the_play_pile() {
         1,
         "and the card burned afterwards, because it is ethereal"
     );
-    assert!(combat.player.piles.hand.is_empty());
-    assert!(combat.player.piles.play.is_empty());
+    assert_eq!(combat.player.piles.hand.as_slice(), []);
+    assert_eq!(combat.player.piles.play.as_slice(), []);
     assert_eq!(
         simulator.state().run_player.relics[0].counter,
         2,

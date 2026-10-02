@@ -171,7 +171,7 @@ fn player(simulator: &Simulator) -> &sts2_engine::PlayerCombatState {
 fn a_fight_opens_with_the_characters_own_slots() {
     let simulator = scenario(&Fight::default());
     assert_eq!(queue(&simulator).capacity, 3);
-    assert!(queue(&simulator).orbs.is_empty());
+    assert_eq!(queue(&simulator).orbs.as_slice(), []);
 }
 
 /// Channelling puts the orb at the back of the queue, and a Zap says which
@@ -216,7 +216,7 @@ fn a_dualcast_evokes_the_front_orb_twice_and_dequeues_it_once() {
 fn a_dualcast_with_an_empty_queue_does_nothing() {
     let mut simulator = holding_orbs(&[], &[("CARD.DUALCAST", 0)]);
     play(&mut simulator, "CARD.DUALCAST");
-    assert!(queue(&simulator).orbs.is_empty());
+    assert_eq!(queue(&simulator).orbs.as_slice(), []);
     assert_eq!(creature(&simulator, 0).block, 0);
 }
 

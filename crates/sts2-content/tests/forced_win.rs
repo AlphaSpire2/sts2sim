@@ -84,7 +84,7 @@ fn a_forced_win_settles_the_fight_and_the_run_walks_on() {
     }
     assert!(simulator.state().combat.is_none(), "the rewards close");
     assert!(simulator.state().terminal.is_none());
-    assert!(!simulator.legal_actions().is_empty());
+    assert_ne!(simulator.legal_actions(), []);
 }
 
 #[test]

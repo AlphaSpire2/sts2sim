@@ -15,7 +15,7 @@ fn fixture_preset_expands_to_every_run_defining_input() {
         "CHARACTER.IRONCLAD"
     );
     assert_eq!(config.ascension, 0);
-    assert!(config.modifiers.is_empty());
+    assert_eq!(config.modifiers.as_slice(), []);
     assert_eq!(config.unlock_preset, FIXTURE_UNLOCK_PRESET);
 }
 

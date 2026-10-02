@@ -1208,7 +1208,7 @@ fn mad_science_that_no_table_wrote_on_does_nothing() {
     play(&mut simulator, "CARD.MAD_SCIENCE");
     assert_eq!(creature(&simulator, 1).current_hp, 39);
     assert_eq!(player(&simulator).block, 0);
-    assert!(player(&simulator).powers.is_empty());
+    assert_eq!(player(&simulator).powers.as_slice(), []);
 }
 
 // --- the colorless pool --------------------------------------------------
@@ -1951,7 +1951,7 @@ fn a_catastrophe_plays_what_it_rolls() {
     );
     play(&mut simulator, "CARD.CATASTROPHE");
     assert_eq!(player(&simulator).block, 10);
-    assert!(pile(&simulator, PileName::Draw).is_empty());
+    assert_eq!(pile(&simulator, PileName::Draw), [] as [String; 0]);
 
     // A pile of nothing but unplayable cards is still played off: the build
     // shuffles the whole pile when its own list comes up empty, and an

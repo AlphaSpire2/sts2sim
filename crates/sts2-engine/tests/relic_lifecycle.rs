@@ -286,7 +286,7 @@ fn a_replacement_takes_the_place_of_what_it_replaced() {
 fn a_melted_relic_stays_held_and_stops_listening() {
     let mut simulator = fight(&["RELIC.TEST_HEALER"], &["CARD.TEST_REMOVE"]);
     play(&mut simulator, "CARD.TEST_REMOVE");
-    assert!(held(&simulator).is_empty());
+    assert_eq!(held(&simulator), [] as [String; 0]);
 
     let mut simulator = fight(&["RELIC.TEST_HEALER"], &["CARD.TEST_MELT"]);
     let before = simulator.state().combat.as_ref().unwrap().creatures[0].current_hp;

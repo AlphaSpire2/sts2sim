@@ -176,7 +176,7 @@ fn a_setup_stands_up_from_the_seed_alone() {
         without_provenance(other.combat_setup().unwrap()),
         without_provenance(fight.combat_setup().unwrap())
     );
-    assert!(!enemies(&other).is_empty());
+    assert_ne!(enemies(&other).as_slice(), []);
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn the_setup_names_the_door_and_the_loadout_and_the_engine_derives_the_rest() {
         .find(|creature| creature.id == combat.player.creature_id)
         .unwrap();
     assert_eq!(player.current_hp, 40);
-    assert!(!enemies(&rebuilt).is_empty());
+    assert_ne!(enemies(&rebuilt).as_slice(), []);
     // The projection reads the roll back as a said count.
     assert_eq!(
         rebuilt

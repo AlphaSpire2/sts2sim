@@ -2431,11 +2431,12 @@ fn reloading_a_finished_ordinary_event_rewinds_to_its_entrance() {
             })
             .unwrap();
         assert_eq!(adapter.simulator().state().run_player.current_hp, 56);
-        assert!(
+        assert_eq!(
             render(adapter.simulator())["choices"]["events"]
                 .as_array()
                 .unwrap()
-                .is_empty()
+                .as_slice(),
+            [] as [serde_json::Value; 0]
         );
         adapter
             .accept(&Record {

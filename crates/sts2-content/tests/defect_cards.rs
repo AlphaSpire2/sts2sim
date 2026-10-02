@@ -521,7 +521,7 @@ fn an_uproar_plays_an_attack_off_the_draw_pile() {
     play(&mut simulator, "CARD.UPROAR");
     // Two hits of six, and the Strike it played for six more.
     assert_eq!(39 - creature(&simulator, 1).current_hp, 18);
-    assert!(pile(&simulator, PileName::Draw).is_empty());
+    assert_eq!(pile(&simulator, PileName::Draw), [] as [String; 0]);
 }
 
 /// A Tesla Coil fires every Lightning orb at the target, twice when upgraded.
@@ -1064,7 +1064,7 @@ fn a_shatter_evokes_every_orb_twice() {
     assert_eq!(39 - creature(&simulator, 1).current_hp, 7);
     // Four evokes of five block each.
     assert_eq!(creature(&simulator, 0).block, 20);
-    assert!(orbs(&simulator).is_empty());
+    assert_eq!(orbs(&simulator), [] as [String; 0]);
 }
 
 /// A Quadcast evokes the front orb four times and dequeues it once.
@@ -1402,7 +1402,7 @@ fn a_storm_answers_a_power_but_not_its_own_play() {
         ..Fight::default()
     });
     play(&mut simulator, "CARD.STORM");
-    assert!(orbs(&simulator).is_empty());
+    assert_eq!(orbs(&simulator), [] as [String; 0]);
     play(&mut simulator, "CARD.DEFRAGMENT");
     assert_eq!(orbs(&simulator), ["ORB.LIGHTNING_ORB"]);
 }
@@ -1557,7 +1557,7 @@ fn a_fusion_channels_plasma() {
 
     let mut upgraded = holding(&[("CARD.FUSION", 1)]);
     play(&mut upgraded, "CARD.FUSION");
-    assert!(pile(&upgraded, PileName::Exhaust).is_empty());
+    assert_eq!(pile(&upgraded, PileName::Exhaust), [] as [String; 0]);
 }
 
 /// A Skim draws and nothing else.
@@ -1630,6 +1630,6 @@ fn a_hologram_with_nothing_to_take_still_pays_block() {
     let mut simulator = holding(&[("CARD.HOLOGRAM", 0)]);
     play(&mut simulator, "CARD.HOLOGRAM");
     assert_eq!(creature(&simulator, 0).block, 3);
-    assert!(pile(&simulator, PileName::Hand).is_empty());
+    assert_eq!(pile(&simulator, PileName::Hand), [] as [String; 0]);
     let _ = choose_first;
 }

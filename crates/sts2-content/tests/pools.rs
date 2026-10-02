@@ -1411,23 +1411,26 @@ fn the_two_bags_are_the_pools_bucketed_by_rarity() {
     }
     // The starter the character opens holding is of no rolled rarity, so the
     // cut to the four rolled rarities drops it and no bag ever offers it back.
-    assert!(
+    assert_eq!(
         generated
             .player_relics
             .bucket(sts2_engine::RelicRarity::Event)
-            .is_empty()
+            .as_slice(),
+        []
     );
-    assert!(
+    assert_eq!(
         generated
             .player_relics
             .bucket(sts2_engine::RelicRarity::Ancient)
-            .is_empty()
+            .as_slice(),
+        []
     );
-    assert!(
+    assert_eq!(
         generated
             .player_relics
             .bucket(sts2_engine::RelicRarity::Starter)
-            .is_empty()
+            .as_slice(),
+        []
     );
 }
 
