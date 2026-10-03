@@ -1,10 +1,11 @@
 //! How a run ends when it is won.
 //!
-//! The corpus has one victory and it walks this whole path, so what is here is
-//! the same path in a scenario: the last act's boss goes down, the player walks
-//! on, meets the Architect, clicks through his line, and proceeds past him.
+//! The final boss leads to the Architect's Proceed action and then victory.
+//! Cosmetic dialogue clicks do not alter gameplay or the victory boundary.
 
+use serde_json::json;
 use sts2_engine::{Action, DecisionContext, MapPointType, RunPhase, RunResult, Simulator};
+use sts2_replay::{AdapterErrorCode, AdapterOutcome, Record, ReplayAdapter};
 
 fn id(model_id: &str) -> sts2_core::ModelId {
     model_id.parse().expect("static model ID")
@@ -30,9 +31,161 @@ fn step(simulator: &mut Simulator, wanted: impl Fn(&Action) -> bool) {
     simulator.step(action).expect("the action applies");
 }
 
+fn architect_choice(sequence: u64, option_id: &str) -> Record {
+    Record {
+        sequence,
+        kind: "event.choose".into(),
+        payload: json!({"data": {
+            "event_id": "EVENT.THE_ARCHITECT",
+            "option_id": option_id,
+            "option_index": 0,
+            "is_proceed": false,
+        }}),
+    }
+}
+
+fn advance_act(sequence: u64) -> Record {
+    Record {
+        sequence,
+        kind: "act.next".into(),
+        payload: json!({"data": {}}),
+    }
+}
+
+fn replay_at_architect() -> ReplayAdapter {
+    let mut simulator = run_at_the_final_boss();
+    step(&mut simulator, |action| {
+        matches!(action, Action::PlayCard { .. })
+    });
+    let mut adapter = ReplayAdapter::new(simulator).verifying_observations();
+    adapter.accept(&advance_act(1)).unwrap();
+    adapter
+}
+
+#[test]
+fn replay_abstracts_architect_dialogue_without_changing_state_or_winning_early() {
+    for pages in [0, 1, 2, 4] {
+        let mut adapter = replay_at_architect();
+        let before = adapter.simulator().snapshot();
+        let mut sequence = 2;
+        for page in 0..=pages {
+            let option = if page == pages {
+                "PROCEED".to_owned()
+            } else {
+                format!("THE_ARCHITECT.dialogue.{page}")
+            };
+            let mut state = sts2_replay::observation::render(adapter.simulator());
+            state["choices"]["events"][0]["options"] = if page == 0 {
+                json!([])
+            } else {
+                json!([{"index": 0, "option_id": option, "is_proceed": false}])
+            };
+            adapter.accept(&Record {
+                sequence,
+                kind: "state.observe".into(),
+                payload: json!({"after": sequence - 1, "context": "action.settled", "state": state}),
+            }).unwrap();
+            sequence += 1;
+            let outcome = adapter
+                .accept(&architect_choice(sequence, &option))
+                .unwrap();
+            sequence += 1;
+            if page < pages {
+                assert!(matches!(outcome, AdapterOutcome::Ignored(_)));
+                assert_eq!(adapter.simulator().snapshot(), before);
+                assert_eq!(adapter.applied_actions(), 1);
+            } else {
+                assert!(matches!(outcome, AdapterOutcome::Applied(_)));
+            }
+        }
+        assert_eq!(adapter.compared_observations(), pages + 1);
+        assert_eq!(adapter.cleared_event_pages(), 0);
+        assert!(
+            adapter
+                .uncovered_fields()
+                .contains("/choices/events/*/options")
+        );
+        assert!(adapter.simulator().state().terminal.is_none());
+        adapter.accept(&advance_act(sequence)).unwrap();
+        assert_eq!(
+            adapter.simulator().state().terminal,
+            Some(RunResult::Victory)
+        );
+        assert_eq!(adapter.applied_actions(), 3);
+    }
+}
+
+#[test]
+fn architect_dialogue_still_checks_health_rng_and_event_identity() {
+    for pointer in [
+        "/players/0/current_hp",
+        "/players/0/rng/counters/rewards",
+        "/choices/events/0/event_id",
+    ] {
+        let mut adapter = replay_at_architect();
+        let before = adapter.simulator().snapshot();
+        let mut state = sts2_replay::observation::render(adapter.simulator());
+        state["choices"]["events"][0]["options"] = json!([]);
+        *state.pointer_mut(pointer).expect("the field is rendered") =
+            if pointer.ends_with("event_id") {
+                json!("EVENT.NEOW")
+            } else {
+                json!(999_999)
+            };
+        adapter
+            .accept(&Record {
+                sequence: 2,
+                kind: "state.observe".into(),
+                payload: json!({"after": 1, "context": "action.settled", "state": state}),
+            })
+            .unwrap();
+        let error = adapter
+            .accept(&architect_choice(3, "THE_ARCHITECT.dialogue.0"))
+            .unwrap_err();
+        assert_eq!(error.code, AdapterErrorCode::StateDivergence, "{pointer}");
+        assert_eq!(adapter.simulator().snapshot(), before);
+    }
+}
+
+#[test]
+fn architect_dialogue_requires_the_correct_room_and_option_shape() {
+    for (field, value) in [
+        ("event_id", json!("EVENT.NEOW")),
+        ("option_index", json!(1)),
+        ("is_proceed", json!(true)),
+        ("option_id", json!("THE_ARCHITECT.dialogue.")),
+        ("option_id", json!("THE_ARCHITECT.dialogue.-1")),
+        ("option_id", json!("UNKNOWN")),
+    ] {
+        let mut adapter = replay_at_architect();
+        let mut record = architect_choice(2, "THE_ARCHITECT.dialogue.0");
+        record.payload["data"][field] = value;
+        assert_eq!(
+            adapter.accept(&record).unwrap_err().code,
+            AdapterErrorCode::IllegalAction
+        );
+    }
+    let mut elsewhere = ReplayAdapter::new(run_at_the_final_boss());
+    assert_eq!(
+        elsewhere
+            .accept(&architect_choice(1, "THE_ARCHITECT.dialogue.0"))
+            .unwrap_err()
+            .code,
+        AdapterErrorCode::IllegalAction
+    );
+    let mut finished = replay_at_architect();
+    finished.accept(&architect_choice(2, "PROCEED")).unwrap();
+    assert_eq!(
+        finished
+            .accept(&architect_choice(3, "THE_ARCHITECT.dialogue.0"))
+            .unwrap_err()
+            .code,
+        AdapterErrorCode::IllegalAction
+    );
+}
+
 /// The last act's boss falls, the player walks on, and the walk is not the win:
-/// it is the Architect's room, with his dialogue in front of the option that
-/// ends the run.
+/// it is the Architect's room, with the Proceed action that readies victory.
 #[test]
 fn the_last_boss_leads_to_the_architect_rather_than_straight_to_a_victory() {
     let mut simulator = run_at_the_final_boss();
@@ -106,8 +259,8 @@ fn the_last_boss_leads_to_the_architect_rather_than_straight_to_a_victory() {
             .iter()
             .map(|option| option.option_id.clone())
             .collect::<Vec<_>>(),
-        ["THE_ARCHITECT.dialogue.0"],
-        "a first win rolls the one-line dialogue, which is one click before the proceed"
+        ["PROCEED"],
+        "cosmetic dialogue adds no simulator decisions"
     );
 }
 
@@ -130,13 +283,8 @@ fn proceeding_past_the_architect_wins_the_run_and_leaves_the_player_standing() {
     step(&mut simulator, |action| {
         matches!(action, Action::AdvanceAct)
     });
-    step(
-        &mut simulator,
-        |action| matches!(action, Action::ChooseEvent { option_id, .. } if option_id == "THE_ARCHITECT.dialogue.0"),
-    );
-
     let DecisionContext::Event { options, .. } = simulator.decision().clone() else {
-        panic!("the dialogue puts up the next page rather than leaving the room");
+        panic!("the Architect exposes Proceed before the run can finish");
     };
     assert_eq!(
         options

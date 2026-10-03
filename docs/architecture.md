@@ -2199,8 +2199,8 @@ A won run ends on the same path. Entering the next act splits on whether there
 is one: past the last act, and standing in a room that is not the victory room,
 it clears the screens and enters the Architect's event room. So walking on from
 the last act's boss is not the win — it is one more room. The Architect's page
-walks the dialogue his ancient rolled, one option per line, and the option after
-the last of them is the win: the player is readied for an act change, entering
+exposes only Proceed; cosmetic dialogue is omitted. Proceed readies the player
+for an act change. Entering
 the next act is asked for again, the current room is now the victory room, and
 the run is won. Winning writes nothing else down here, because the current room
 is an event room rather than a combat room, so no fight's length is recorded.
@@ -2236,19 +2236,20 @@ The run also stays in its last act; there is no act to move to. Three acts is
 the whole of it in the pinned build — four act models across three indices,
 Overgrowth or Underdocks, then Hive, then Glory — so there is no act four, no
 second ending, and nothing gating the win beyond beating the last boss and
-walking through the conversation. The one thing a profile changes is which of
-the ancient's dialogues is rolled, which is how many clicks stand in front of
-the proceed: the dialogue kept is the one whose visit index matches how many
-times the character has already won, and that count lives in the save rather
-than in anything a recording projects. This baseline models the dialogue written
-for a first win, which for most characters is two lines — one click, then the
-proceed.
+choosing Proceed. Profile history changes the Architect's dialogue length, but
+the intervening clicks do not change gameplay. The simulator omits those
+decisions without changing room initialization or its RNG consumption.
 
-Entering the room takes the page's option back down before the line plays and
-puts it back once the speech has animated, so a recording can catch the page
-with nothing on it. There is no animation here: the
-settled state is the page with its option on it, and the replay adapter passes
-over the recorded snapshot of the gap rather than comparing it.
+Replay accepts `THE_ARCHITECT.dialogue.<index>` clicks as presentation-only
+records while the simulator is waiting at the Architect's Proceed action.
+The recorded event identity, option index zero, and non-proceed flag must agree;
+unknown options and dialogue outside this decision context remain errors.
+These clicks do not step the simulator or count as applied actions. The
+Architect's option list is omitted from observation rendering and reported as
+`/choices/events/*/options` in uncovered fields. Event identity, player state,
+RNG, and the terminal outcome remain checked, including observations where the
+dialogue animation temporarily clears the option list. The recorded Proceed
+and subsequent act transition still drive the simulator's victory boundary.
 
 ## Projection rendering and observation matching
 

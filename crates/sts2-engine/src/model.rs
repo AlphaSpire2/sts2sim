@@ -885,9 +885,11 @@ pub struct PlayerCombatState {
     /// the cards that ask whether anything has exhausted read.
     #[serde(default)]
     pub cards_exhausted_this_turn: u32,
-    /// One entry per block gain this player has worked up this turn off a card
-    /// or a monster move, naming the card play it came from. It is what an
-    /// Unmovable counts.
+    /// One entry per powered block gain this turn. A card ID exempts gains
+    /// within that card's latest play from Unmovable's count. Starting another
+    /// play of the same card changes its earlier entries to `None`, preserving
+    /// their count without exempting them again. Unattributed gains are also
+    /// `None` and always count.
     #[serde(default)]
     pub block_gains_this_turn: Vec<Option<CardInstanceId>>,
     /// The orbs this player is holding and how many slots they have to hold

@@ -2095,23 +2095,11 @@ pub fn whispering_hollow() -> EventDefinition {
 /// enter a next act and finds there is none, and proceeding past him is what
 /// ends the run.
 ///
-/// Each character has three or four dialogues, one for each of their first
-/// wins, and only the ones whose visit index matches how many times that
-/// character has already won are kept. The pinned baseline has no such count:
-/// the profile's per-character win total is not part of its unlock state, and
-/// a first victory reads it as zero. So the candidate list this baseline rolls
-/// over is the one
-/// dialogue written for a first win, and how many lines that one holds is what
-/// decides how many clicks stand in front of the proceed. The Silent's is one
-/// line and so has none; the Ironclad's and the Necrobinder's are two; the
-/// Defect's and the Regent's are three.
+/// Cosmetic dialogue varies with profile history and is omitted. Every
+/// character receives the same final Proceed action. Room initialization and
+/// its dialogue-selection RNG consumption are retained.
 #[must_use]
-pub fn the_architect(character: &sts2_core::ModelId) -> EventDefinition {
-    let lines = match character.to_string().as_str() {
-        "CHARACTER.SILENT" => 1,
-        "CHARACTER.DEFECT" | "CHARACTER.REGENT" => 3,
-        _ => 2,
-    };
+pub fn the_architect(_character: &sts2_core::ModelId) -> EventDefinition {
     EventDefinition {
         model_id: id("EVENT.THE_ARCHITECT"),
         // The room is laid out as a fight, so it stands the Architect's own
@@ -2124,28 +2112,13 @@ pub fn the_architect(character: &sts2_core::ModelId) -> EventDefinition {
         allowed: EventCondition::Never,
         vars: Vec::new(),
         generation: EventGeneration::AncientDialogue {
-            dialogues: vec![architect_dialogue(lines - 1)],
+            dialogues: vec![vec![option(
+                "PROCEED",
+                "Proceed",
+                vec![EventEffect::WinRun],
+            )]],
         },
     }
-}
-
-/// One of the Architect's dialogues as the page that opens it: an option per
-/// line short of the last, each replacing the page with the next line's, and
-/// then a proceed.
-///
-/// Each line's option is keyed on the event's own entry, the word `dialogue`
-/// and the line index, and the last line's option is the proceed instead — so a
-/// dialogue of `lines` lines lays out `lines - 1` clicks before it.
-fn architect_dialogue(lines_before_proceed: usize) -> Vec<EventOption> {
-    let mut page = vec![option("PROCEED", "Proceed", vec![EventEffect::WinRun])];
-    for line in (0..lines_before_proceed).rev() {
-        page = vec![option(
-            &format!("THE_ARCHITECT.dialogue.{line}"),
-            "Respond",
-            vec![EventEffect::SetPage(page)],
-        )];
-    }
-    page
 }
 
 /// An event whose page never varies, heals nobody on the way in, and rolls

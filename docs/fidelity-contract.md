@@ -194,6 +194,11 @@ test facility and is never evidence of gameplay RNG parity.
 
 ## Known divergences
 
+The Architect's cosmetic dialogue is outside gameplay conformance. Its clicks
+are accepted only in the corresponding event context, and its option list is
+reported as uncovered. Final player state and the Proceed/act-transition
+sequence leading to victory remain part of verification.
+
 [`fidelity-divergences.md`](fidelity-divergences.md) is the standing list of
 places this simulator departs from the build, each with the evidence for
 whether the departure can reach a conformance claim. A divergence not on that

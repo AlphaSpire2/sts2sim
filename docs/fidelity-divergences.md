@@ -15,6 +15,28 @@ Every entry answers four questions: what the build does, what this simulator
 does instead, whether the difference can reach a conformance claim, and what
 would change that.
 
+## The Architect's cosmetic dialogue is omitted
+
+**The build.** After the final boss, the Architect presents dialogue whose
+length depends on prior character wins. The dialogue clicks change the visible
+page; the final Proceed readies the act transition that declares victory.
+
+**This simulator.** The room exposes only Proceed. Replay accepts correctly
+shaped Architect dialogue clicks while waiting at that action, without changing
+simulation state. Room initialization and RNG consumption are retained.
+
+**Whether it can reach a conformance claim.** Dialogue option sequences are
+explicitly outside the claim: replay reports `/choices/events/*/options` as
+uncovered for this event. All other rendered fields, including event identity,
+health and RNG counters, remain compared. Proceed and the victory transition
+must still be legal. Unknown event choices and dialogue clicks outside the
+Architect's active page fail. Scenarios exercise varying dialogue lengths,
+unchanged state across clicks, and rejection of gameplay mismatches.
+
+**What would change this.** If a supported build makes these dialogue choices
+affect gameplay, that behavior and its profile inputs must be modeled before
+those clicks can remain accepted.
+
 ## The shop's action list omits what the player cannot afford
 
 **The build.** A shop item the player cannot afford is clickable. The click is

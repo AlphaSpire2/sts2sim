@@ -1957,6 +1957,97 @@ fn an_unmovable_doubles_the_first_blocks_of_the_turn() {
     assert_eq!(player(&simulator).block, 15, "the second is not");
 }
 
+#[test]
+fn unmovable_counts_hidden_gem_replays_as_separate_plays() {
+    for automatic in [false, true] {
+        for (stacks, expected) in [(1, 24), (2, 30)] {
+            let draw_or_play = if automatic {
+                "CARD.HAVOC"
+            } else {
+                "CARD.POMMEL_STRIKE"
+            };
+            let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+                .player_hp(80, 80)
+                .energy(9, 9)
+                .turn(1, 1)
+                .rng_counter(RunStream::CombatCardSelection, 0)
+                .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 200, 200, "SHRINKER_MOVE")
+                .power(
+                    0,
+                    id("POWER.UNMOVABLE_POWER"),
+                    stacks,
+                    sts2_engine::PowerType::Buff,
+                )
+                .power(
+                    0,
+                    id("POWER.DEXTERITY_POWER"),
+                    1,
+                    sts2_engine::PowerType::Buff,
+                )
+                .card(PileName::Hand, 0, card("CARD.HIDDEN_GEM", 0), 1)
+                .card(PileName::Hand, 1, card(draw_or_play, 0), 1)
+                .card(PileName::Hand, 2, card("CARD.DEFEND_IRONCLAD", 0), 1)
+                .card(PileName::Draw, 3, card("CARD.ARMAMENTS", 1), 1)
+                .build(sts2_content::standard_registry())
+                .expect("the scenario builds");
+            play(&mut simulator, "CARD.HIDDEN_GEM");
+            play(&mut simulator, draw_or_play);
+            if !automatic {
+                play(&mut simulator, "CARD.ARMAMENTS");
+            }
+            assert_eq!(
+                player(&simulator).block,
+                expected,
+                "automatic={automatic}, stacks={stacks}"
+            );
+            play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+            assert_eq!(player(&simulator).block, expected + 9);
+        }
+    }
+}
+
+#[test]
+fn unmovable_counts_a_card_returned_to_hand_as_a_new_play() {
+    let mut simulator = fight(&[
+        ("CARD.UNMOVABLE", 1),
+        ("CARD.UNMOVABLE", 1),
+        ("CARD.DEFEND_IRONCLAD", 0),
+        ("CARD.HOLOGRAM", 0),
+    ]);
+    play(&mut simulator, "CARD.UNMOVABLE");
+    play(&mut simulator, "CARD.UNMOVABLE");
+    play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    assert_eq!(player(&simulator).block, 10);
+    play(&mut simulator, "CARD.HOLOGRAM");
+    assert_eq!(player(&simulator).block, 16);
+    play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    assert_eq!(player(&simulator).block, 21);
+}
+
+#[test]
+fn unmovable_doubles_every_block_gain_within_one_play() {
+    let mut simulator = fight_with_draw(
+        &[
+            ("CARD.UNMOVABLE", 1),
+            ("CARD.UNMOVABLE", 1),
+            ("CARD.SCOURGE", 0),
+            ("CARD.DEATHS_DOOR", 0),
+        ],
+        &[("CARD.DEFEND_IRONCLAD", 0)],
+    );
+    play(&mut simulator, "CARD.UNMOVABLE");
+    play(&mut simulator, "CARD.UNMOVABLE");
+    play(&mut simulator, "CARD.SCOURGE");
+    play(&mut simulator, "CARD.DEATHS_DOOR");
+    assert_eq!(player(&simulator).block, 36);
+    play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    assert_eq!(
+        player(&simulator).block,
+        41,
+        "the earlier play's three gains exhaust both Unmovable stacks"
+    );
+}
+
 /// An infernal blade rolls one attack of the character's own pool and hands it
 /// over free for the turn.
 #[test]

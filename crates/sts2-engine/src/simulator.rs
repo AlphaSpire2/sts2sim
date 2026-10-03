@@ -23011,6 +23011,15 @@ impl Simulator {
         target: Option<CreatureCombatId>,
     ) -> Result<(), EngineError> {
         let owner = self.combat()?.player.creature_id;
+        if event == crate::HookEvent::BeforeCardPlayed {
+            // Earlier plays of this same card count against Unmovable. Only
+            // gains within the play now starting may share its exemption.
+            for source in &mut self.combat_mut()?.player.block_gains_this_turn {
+                if *source == Some(card.id) {
+                    *source = None;
+                }
+            }
+        }
         // The card's type, which one model reads off its own saved property.
         let played_type = self
             .content

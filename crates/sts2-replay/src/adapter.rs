@@ -269,6 +269,7 @@ impl ReplayAdapter {
             self.settle_observations(record)?;
         }
         let action = match record.kind.as_str() {
+            "event.choose" if self.is_architect_dialogue(record) => None,
             "event.choose" => Some(self.event_choice(record)?),
             "map.choose" => Some(self.map_choice(record)?),
             "combat.play_card" => Some(self.play_card(record)?),
@@ -632,6 +633,7 @@ impl ReplayAdapter {
         // up once the speech has animated. The state this engine settles on is
         // the one after that, so the snapshot taken during it is passed over.
         if record.kind == "event.choose"
+            && !self.at_architect_proceed()
             && record
                 .payload
                 .pointer("/data/option_id")
@@ -651,6 +653,45 @@ impl ReplayAdapter {
         // while the killing action is still settling, so the observation before
         // it is mid-settle and the one after it is the terminal state.
         self.verify_pending_observation()
+    }
+
+    fn at_architect_proceed(&self) -> bool {
+        matches!(
+            self.simulator.decision(),
+            sts2_engine::DecisionContext::Event { model_id, options }
+                if model_id.category() == "EVENT" && model_id.entry() == "THE_ARCHITECT"
+                    && options.len() == 1
+                    && options[0].option_id == "PROCEED"
+        )
+    }
+
+    /// Dialogue clicks carry no gameplay decision. Accept only their recorded
+    /// shape while the simulator is waiting for the Architect's final Proceed.
+    fn is_architect_dialogue(&self, record: &Record) -> bool {
+        self.at_architect_proceed()
+            && record
+                .payload
+                .pointer("/data/event_id")
+                .and_then(Value::as_str)
+                == Some("EVENT.THE_ARCHITECT")
+            && record
+                .payload
+                .pointer("/data/option_index")
+                .and_then(Value::as_u64)
+                == Some(0)
+            && record
+                .payload
+                .pointer("/data/is_proceed")
+                .and_then(Value::as_bool)
+                == Some(false)
+            && record
+                .payload
+                .pointer("/data/option_id")
+                .and_then(Value::as_str)
+                .and_then(|id| id.strip_prefix("THE_ARCHITECT.dialogue."))
+                .is_some_and(|index| {
+                    !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+                })
     }
 
     fn event_choice(&self, record: &Record) -> Result<Action, AdapterError> {
