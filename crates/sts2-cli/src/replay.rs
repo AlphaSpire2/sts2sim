@@ -24,6 +24,8 @@ pub struct ReplayReport {
     /// Observations taken between two rooms, which this engine walks through
     /// inside a single step and so never settles on.
     pub dropped_room_entries: usize,
+    /// Legacy presentation records excluded after final combat verification.
+    pub post_victory_records: usize,
     pub uncovered_fields: Vec<String>,
     pub recorded_terminal: Option<String>,
     /// Stats from the last decoded observation, including observations after
@@ -166,6 +168,7 @@ pub fn replay<R: BufRead>(input: R) -> Result<ReplayReport, CliError> {
         applied_actions: adapter.applied_actions(),
         compared_observations: adapter.compared_observations(),
         dropped_room_entries: adapter.dropped_room_entries(),
+        post_victory_records: adapter.post_victory_records(),
         uncovered_fields: adapter.uncovered_fields().iter().cloned().collect(),
         recorded_terminal,
         recorded_end,
@@ -315,6 +318,7 @@ fn write_json<W: Write>(report: &ReplayReport, output: &mut W) -> Result<(), Cli
         "applied_actions": report.applied_actions,
         "compared_observations": report.compared_observations,
         "dropped_room_entries": report.dropped_room_entries,
+        "post_victory_records": report.post_victory_records,
         "uncovered_fields": report.uncovered_fields,
         "recorded_terminal": report.recorded_terminal,
         "recorded_end": report.recorded_end,
@@ -364,6 +368,13 @@ fn write_text<W: Write>(
         report.recorded_terminal.as_deref().unwrap_or("none"),
         report.simulated_terminal.as_deref().unwrap_or("none")
     )?;
+    if report.post_victory_records > 0 {
+        writeln!(
+            output,
+            "post-victory  {} presentation records excluded after final combat",
+            report.post_victory_records
+        )?;
+    }
     if report.resumes > 0 {
         writeln!(
             output,
@@ -720,6 +731,7 @@ mod tests {
             applied_actions: 1,
             compared_observations: 1,
             dropped_room_entries: 0,
+            post_victory_records: 0,
             uncovered_fields: Vec::new(),
             recorded_terminal: Some("*".to_owned()),
             recorded_end: None,

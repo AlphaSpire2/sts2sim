@@ -971,23 +971,6 @@ pub fn mysterious_knight_event_encounter() -> EncounterDefinition {
     }
 }
 
-/// The Architect's own room, which is a layout rather than a fight: the event
-/// stands his creature up so that there is somebody to talk to, and nothing
-/// ever takes a turn in it.
-#[must_use]
-pub fn the_architect_event_encounter() -> EncounterDefinition {
-    EncounterDefinition {
-        model_id: id("ENCOUNTER.THE_ARCHITECT_EVENT_ENCOUNTER"),
-        slots: Vec::new(),
-        spawn_slot_names: Vec::new(),
-        generation: MonsterGeneration::Fixed(vec![id("MONSTER.ARCHITECT")]),
-        // It counts as a monster room, the same as every other event
-        // encounter, though nothing ever ends this one to claim the rewards.
-        gives_rewards: true,
-        rewards: Some(monster_room_rewards()),
-    }
-}
-
 /// A lone Owl Magistrate.
 #[must_use]
 pub fn owl_magistrate_normal() -> EncounterDefinition {

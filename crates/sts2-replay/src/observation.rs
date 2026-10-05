@@ -586,18 +586,6 @@ fn render_choices(state: &GameState) -> Value {
     choices.insert(
         "events".to_owned(),
         match begun {
-            // The Architect's cosmetic option sequence depends on profile
-            // history. Omitting it reports the field as uncovered while the
-            // event identity and all gameplay state remain comparable.
-            Some(begun)
-                if begun.model_id.category() == "EVENT"
-                    && begun.model_id.entry() == "THE_ARCHITECT" =>
-            {
-                json!([{
-                    "event_id": begun.model_id.to_string(),
-                    "player": slot,
-                }])
-            }
             Some(begun) => json!([{
                 "event_id": begun.model_id.to_string(),
                 "player": slot,

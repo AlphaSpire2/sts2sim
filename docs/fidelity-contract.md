@@ -194,10 +194,12 @@ test facility and is never evidence of gameplay RNG parity.
 
 ## Known divergences
 
-The Architect's cosmetic dialogue is outside gameplay conformance. Its clicks
-are accepted only in the corresponding event context, and its option list is
-reported as uncovered. Final player state and the Proceed/act-transition
-sequence leading to victory remain part of verification.
+Gameplay victory is terminal after the final required boss's combat settles,
+including combat-end effects; Double Boss requires the second boss. The
+Architect and all subsequent presentation are outside simulation and
+conformance. New recordings finish at the gameplay boundary. Older traces'
+post-victory tails are excluded only after the final combat observation is
+checked, and the excluded record count is reported.
 
 [`fidelity-divergences.md`](fidelity-divergences.md) is the standing list of
 places this simulator departs from the build, each with the evidence for

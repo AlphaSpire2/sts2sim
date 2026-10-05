@@ -3436,19 +3436,6 @@ impl Simulator {
                 }
                 options
             }
-            crate::EventGeneration::AncientDialogue { dialogues } => {
-                // One of the valid dialogues, rolled off the event's own stream.
-                // A single candidate is rolled for all the same, which is what
-                // rolling over a list does.
-                let index = rng
-                    .next_index(dialogues.len())
-                    .map_err(|error| {
-                        EngineError::new(ErrorCode::InternalInvariant)
-                            .with_detail("ancient_dialogue", error.to_string())
-                    })?
-                    .ok_or_else(|| unsupported_content(model_id))?;
-                dialogues[index].clone()
-            }
             crate::EventGeneration::Fixed(options) => {
                 // Whatever the page leaves open is rolled as the room is
                 // entered, in the order the page writes it.
@@ -7552,18 +7539,6 @@ impl Simulator {
             EventEffect::RemoveRelic(model_id) => {
                 self.run_out_of_combat(&Command::Relic(crate::RelicCmd::Remove(model_id)))?;
             }
-            // The Architect only marks the local player ready on the act-change
-            // synchronizer. What that then runs is the ordinary move into the
-            // next act, which is an act transition like any other and is
-            // recorded as one; the run is won there rather than here.
-            EventEffect::WinRun => {
-                if let Some(run) = self.state.run.as_mut() {
-                    run.phase = RunPhase::ActTransition;
-                }
-                // The Architect's room is the room the won run ends standing
-                // in, so nothing closes it.
-                finish_room = false;
-            }
             // A page that rolled no potion or no relic has nothing to spend,
             // and proceeding is the option that only closes the page.
             EventEffect::DiscardRolledPotion
@@ -7571,23 +7546,6 @@ impl Simulator {
             | EventEffect::Proceed => {}
         }
         Ok(finish_room)
-    }
-
-    /// Winning: the run is over and won.
-    ///
-    /// Ending it writes the run out and records nothing else — the room the
-    /// player is standing in is the Architect's, not a combat room, so no
-    /// fight's length is written down — and then every player's *creature* is
-    /// killed outright.
-    ///
-    /// That last part leaves the run untouched: the Architect's room stands no
-    /// fight up for the player, so the creature that is killed is not the one
-    /// the run's own health is kept on. The recorded victory ends on a player
-    /// still standing at the health they walked in with, which is what this
-    /// writes.
-    fn win_run(&mut self) {
-        self.state.terminal = Some(RunResult::Victory);
-        self.state.combat = None;
     }
 
     /// The pools an offer draws from, with whatever a relic adds standing behind
@@ -9351,65 +9309,7 @@ impl Simulator {
         run.phase = RunPhase::Map;
     }
 
-    /// The Architect's room: the room the last act's boss leads to, and the only
-    /// room that counts as the victory room.
-    ///
-    /// It is entered the way any room is entered outright, which is not the way
-    /// a map point is walked onto: a room of the act's own family is marked
-    /// visited, so the last act counts one more event; but no map point history
-    /// entry is appended, and no event is pulled, so the run does not record the
-    /// Architect as an event it has seen.
-    fn enter_victory_room(&mut self) -> Result<(), EngineError> {
-        let model_id: ModelId = "EVENT.THE_ARCHITECT".parse().expect("static model ID");
-        let RoomDefinition::Event {
-            options,
-            rng_counter,
-            ..
-        } = self.generate_event_room(&model_id)?
-        else {
-            return Err(unsupported_content(&model_id));
-        };
-        let run = self.state.run.as_mut().expect("act transition implies run");
-        run.act_mut().events_visited += 1;
-        run.current_room_model = Some(model_id.clone());
-        // No map point was walked onto, so the counter carries on from the
-        // boss room this one stands behind.
-        run.current_room_id = run.next_room_id;
-        run.next_room_id += 1;
-        run.current_room_type = Some(crate::MapPointType::Ancient);
-        run.phase = RunPhase::Room;
-        run.begun_event = Some(crate::BegunEvent {
-            model_id: model_id.clone(),
-            options: options.clone(),
-        });
-        run.active_room = Some(ActiveRoom::Event {
-            model_id,
-            options,
-            rng_counter,
-            shelf: Vec::new(),
-            standing_fight: None,
-            rolled_card: None,
-            skipped_cards: Vec::new(),
-            sphere: None,
-        });
-        Ok(())
-    }
-
     fn advance_act(&mut self, events: &mut Vec<SemanticEvent>) -> Result<(), EngineError> {
-        // Asking for the next act with the current room already the victory room
-        // is the second time it is asked, the Architect's proceed having set the
-        // player ready, and it wins the run instead of standing a room up. The
-        // room stays where it is, because a won run ends standing in it.
-        let standing_in_the_victory_room = self
-            .state
-            .run
-            .as_ref()
-            .is_some_and(|run| run.current_room_model.as_ref().is_some_and(is_victory_room));
-        if standing_in_the_victory_room {
-            self.win_run();
-            self.emit("act.next", BTreeMap::new(), events);
-            return Ok(());
-        }
         // Walking on abandons whatever is left on the reward screen.
         self.state.combat = None;
         if let Some(run) = &mut self.state.run {
@@ -9424,13 +9324,10 @@ impl Simulator {
             run.current_act + 1 >= run.acts.len()
         };
         if past_the_last_act {
-            // Asking for the next act from the last one, standing anywhere but
-            // the victory room: the screens are cleared and the Architect's room
-            // is entered. Walking on from the last act's boss is not the win —
-            // meeting the Architect and proceeding past him is.
-            self.enter_victory_room()?;
-            self.emit("act.next", BTreeMap::new(), events);
-            return Ok(());
+            return Err(EngineError::new(ErrorCode::InternalInvariant).with_detail(
+                "advance_act",
+                "final boss combat must already have ended the run",
+            ));
         }
         {
             let run = self.state.run.as_mut().expect("act transition implies run");
@@ -22022,6 +21919,15 @@ impl Simulator {
         if std::mem::take(&mut self.side_switch_owed_after_combat) {
             self.switch_sides()?;
         }
+        if self.state.terminal.is_none()
+            && self.state.run.as_ref().is_some_and(|run| {
+                run.current_act + 1 == run.acts.len()
+                    && run.current_room_type == Some(crate::MapPointType::Boss)
+                    && boss_leads_to_the_next_act(run)
+            })
+        {
+            self.state.terminal = Some(RunResult::Victory);
+        }
         Ok(())
     }
 
@@ -29441,14 +29347,6 @@ fn action_matches_family(action: &Action, expected: &str) -> bool {
             | (Action::ClaimReward { .. } | Action::AdvanceAct, "rewards")
             | (Action::Proceed, "rewards" | "room_proceed")
     )
-}
-
-/// Whether a room is the victory room, which only the Architect's room is. It
-/// is the test the build makes before it stands the next act up: walking on
-/// from inside the victory room is the win, and walking on from anywhere else
-/// in the last act is what stands the room up.
-fn is_victory_room(model_id: &ModelId) -> bool {
-    model_id.entry() == "THE_ARCHITECT"
 }
 
 /// What a card costs in the form it is in: an upgrade can make it cheaper, and

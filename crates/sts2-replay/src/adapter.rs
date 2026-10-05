@@ -81,6 +81,8 @@ pub struct ReplayAdapter {
     parent_exit_record: Option<u64>,
     cleared_event_pages: usize,
     unwritten_reward_blocks: usize,
+    post_victory_records: usize,
+    post_victory: bool,
     /// The state the build last wrote to its save file, which is where a
     /// `run.resume` puts the run back.
     save_point: Option<Snapshot>,
@@ -115,6 +117,8 @@ impl ReplayAdapter {
             parent_exit_record: None,
             cleared_event_pages: 0,
             unwritten_reward_blocks: 0,
+            post_victory_records: 0,
+            post_victory: false,
             save_point,
             actions_since_save: 0,
             resumes: 0,
@@ -227,8 +231,13 @@ impl ReplayAdapter {
         self.unwritten_reward_blocks
     }
 
-    /// How many observations named an action earlier than one already named:
-    /// the recorder writing an observation late.
+    /// Legacy presentation records excluded after the final combat boundary.
+    #[must_use]
+    pub const fn post_victory_records(&self) -> usize {
+        self.post_victory_records
+    }
+
+    /// How many observations arrived after a newer action was already observed.
     #[must_use]
     pub const fn late_observations(&self) -> usize {
         self.timeline.late_observations()
@@ -265,11 +274,48 @@ impl ReplayAdapter {
         let role = self.timeline.accept(record).map_err(|error| {
             Self::error(record, AdapterErrorCode::MalformedRecord, error.to_string())
         })?;
+        // Older traces continue into victory presentation. Check the final
+        // combat observation before crossing that boundary; never simulate or
+        // compare the presentation tail. Structural trace validation still runs.
+        if self.simulator.state().terminal == Some(sts2_engine::RunResult::Victory)
+            && !self.post_victory
+            && matches!(
+                record.kind.as_str(),
+                "act.next" | "room.proceed" | "room.exit" | "run.resume"
+            )
+        {
+            if self.verify_observations {
+                self.pass_over_stage_observation();
+                self.verify_pending_observation()?;
+            }
+            self.post_victory = true;
+        }
+        if self.post_victory {
+            let presentation_action = matches!(record.kind.as_str(), "act.next" | "room.proceed")
+                || (matches!(record.kind.as_str(), "event.choose" | "event.advance")
+                    && record
+                        .payload
+                        .pointer("/data/event_id")
+                        .and_then(Value::as_str)
+                        == Some("EVENT.THE_ARCHITECT"));
+            if matches!(
+                role,
+                TimelineRole::InitiatingAction | TimelineRole::NestedChoice
+            ) && !presentation_action
+            {
+                return Err(Self::error(
+                    record,
+                    AdapterErrorCode::IllegalAction,
+                    "gameplay action after final-boss victory",
+                ));
+            }
+            self.post_victory_records += 1;
+            return Ok(AdapterOutcome::Ignored(role));
+        }
         if self.verify_observations {
             self.settle_observations(record)?;
         }
         let action = match record.kind.as_str() {
-            "event.choose" if self.is_architect_dialogue(record) => None,
             "event.choose" => Some(self.event_choice(record)?),
             "map.choose" => Some(self.map_choice(record)?),
             "combat.play_card" => Some(self.play_card(record)?),
@@ -633,7 +679,6 @@ impl ReplayAdapter {
         // up once the speech has animated. The state this engine settles on is
         // the one after that, so the snapshot taken during it is passed over.
         if record.kind == "event.choose"
-            && !self.at_architect_proceed()
             && record
                 .payload
                 .pointer("/data/option_id")
@@ -653,45 +698,6 @@ impl ReplayAdapter {
         // while the killing action is still settling, so the observation before
         // it is mid-settle and the one after it is the terminal state.
         self.verify_pending_observation()
-    }
-
-    fn at_architect_proceed(&self) -> bool {
-        matches!(
-            self.simulator.decision(),
-            sts2_engine::DecisionContext::Event { model_id, options }
-                if model_id.category() == "EVENT" && model_id.entry() == "THE_ARCHITECT"
-                    && options.len() == 1
-                    && options[0].option_id == "PROCEED"
-        )
-    }
-
-    /// Dialogue clicks carry no gameplay decision. Accept only their recorded
-    /// shape while the simulator is waiting for the Architect's final Proceed.
-    fn is_architect_dialogue(&self, record: &Record) -> bool {
-        self.at_architect_proceed()
-            && record
-                .payload
-                .pointer("/data/event_id")
-                .and_then(Value::as_str)
-                == Some("EVENT.THE_ARCHITECT")
-            && record
-                .payload
-                .pointer("/data/option_index")
-                .and_then(Value::as_u64)
-                == Some(0)
-            && record
-                .payload
-                .pointer("/data/is_proceed")
-                .and_then(Value::as_bool)
-                == Some(false)
-            && record
-                .payload
-                .pointer("/data/option_id")
-                .and_then(Value::as_str)
-                .and_then(|id| id.strip_prefix("THE_ARCHITECT.dialogue."))
-                .is_some_and(|index| {
-                    !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
-                })
     }
 
     fn event_choice(&self, record: &Record) -> Result<Action, AdapterError> {

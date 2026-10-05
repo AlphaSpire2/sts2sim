@@ -572,8 +572,7 @@ pub struct RunState {
     /// it as it is built, and it resets as a map point is walked onto. Almost
     /// every room is
     /// the first at its point and so is room zero; a room the run stands up
-    /// without moving — the fight an event pushes, or the Architect's room
-    /// behind the last boss — is the next one along.
+    /// without moving — such as a fight an event pushes — is the next one along.
     #[serde(default)]
     pub next_room_id: u32,
     /// The id the current room took.
@@ -1232,16 +1231,6 @@ pub enum EventGeneration {
     /// entries this run qualifies for. A roll is not a shuffle: it reads one
     /// value per pool rather than a whole permutation.
     RolledRelicPools { pools: Vec<Vec<ConditionalRelic>> },
-    /// The Architect's page: the ancient's dialogues are cut down to the ones
-    /// valid for the character and one of what is left is rolled, and the page
-    /// then walks that dialogue's lines one option at a time before the option
-    /// that ends the run.
-    ///
-    /// Each entry is one candidate dialogue, already laid out as the first
-    /// page it puts up; the pages after it hang off that page's own
-    /// [`EventEffect::SetPage`], each line replacing the page with the next
-    /// line's option. The roll is spent even over a single candidate.
-    AncientDialogue { dialogues: Vec<Vec<EventOption>> },
     /// Nonupeipe's page: one list, with the entries this run qualifies for
     /// added to the end of it, shuffled whole, and the first few offered.
     ShuffledRelicPool {
@@ -1836,9 +1825,6 @@ pub enum EventEffect {
     ReadTheEventStream(i32),
     Unsupported(ModelId),
     Proceed,
-    /// The Architect ends the run: the run is over and won, and the act
-    /// change behind it carries the win through.
-    WinRun,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

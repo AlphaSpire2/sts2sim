@@ -2088,39 +2088,6 @@ pub fn whispering_hollow() -> EventDefinition {
     }
 }
 
-/// The Architect, the ancient the last act's boss leads to and the only room
-/// the build calls a victory room.
-///
-/// No act's event roster carries him: his room is stood up as the run tries to
-/// enter a next act and finds there is none, and proceeding past him is what
-/// ends the run.
-///
-/// Cosmetic dialogue varies with profile history and is omitted. Every
-/// character receives the same final Proceed action. Room initialization and
-/// its dialogue-selection RNG consumption are retained.
-#[must_use]
-pub fn the_architect(_character: &sts2_core::ModelId) -> EventDefinition {
-    EventDefinition {
-        model_id: id("EVENT.THE_ARCHITECT"),
-        // The room is laid out as a fight, so it stands the Architect's own
-        // creature up as it is entered,
-        // which is where the health roll every enemy's creation spends goes.
-        combat_layout: Some(id("ENCOUNTER.THE_ARCHITECT_EVENT_ENCOUNTER")),
-        heals_on_entry: false,
-        // He is entered directly rather than pulled off an act roster, so no
-        // act ever asks whether it may have him.
-        allowed: EventCondition::Never,
-        vars: Vec::new(),
-        generation: EventGeneration::AncientDialogue {
-            dialogues: vec![vec![option(
-                "PROCEED",
-                "Proceed",
-                vec![EventEffect::WinRun],
-            )]],
-        },
-    }
-}
-
 /// An event whose page never varies, heals nobody on the way in, and rolls
 /// nothing before it is built.
 fn plain(model_id: &str, allowed: EventCondition, options: Vec<EventOption>) -> EventDefinition {

@@ -342,13 +342,13 @@ mod tests {
     /// the terminal the simulator settled on, and nothing above the simulator
     /// decides which one it is.
     #[test]
-    fn auto_mode_walks_the_last_boss_through_the_architect_to_a_victory() {
+    fn auto_mode_finishes_at_the_last_boss() {
         let mut simulator = sts2_content::final_boss_fixture().unwrap();
         let mut output = Vec::new();
         let result = run_auto(&mut simulator, &mut output, false).unwrap();
         assert_eq!(result, RunResult::Victory);
         let session = String::from_utf8(output).unwrap();
-        assert!(session.contains("auto> advance"));
+        assert!(!session.contains("auto> advance"));
         assert!(session.contains("terminal: Victory"));
     }
 

@@ -1509,8 +1509,7 @@ rolled, and no map point can ever be such an encounter.
 Every room the run stands up takes the next room id, and that counter is reset
 when a map location is entered rather than when a room is left.
 Almost every room is the first at its point and so is room zero; a room the run
-stands up without moving — the fight an event pushes onto its own room, the
-Architect's room behind the last boss — takes the next id along, and the
+stands up without moving — the fight an event pushes onto its own room — takes the next id along, and the
 projection carries it.
 
 Obtaining a relic takes it out of both the player's grab bag and the shared
@@ -2195,61 +2194,23 @@ outside a fight — paying HP to an event, or to a card played at a merchant —
 and the same owed-loss path answers for both. The run's terminal is the
 simulator's answer to `run.finish`, never something a replay forces.
 
-A won run ends on the same path. Entering the next act splits on whether there
-is one: past the last act, and standing in a room that is not the victory room,
-it clears the screens and enters the Architect's event room. So walking on from
-the last act's boss is not the win — it is one more room. The Architect's page
-exposes only Proceed; cosmetic dialogue is omitted. Proceed readies the player
-for an act change. Entering
-the next act is asked for again, the current room is now the victory room, and
-the run is won. Winning writes nothing else down here, because the current room
-is an event room rather than a combat room, so no fight's length is recorded.
-Winning then kills every player's *creature* outright.
+Victory is reached when combat against the last required boss finishes. The
+combat's end and victory hooks, health changes, reward bookkeeping, and owed
+turn completion settle before the terminal result is exposed. On Double Boss,
+the first boss remains a normal completed room; only the second ends the run.
+Earlier-act bosses still lead to the next act.
 
-That last call leaves the run untouched: the Architect's room stands no fight up
-for the player, so the creature the kill reaches is not the one the run's health
-is kept on, and the terminal observation shows a player still standing at the
-health they walked in with. A won run and a lost one settle differently, and the
-health is the first place it shows.
+The terminal state retains the settled final combat and its room, player state,
+map history, and RNG counters for comparison. No further action is legal.
+The Architect is outside the simulator: there is no event, encounter, creature,
+dialogue, departure action, or presentation RNG consumption after victory.
 
-Two more things about that path are pinned against a recorded victory. The last
-act's boss pays nothing: a boss room in the last act returns before it generates
-any reward at all, so the set is built, offered, and put through the modify
-passes with nothing on it — no card, no gold, no relic, and
-not one die rolled for any of them. And a set with nothing on it is complete the
-moment it goes up, so the screen closes itself and the next thing the run
-answers is the act change.
-
-The Architect's room is entered directly rather than by walking onto a map
-point, and the difference shows in three places. The act counts one more room
-of the event family, but no map-point history entry is appended and the act's
-event list is never pulled from, so the run does not record the Architect among
-the events it has seen. The room-id counter is reset only when a map location
-is entered, so the room takes the id after the boss room's rather than starting
-over at zero. And his event is laid out as a combat with a canonical encounter,
-so entering the room creates the Architect's creature — which spends one roll
-of the niche stream on its health the way every enemy's creation does, even
-though its range holds the single value 9999 and nothing in the room ever takes
-a turn.
-
-The run also stays in its last act; there is no act to move to. Three acts is
-the whole of it in the pinned build — four act models across three indices,
-Overgrowth or Underdocks, then Hive, then Glory — so there is no act four, no
-second ending, and nothing gating the win beyond beating the last boss and
-choosing Proceed. Profile history changes the Architect's dialogue length, but
-the intervening clicks do not change gameplay. The simulator omits those
-decisions without changing room initialization or its RNG consumption.
-
-Replay accepts `THE_ARCHITECT.dialogue.<index>` clicks as presentation-only
-records while the simulator is waiting at the Architect's Proceed action.
-The recorded event identity, option index zero, and non-proceed flag must agree;
-unknown options and dialogue outside this decision context remain errors.
-These clicks do not step the simulator or count as applied actions. The
-Architect's option list is omitted from observation rendering and reported as
-`/choices/events/*/options` in uncovered fields. Event identity, player state,
-RNG, and the terminal outcome remain checked, including observations where the
-dialogue animation temporarily clears the option list. The recorded Proceed
-and subsequent act transition still drive the simulator's victory boundary.
+New recordings close with `run.finish VICTORY` and a final observation at this
+same gameplay boundary. For older recordings/scripts, replay compares the last
+combat observation before the post-victory departure, then excludes the
+presentation tail and reports `post_victory_records`. Trace structure and
+terminal results are still validated; gameplay actions after victory fail.
+Presentation observations never repair state or conceal an earlier divergence.
 
 ## Projection rendering and observation matching
 

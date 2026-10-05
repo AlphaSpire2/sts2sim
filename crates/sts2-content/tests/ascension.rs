@@ -467,12 +467,13 @@ fn the_second_boss_is_fielded_only_after_the_first_one_has_been_fought() {
         Some("ENCOUNTER.AEONGLASS_BOSS".to_owned())
     );
     play_a_strike(&mut simulator);
-    // And the fight behind it is the one the act ends on.
+    // The second boss ends gameplay without a departure into presentation.
     assert_eq!(
-        simulator.legal_actions().first(),
-        Some(&Action::AdvanceAct),
-        "the second boss is what asks for what comes after the act"
+        simulator.state().terminal,
+        Some(sts2_engine::RunResult::Victory),
+        "the second boss completes the run"
     );
+    assert_eq!(simulator.legal_actions(), []);
 }
 
 // --- the harness ----------------------------------------------------------

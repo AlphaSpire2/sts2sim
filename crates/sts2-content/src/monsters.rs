@@ -4131,26 +4131,6 @@ fn pet_monster(model_id: &str) -> MonsterDefinition {
     )
 }
 
-/// The Architect, who stands in his own room behind the last act's boss and
-/// never acts: one hidden `NOTHING` move that follows itself, and a health
-/// range with a single value in it — so the roll his creation spends still
-/// reads a die and still lands on 9999.
-#[must_use]
-pub fn architect() -> MonsterDefinition {
-    monster(
-        "MONSTER.ARCHITECT",
-        9999,
-        9999,
-        "NOTHING_MOVE",
-        vec![MonsterState::Move(MonsterMove {
-            state_id: "NOTHING_MOVE".to_owned(),
-            intent: Intent::new("NOTHING_MOVE", Vec::new()),
-            commands: Vec::new(),
-            follow_up: "NOTHING_MOVE".to_owned(),
-        })],
-    )
-}
-
 /// A fossil stalker: a tackle that leaves its target frail, a latch, and a
 /// double lash. It opens on the latch and rolls between the three from then on,
 /// and none of them can come up three times running.
@@ -5318,7 +5298,6 @@ pub fn multi_attack_move_monster() -> MonsterDefinition {
 pub fn monsters_at_ascension(ascension: u8) -> Vec<MonsterDefinition> {
     vec![
         osty(),
-        architect(),
         byrdpip(),
         paels_legion(),
         fossil_stalker_at(ascension),
