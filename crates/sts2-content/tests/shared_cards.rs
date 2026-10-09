@@ -2519,6 +2519,64 @@ fn a_splash_offers_the_other_characters_attacks() {
     assert_eq!(landed.energy_cost, 0, "free for the turn it landed on");
 }
 
+fn splash_with_seven_stars(upgrade: u8) -> Simulator {
+    let mut simulator = scenario(&[("CARD.SPLASH", upgrade)], &[], 999)
+        // This roll offers Seven Stars, so both resource costs are exercised.
+        .rng_counter(RunStream::CombatCardGeneration, 59)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.SPLASH");
+    let chosen = simulator.legal_actions().iter().find(|action| {
+        matches!(action, Action::ChooseCards { cards, .. }
+            if cards.first().is_some_and(|card| card.fingerprint.model_id == id("CARD.SEVEN_STARS")))
+    }).cloned().expect("Seven Stars is offered");
+    simulator.step(chosen).expect("Seven Stars can be chosen");
+    simulator
+}
+
+fn generated_seven_stars(simulator: &Simulator) -> &sts2_engine::CardInstance {
+    simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing")
+        .player
+        .piles
+        .all_cards()
+        .find(|card| card.fingerprint.model_id == id("CARD.SEVEN_STARS"))
+        .expect("the generated Seven Stars is in combat")
+}
+
+/// Splash frees both resources, even when the owner has no stars. Its discount
+/// expires on play or at turn end, for both the base and upgraded card.
+#[test]
+fn a_splash_frees_star_costs_until_played_or_the_turn_ends() {
+    for upgrade in [0, 1] {
+        for play_generated in [false, true] {
+            let mut simulator = splash_with_seven_stars(upgrade);
+            let generated = generated_seven_stars(&simulator);
+            assert_eq!(generated.fingerprint.upgrade_level, upgrade);
+            assert_eq!((generated.energy_cost, generated.star_cost), (0, 0));
+            assert_eq!(simulator.state().combat.as_ref().unwrap().player.stars, 0);
+            assert!(play_action(&simulator, "CARD.SEVEN_STARS").is_some());
+            let energy_before = energy(&simulator);
+            if play_generated {
+                play(&mut simulator, "CARD.SEVEN_STARS");
+                assert_eq!(energy(&simulator), energy_before);
+                assert_eq!(simulator.state().combat.as_ref().unwrap().player.stars, 0);
+            } else {
+                end_turn(&mut simulator);
+                assert!(play_action(&simulator, "CARD.SEVEN_STARS").is_none());
+            }
+            let generated = generated_seven_stars(&simulator);
+            assert_eq!(
+                (generated.energy_cost, generated.star_cost),
+                (2 - i32::from(upgrade), 7)
+            );
+        }
+    }
+}
+
 /// A stratagem hands as many cards as it has stacks back out of the draw pile
 /// every time that pile is shuffled.
 #[test]

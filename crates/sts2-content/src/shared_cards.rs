@@ -510,7 +510,7 @@ fn splash(upgraded: bool) -> Vec<Command> {
                 ethereal: false,
                 retain: false,
                 upgraded: false,
-                temporary_cost: Some(sts2_engine::TemporaryCost::this_turn(0)),
+                temporary_cost: Some(sts2_engine::TemporaryCost::free_this_turn()),
                 position: sts2_engine::DrawPilePosition::Bottom,
             })],
         },
