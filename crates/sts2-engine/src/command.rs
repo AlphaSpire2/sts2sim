@@ -180,8 +180,8 @@ pub enum Command {
     /// Damage dealt whose result the commands that follow read.
     ///
     /// This is what a body names when it damages something and then acts on
-    /// what that blow came to, the way an Omnislice splashes the first hit
-    /// onto everyone else. Inside `then`, the counts that read a settled blow
+    /// what that blow came to, the way a Blight Strike applies Doom worth its
+    /// damage. Inside `then`, the counts that read a settled blow
     /// are that first result.
     Deal {
         target: CreatureSelector,
@@ -451,6 +451,10 @@ pub enum StunFollowUp {
 /// A swing: damage dealt in a counted number of hits.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum DamageCmd {
+    /// One powered hit on the body's target, followed by its total damage
+    /// including overkill dealt unpowered to the other opponents. Both calls
+    /// belong to one attack context, as in Omnislice.
+    AttackWithSplash { amount: Amount },
     /// An attack, carrying the gameplay settings it is built with: the damage
     /// each hit deals, how many hits it makes, who it is aimed at, and whether
     /// it skips the listeners that scale it.

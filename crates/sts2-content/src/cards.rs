@@ -2118,16 +2118,9 @@ pub(crate) fn rarity(
 /// One blow on the target, and the same blow again on everyone else: what the
 /// first came to, overkill and all, dealt unpowered.
 fn omnislice(damage: i32) -> Command {
-    Command::Deal {
-        target: CreatureSelector::Target,
+    Command::Damage(DamageCmd::AttackWithSplash {
         amount: Amount::Fixed(damage),
-        props: ValueProps::NONE,
-        then: vec![Command::Creature(CreatureCmd::Damage {
-            target: CreatureSelector::OtherOpponents,
-            amount: Amount::counting(Count::DealtDamageWithOverkill),
-            props: ValueProps::UNPOWERED,
-        })],
-    }
+    })
 }
 
 /// The mantle's block, and the one more HP a turn it will cost.

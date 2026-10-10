@@ -4386,6 +4386,13 @@ pub enum ResumeFrame {
     SetupPlayerTurn(SetupPlayerTurnStep),
     /// One attack's per-hit loop.
     Attack(Box<AttackFrame>),
+    /// The damage calls inside one manually grouped attack. A damage listener
+    /// may suspend either call, but the after-attack pass must see both hits.
+    SplashAttack {
+        context: Box<crate::CommandContext>,
+        results: Vec<(usize, CreatureCombatId, DamageResult)>,
+        splash_pending: bool,
+    },
     /// Damage over the creatures one command reaches.
     Damage(Box<DamageFrame>),
     /// A maximum-HP loss past the blow it deals for the current HP left

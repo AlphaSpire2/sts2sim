@@ -621,6 +621,75 @@ fn a_screen_inside_a_multi_target_command_resumes_at_the_target_it_had_not_told(
 }
 
 #[test]
+fn a_splash_attack_resumes_either_damage_call_before_announcing_the_attack() {
+    for asking_target in [1, 2] {
+        let mut content = (*registry()).clone();
+        content.add_card(CardDefinition {
+            card_type: CardType::Attack,
+            target: TargetType::AnyEnemy,
+            ..card(
+                "CARD.SPLASH_ATTACK",
+                vec![Command::Damage(DamageCmd::AttackWithSplash {
+                    amount: Amount::Fixed(4),
+                })],
+            )
+        });
+        content.add_power(power(
+            "POWER.SPLASH_ASKER",
+            vec![
+                ModifierHook::every_turn(
+                    HookEvent::AfterDamageReceived,
+                    vec![hand_screen(vec![stop_asking()])],
+                )
+                .when(HookCondition::OwnerTookUnblockedDamage),
+            ],
+        ));
+        content.add_power(asker(
+            "POWER.ATTACK_COUNTER",
+            HookEvent::AfterAttack,
+            block(3),
+        ));
+        let mut simulator = builder()
+            .enemy(1, id("MONSTER.DUMMY"), 40, 40, "WAIT")
+            .enemy(2, id("MONSTER.DUMMY"), 40, 40, "WAIT")
+            .power(asking_target, id("POWER.SPLASH_ASKER"), 1, PowerType::Buff)
+            .power(0, id("POWER.ATTACK_COUNTER"), 1, PowerType::Buff)
+            .relics(&[id("RELIC.DAMAGE_COUNTER")])
+            .card(PileName::Hand, 1, fingerprint("CARD.SPLASH_ATTACK"), 0)
+            .card(PileName::Hand, 2, fingerprint("CARD.FILLER"), 0)
+            .card(PileName::Hand, 3, fingerprint("CARD.FILLER"), 0)
+            .build(Arc::new(content))
+            .unwrap();
+        simulator
+            .step(play(&simulator, "CARD.SPLASH_ATTACK"))
+            .unwrap();
+
+        assert!(choosing(&simulator));
+        assert_eq!(hp_of(&simulator, 1), 36);
+        assert_eq!(
+            hp_of(&simulator, 2),
+            if asking_target == 1 { 40 } else { 36 }
+        );
+        assert_eq!(
+            block_of(&simulator, 0),
+            0,
+            "AfterAttack waits for both damage calls"
+        );
+        assert_clone_resumes_identically(&simulator, 1);
+        simulator.step(pick_first(&simulator)).unwrap();
+        assert!(!choosing(&simulator));
+        assert_eq!(hp_of(&simulator, 1), 36);
+        assert_eq!(hp_of(&simulator, 2), 36);
+        assert_eq!(
+            relic_counter(&simulator),
+            2,
+            "neither damage call is repeated"
+        );
+        assert_eq!(block_of(&simulator, 0), 3, "one attack is announced");
+    }
+}
+
+#[test]
 fn a_screen_inside_a_monster_move_resumes_mid_move() {
     let mut simulator = builder()
         .enemy(1, id("MONSTER.ASKER"), 40, 40, "ASK")

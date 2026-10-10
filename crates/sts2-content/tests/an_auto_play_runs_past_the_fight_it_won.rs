@@ -159,3 +159,39 @@ fn an_auto_play_announces_each_pass_before_the_next_runs() {
     end_the_turn(&mut simulator);
     assert_eq!(enemy_hp(&simulator), 39 - 6 - 5);
 }
+
+#[test]
+fn stampede_finishes_its_selection_rolls_after_a_lethal_play() {
+    for (attacks, stacks, expected_rolls) in [(3, 2, 2), (3, 4, 4), (1, 3, 1)] {
+        let mut scenario = ScenarioBuilder::new("STAMPEDE", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+            .player_hp(80, 80)
+            .energy(0, 3)
+            .turn(1, 1)
+            .rng_counter(RunStream::Shuffle, 0)
+            .rng_counter(RunStream::CombatTargets, 0)
+            .power(0, id("POWER.STAMPEDE_POWER"), stacks, PowerType::Buff)
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 1, 39, "SHRINKER_MOVE");
+        for index in 0..attacks {
+            scenario = scenario.card(PileName::Hand, index, card("CARD.STRIKE_IRONCLAD"), 0);
+        }
+        let mut simulator = scenario
+            .build(sts2_content::standard_registry())
+            .expect("the scenario builds");
+        end_the_turn(&mut simulator);
+        assert!(simulator.state().combat.as_ref().unwrap().has_ended);
+        assert_eq!(
+            simulator.state().rng.stream(RunStream::Shuffle).counter(),
+            expected_rolls,
+            "remaining selections still roll; an empty candidate list consumes nothing"
+        );
+        assert_eq!(
+            simulator
+                .state()
+                .rng
+                .stream(RunStream::CombatTargets)
+                .counter(),
+            1,
+            "only the lethal first card is played; later selections never roll a target"
+        );
+    }
+}

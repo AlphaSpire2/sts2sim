@@ -2471,15 +2471,18 @@ fn stampede_power() -> PowerDefinition {
             HookEvent::AfterAutoPostPlayPhaseEntered,
             vec![Command::Repeat {
                 times: stacks(),
-                then: vec![Command::Card(CardCmd::AutoPlay {
-                    at_the_bodys_target: false,
+                then: vec![Command::Select {
                     cards: CardSelector::ShuffleRolledFromPile {
                         pile: sts2_engine::PileName::Hand,
                         filter: sts2_engine::CardFilter::PlayableOfType(
                             sts2_engine::CardType::Attack,
                         ),
                     },
-                })],
+                    then: vec![Command::Card(CardCmd::AutoPlay {
+                        at_the_bodys_target: false,
+                        cards: CardSelector::Chosen,
+                    })],
+                }],
             }],
         )],
         ..counter("POWER.STAMPEDE_POWER", PowerType::Buff)

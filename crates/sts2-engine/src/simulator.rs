@@ -2477,6 +2477,11 @@ impl Simulator {
                 .run_setup_player_turn(step, None, events)
                 .map(|()| false),
             Frame::Attack(frame) => self.run_attack_hits(*frame, events),
+            Frame::SplashAttack {
+                context,
+                results,
+                splash_pending,
+            } => self.finish_splash_attack(&context, results, splash_pending, events),
             // Settling the deaths the call caused is what ends a damaging call,
             // and it is what every other queue entry does when it finishes.
             Frame::Damage(frame) => {
@@ -10693,11 +10698,13 @@ impl Simulator {
         context: &CommandContext,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
+        let mut ended = false;
         while remaining > 0 {
             remaining -= 1;
-            if self.run_commands(then, context, events)? {
-                return Ok(true);
-            }
+            // The body's loop still evaluates later iterations after a lethal
+            // autoplay. In particular, Stampede selects before AutoPlay asks
+            // whether combat is ending, so those selections still consume RNG.
+            ended |= self.run_commands(then, context, events)?;
             if self.queue_is_held() {
                 if remaining > 0 {
                     self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::Loop(
@@ -10711,7 +10718,7 @@ impl Simulator {
                 return Ok(false);
             }
         }
-        Ok(false)
+        Ok(ended)
     }
 
     /// `Command::RepeatWithLast`'s rounds, of which the very last runs its own
@@ -11119,6 +11126,9 @@ impl Simulator {
     ) -> Result<bool, EngineError> {
         match command {
             Command::Creature(creature) => self.run_creature_command(creature, context, events),
+            Command::Damage(DamageCmd::AttackWithSplash { amount }) => {
+                self.run_splash_attack(amount, context, events)
+            }
             Command::Damage(DamageCmd::Attack {
                 amount,
                 hits,
@@ -12058,6 +12068,109 @@ impl Simulator {
             then,
         };
         self.run_attack_hits(frame, events)
+    }
+
+    /// Omnislice groups two different damaging calls into one attack context.
+    /// Keep each receiver with its result so `AfterAttack` sees the splash as
+    /// well as the primary hit, even if either call opens a selection screen.
+    fn run_splash_attack(
+        &mut self,
+        amount: &Amount,
+        context: &CommandContext,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        let value = ValueContext {
+            dealer: context.owner,
+            card: context.card,
+            props: ValueProps::NONE,
+            ..ValueContext::default()
+        };
+        self.without_suspension("a listener answering for a swing", true, |engine| {
+            engine.dispatch_hooks(&[crate::HookEvent::BeforeAttack], &HookContext::over(value))
+        })?;
+        let amount = self.resolve_amount(amount, context)?;
+        let targets = self.resolve_creatures(CreatureSelector::Target, context)?;
+        let results = self.run_damage(
+            crate::DamageFrame {
+                targets,
+                dealer: context.owner,
+                card: context.card,
+                props: ValueProps::NONE,
+                amount,
+                results: Vec::new(),
+                announced: 0,
+                given: false,
+            },
+            events,
+        )?;
+        self.finish_splash_attack(
+            context,
+            results
+                .into_iter()
+                .map(|(target, result)| (1, target, result))
+                .collect(),
+            true,
+            events,
+        )
+    }
+
+    fn finish_splash_attack(
+        &mut self,
+        context: &CommandContext,
+        mut results: Vec<(usize, CreatureCombatId, DamageResult)>,
+        mut splash_pending: bool,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        if !self.suspended() && splash_pending {
+            self.cleanup_dead(events)?;
+            splash_pending = false;
+            if let Some((_, _, primary)) = results.first() {
+                let amount = primary.blocked + primary.unblocked + primary.overkill;
+                let targets = self.resolve_creatures(CreatureSelector::OtherOpponents, context)?;
+                let splash = self.run_damage(
+                    crate::DamageFrame {
+                        targets,
+                        dealer: context.owner,
+                        card: context.card,
+                        props: ValueProps::UNPOWERED,
+                        amount,
+                        results: Vec::new(),
+                        announced: 0,
+                        given: false,
+                    },
+                    events,
+                )?;
+                results.extend(
+                    splash
+                        .into_iter()
+                        .map(|(target, result)| (2, target, result)),
+                );
+            }
+        }
+        if self.suspended() {
+            self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::SplashAttack {
+                context: Box::new(context.clone()),
+                results,
+                splash_pending,
+            })))?;
+            return Ok(false);
+        }
+        self.cleanup_dead(events)?;
+        let announced = HookContext {
+            attack_results: results,
+            ..HookContext::over(ValueContext {
+                dealer: context.owner,
+                card: context.card,
+                props: ValueProps::NONE,
+                ..ValueContext::default()
+            })
+        };
+        self.without_suspension(
+            "a listener answering for a finished swing",
+            true,
+            |engine| engine.dispatch_hooks(&[crate::HookEvent::AfterAttack], &announced),
+        )?;
+        Ok(self.combat_is_ending())
     }
 
     /// The hit loop, entered at its start or at the hit a screen stopped it on.
@@ -29612,6 +29725,9 @@ fn body_damage_var(effects: &[Command], own_owner: bool) -> Option<(&Amount, Val
     };
     for effect in effects {
         let found = match effect {
+            Command::Damage(DamageCmd::AttackWithSplash { amount }) => {
+                Some((amount, ValueProps::NONE, false))
+            }
             Command::Damage(DamageCmd::Attack { amount, props, .. })
             | Command::Strike { amount, props, .. } => Some((amount, *props, false)),
             Command::Damage(DamageCmd::AttackFromPet { amount, props, .. }) => {
