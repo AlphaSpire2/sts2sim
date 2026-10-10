@@ -19914,19 +19914,13 @@ impl Simulator {
     /// goes with it. The win half only reports; the caller finishes the fight,
     /// because that is where a settled queue finishes it too.
     ///
-    /// A screen standing when the check is asked is the one place this does not
-    /// follow the build. The build's chain carries on past a body that has
-    /// paused and asks anyway, and would end the combat out from under the
-    /// screen; here the check is deferred to whoever picks the chain back up.
-    /// Nothing can reach it but a fight won inside the player's own turn setup,
-    /// which is the one stage of the handover with no continuation of its own to
-    /// ask again.
+    /// The build also asks while turn setup is awaiting a hand selection:
+    /// side-start listeners can end the fight in front of that answer. Ending
+    /// the combat cancels the pending screen and its paused continuation rather
+    /// than asking for a card after every enemy has already died.
     fn check_win_condition(&mut self) -> Result<CombatOutcome, EngineError> {
         if self.state.combat.is_none() {
             return Ok(CombatOutcome::Lost);
-        }
-        if self.suspended() {
-            return Ok(CombatOutcome::Unsettled);
         }
         let player_id = self.combat()?.player.creature_id;
         if self.pending_loss || !self.creature(player_id)?.alive() {
@@ -19934,6 +19928,11 @@ impl Simulator {
             return Ok(CombatOutcome::Lost);
         }
         if self.combat_is_won()? {
+            if self.suspended() {
+                let combat = self.combat_mut()?;
+                combat.suspended_choice = None;
+                combat.queue.clear();
+            }
             return Ok(CombatOutcome::Won);
         }
         Ok(CombatOutcome::Unsettled)

@@ -694,3 +694,89 @@ fn the_silents_reward_spec_is_her_own_pool() {
     assert_eq!(spec.card_option_count, 3);
     let _ = TargetType::SelfTarget;
 }
+
+/// A side-start kill ends the fight even while turn setup awaits a discard.
+#[test]
+fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
+    let mut simulator = Fight {
+        enemies: 3,
+        enemy_hp: 1,
+        powers: &[
+            (0, "POWER.TOOLS_OF_THE_TRADE_POWER", 1, PowerType::Buff),
+            (0, "POWER.NOXIOUS_FUMES_POWER", 1, PowerType::Buff),
+            (0, "POWER.OUTBREAK_POWER", 1, PowerType::Buff),
+        ],
+        draw: &[("CARD.DEFLECT", 0), ("CARD.SLICE", 0)],
+        ..Fight::default()
+    }
+    .build();
+    end_turn(&mut simulator);
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("won combat stands");
+    assert!(
+        combat
+            .creatures
+            .iter()
+            .filter(|c| c.side == sts2_engine::CombatSide::Enemy)
+            .all(|c| c.current_hp == 0),
+        "Outbreak killed every enemy"
+    );
+    assert!(
+        !combat.in_progress,
+        "the side-start kill must settle victory"
+    );
+    assert!(
+        combat.suspended_choice.is_none(),
+        "combat ending cancels the discard screen"
+    );
+    assert!(combat.queue.is_empty(), "the paused setup is cancelled");
+    assert!(combat.has_ended && combat.rewards_open);
+    assert!(
+        simulator.legal_actions().contains(&Action::Proceed),
+        "the won fight can be left without answering the discard"
+    );
+    simulator
+        .step(Action::Proceed)
+        .expect("the won fight can be left");
+}
+
+/// Side-start damage must preserve the discard and its continuation if enemies survive.
+#[test]
+fn tools_of_the_trade_still_requires_a_discard_after_nonlethal_outbreak() {
+    let mut simulator = Fight {
+        enemies: 3,
+        enemy_hp: 39,
+        powers: &[
+            (0, "POWER.TOOLS_OF_THE_TRADE_POWER", 1, PowerType::Buff),
+            (0, "POWER.NOXIOUS_FUMES_POWER", 1, PowerType::Buff),
+            (0, "POWER.OUTBREAK_POWER", 1, PowerType::Buff),
+        ],
+        draw: &[("CARD.DEFLECT", 0), ("CARD.SLICE", 0)],
+        ..Fight::default()
+    }
+    .build();
+    end_turn(&mut simulator);
+    let combat = simulator.state().combat.as_ref().expect("combat is live");
+    assert!(combat.in_progress && !combat.has_ended && !combat.rewards_open);
+    assert!(combat.suspended_choice.is_some());
+    assert!(!combat.queue.is_empty(), "turn setup awaits the discard");
+    for enemy in 1..=3 {
+        assert_eq!(creature(&simulator, enemy).current_hp, 38);
+    }
+    assert!(!simulator.legal_actions().contains(&Action::Proceed));
+
+    choose(&mut simulator, "CARD.DEFLECT");
+    assert_eq!(hand(&simulator), vec!["CARD.SLICE"]);
+    let combat = simulator.state().combat.as_ref().expect("combat continues");
+    assert!(combat.suspended_choice.is_none());
+    assert!(combat.queue.is_empty(), "turn setup resumed");
+    assert!(
+        simulator
+            .legal_actions()
+            .iter()
+            .any(|action| matches!(action, Action::EndTurn { .. }))
+    );
+}
