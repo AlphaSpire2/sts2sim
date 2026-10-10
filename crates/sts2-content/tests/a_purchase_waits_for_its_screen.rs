@@ -279,6 +279,7 @@ fn a_parked_pass_on_the_pending_list_still_runs() {
     let run = state.run.as_mut().expect("the run stands");
     // A screen standing over the pending list, with nothing behind its answer.
     run.suspended_choice = Some(sts2_engine::SuspendedChoice {
+        semantics: sts2_engine::ChoiceSemantics::default(),
         id: sts2_core::ChoiceId::from(0),
         identity: sts2_engine::ChoiceIdentity::Offered,
         screen: sts2_engine::ChoiceScreen::ChooseACard,

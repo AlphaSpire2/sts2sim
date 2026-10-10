@@ -18,6 +18,10 @@ use sts2_engine::{
     CreatureSelector, DamageCmd, DrawPilePosition, ForgeCmd, HookCondition, HookEvent,
     ModifierHook, PileName, PlayerCmd, SelectorPrefs, TargetType, ValueProps,
 };
+use sts2_engine::{
+    ChoiceCondition, ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
+    ChoiceScope, ChoiceSemantics, ChoiceSubject,
+};
 
 use crate::cards::{
     apply_power, attack, block, buff, card, costing_star_x, costing_stars, costing_x, debuff, draw,
@@ -110,6 +114,12 @@ fn chosen_onto_the_draw_pile() -> Command {
 /// the card that did it was upgraded, and then put in the card's place.
 fn transform_from_hand(prefs: SelectorPrefs, into: &str, upgraded: bool) -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Combat).model(id(into)),
+            ChoiceOp::new(ChoiceOperationKind::Upgrade, ChoiceScope::Combat)
+                .on(ChoiceSubject::Replacement)
+                .count(i32::from(upgraded)),
+        ]),
         prefs,
         maximum: None,
         exact_count: None,
@@ -465,6 +475,11 @@ fn cosmic_indifference(block_amount: i32) -> Vec<Command> {
     vec![
         block(block_amount),
         Command::CardSelect(CardSelectCmd::FromCombatPile {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                    .to(ChoiceDestination::DrawTop)
+                    .when(ChoiceCondition::InDrawOrDiscard),
+            ]),
             pile: PileName::Discard,
             prefs: SelectorPrefs::exactly(1),
             maximum: None,
@@ -543,6 +558,10 @@ fn photon_cut(damage: i32, cards: i32) -> Vec<Command> {
         draw(cards),
         crate::cards::choosing_from_hand(
             SelectorPrefs::exactly(1),
+            ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                    .to(ChoiceDestination::DrawTop),
+            ]),
             vec![chosen_onto_the_draw_pile()],
         ),
     ]
@@ -966,6 +985,10 @@ fn glimmer(cards: i32) -> Vec<Command> {
         draw(cards),
         crate::cards::choosing_from_hand(
             SelectorPrefs::exactly(1),
+            ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                    .to(ChoiceDestination::DrawTop),
+            ]),
             vec![chosen_onto_the_draw_pile()],
         ),
     ]
@@ -1045,6 +1068,13 @@ fn lunar_blast(damage: i32) -> Command {
 /// minion's dive bomb where it stood.
 fn charge(upgraded: bool) -> Command {
     Command::CardSelect(CardSelectCmd::FromCombatPile {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Combat)
+                .model(id("CARD.MINION_DIVE_BOMB")),
+            ChoiceOp::new(ChoiceOperationKind::Upgrade, ChoiceScope::Combat)
+                .on(ChoiceSubject::Replacement)
+                .count(i32::from(upgraded)),
+        ]),
         pile: PileName::Draw,
         prefs: SelectorPrefs::exactly(2),
         maximum: None,
@@ -1063,6 +1093,10 @@ fn charge(upgraded: bool) -> Command {
 /// joins the hand.
 fn quasar(upgraded: bool) -> Command {
     Command::CardSelect(CardSelectCmd::ChooseAGeneratedCard {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                .to(ChoiceDestination::Hand),
+        ]),
         pool: colorless(),
         count: 3,
         filter: CardFilter::Any,
@@ -1550,6 +1584,9 @@ fn decisions_decisions(cards: i32) -> Vec<Command> {
     vec![
         draw(cards),
         Command::CardSelect(CardSelectCmd::FromHand {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Play, ChoiceScope::Combat).count(3),
+            ]),
             prefs: SelectorPrefs::exactly(1),
             maximum: None,
             exact_count: None,
@@ -1604,6 +1641,11 @@ fn heirloom_hammer(damage: i32) -> Vec<Command> {
     vec![
         attack(damage),
         Command::CardSelect(CardSelectCmd::FromHand {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Copy, ChoiceScope::Combat)
+                    .on(ChoiceSubject::Copy)
+                    .to(ChoiceDestination::Hand),
+            ]),
             prefs: SelectorPrefs::exactly(1),
             maximum: None,
             exact_count: None,

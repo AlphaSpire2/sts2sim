@@ -309,3 +309,12 @@ explicit profile from its recorded unlocks and optional discovery metadata,
 subject to the content limits and legacy fallback described above. Registered
 presets under [`manifests/unlock-presets/`](../manifests/unlock-presets) remain
 defaults for callers that supply only a profile name.
+
+### Selection semantics
+
+Supported selection producers expose complete public effect metadata under
+observation version 10. Metadata does not execute commands, consume RNG, infer
+private outcomes, or change selection legality. Unknown descriptors are retained
+for legacy snapshots. The registry inventory and existing behavioral suites
+jointly verify coverage and execution; [choice semantics](choice-semantics.md)
+defines the public interface.

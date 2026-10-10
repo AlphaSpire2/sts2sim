@@ -137,6 +137,7 @@ fn a_brew_beside(standing: Standing) -> Simulator {
         rest_option_owed: None,
         rest_options_owed: Vec::new(),
         suspended_choice: matches!(standing, Standing::ACardPick).then(|| SuspendedChoice {
+            semantics: sts2_engine::ChoiceSemantics::default(),
             id: sts2_core::ChoiceId::from(0),
             identity: ChoiceIdentity::Offered,
             screen: ChoiceScreen::RewardGrid,

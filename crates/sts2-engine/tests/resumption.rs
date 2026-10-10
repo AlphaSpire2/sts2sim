@@ -110,6 +110,7 @@ fn block(amount: i32) -> Command {
 /// the hand holds more than one.
 fn hand_screen(then: Vec<Command>) -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: sts2_engine::ChoiceSemantics::default(),
         maximum: None,
         exact_count: None,
         prefs: SelectorPrefs::exactly(1),
@@ -122,6 +123,7 @@ fn hand_screen(then: Vec<Command>) -> Command {
 /// down.
 fn discard_screen(then: Vec<Command>) -> Command {
     Command::CardSelect(CardSelectCmd::FromCombatPile {
+        semantics: sts2_engine::ChoiceSemantics::default(),
         exact_count: None,
         pile: PileName::Discard,
         prefs: SelectorPrefs::exactly(1),
@@ -827,9 +829,19 @@ fn a_screen_in_the_turn_setup_survives_a_snapshot_taken_while_it_is_up() {
     // The same state carried out through the portable boundary and back has to
     // resume identically too, because the frame lives in the state rather than
     // on a Rust call stack.
+    let visible_before = simulator.agent_observation();
+    let DecisionContext::ChooseCards { semantics, .. } = &visible_before.decision else {
+        panic!("active choice")
+    };
+    assert_eq!(semantics.coverage, sts2_engine::ChoiceCoverage::Unknown);
+    assert_eq!(semantics.origin, sts2_engine::ChoiceIdentity::CombatCard);
     let snapshot = simulator.snapshot();
     let mut restored = simulator.clone();
     restored.restore(&snapshot).unwrap();
+    assert_eq!(
+        restored.agent_observation().decision,
+        visible_before.decision
+    );
     assert_eq!(
         restored.state_key().unwrap(),
         simulator.state_key().unwrap()

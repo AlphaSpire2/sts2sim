@@ -4,6 +4,10 @@ use sts2_engine::{
     AncientRelicGroup, CardTag, EventAmount, EventCardFilter, EventCondition, EventDefinition,
     EventEffect, EventGeneration, EventOption,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
+    ChoiceSemantics,
+};
 
 use crate::id;
 
@@ -103,6 +107,11 @@ pub fn stone_of_all_time() -> EventDefinition {
                         // order, and takes the only one without asking.
                         EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                             sts2_engine::CardSelectCmd::FromDeckForEnchantment {
+                                semantics: ChoiceSemantics::known(vec![
+                                    ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                                        .model(id("ENCHANTMENT.VIGOROUS"))
+                                        .amount(8),
+                                ]),
                                 enchantment: id("ENCHANTMENT.VIGOROUS"),
                                 amount: 8,
                                 filter: sts2_engine::CardFilter::Any,
@@ -348,6 +357,11 @@ pub fn self_help_book() -> EventDefinition {
                 name,
                 vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                     sts2_engine::CardSelectCmd::FromDeckForEnchantment {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                                .model(id(enchantment))
+                                .amount(2),
+                        ]),
                         enchantment: id(enchantment),
                         amount: 2,
                         filter: sts2_engine::CardFilter::OfType(card_type),
@@ -496,6 +510,11 @@ pub fn symbiote() -> EventDefinition {
                     "Approach",
                     vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForEnchantment {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                                    .model(id("ENCHANTMENT.CORRUPTED"))
+                                    .amount(1),
+                            ]),
                             enchantment: id("ENCHANTMENT.CORRUPTED"),
                             amount: 1,
                             filter: sts2_engine::CardFilter::Any,
@@ -518,6 +537,10 @@ pub fn symbiote() -> EventDefinition {
                     "Kill it with fire",
                     vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                                    .rolled(),
+                            ]),
                             prefs: sts2_engine::SelectorPrefs::exactly(1),
                             then: vec![sts2_engine::Command::Card(
                                 sts2_engine::CardCmd::TransformDeckCards {
@@ -557,6 +580,11 @@ pub fn spiraling_whirlpool() -> EventDefinition {
                 "Observe",
                 vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                     sts2_engine::CardSelectCmd::FromDeckForEnchantment {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                                .model(id("ENCHANTMENT.SPIRAL"))
+                                .amount(1),
+                        ]),
                         enchantment: id("ENCHANTMENT.SPIRAL"),
                         amount: 1,
                         // The extra filter is what Spiral can go on again,
@@ -647,6 +675,10 @@ pub fn amalgamator() -> EventDefinition {
             name,
             vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromDeckForRemoval {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Remove, ChoiceScope::Run)
+                            .to(ChoiceDestination::Removed),
+                    ]),
                     prefs: sts2_engine::SelectorPrefs::exactly(2),
                     filter: sts2_engine::CardFilter::BasicOfTag(tag),
                     then: vec![
@@ -997,6 +1029,10 @@ pub fn spirit_grafter() -> EventDefinition {
                 vec![
                     EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForUpgrade {
+                            semantics: ChoiceSemantics::known(vec![ChoiceOp::new(
+                                ChoiceOperationKind::Upgrade,
+                                ChoiceScope::Run,
+                            )]),
                             prefs: sts2_engine::SelectorPrefs::exactly(1),
                             then: vec![sts2_engine::Command::Card(sts2_engine::CardCmd::Upgrade {
                                 cards: sts2_engine::CardSelector::Chosen,
@@ -1506,6 +1542,10 @@ pub fn sapphire_seed() -> EventDefinition {
                     EventEffect::Heal(EventAmount::Fixed(9)),
                     EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForUpgrade {
+                            semantics: ChoiceSemantics::known(vec![ChoiceOp::new(
+                                ChoiceOperationKind::Upgrade,
+                                ChoiceScope::Run,
+                            )]),
                             prefs: sts2_engine::SelectorPrefs::exactly(1),
                             then: vec![sts2_engine::Command::Card(sts2_engine::CardCmd::Upgrade {
                                 cards: sts2_engine::CardSelector::Chosen,
@@ -1519,6 +1559,11 @@ pub fn sapphire_seed() -> EventDefinition {
                 "Plant",
                 vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                     sts2_engine::CardSelectCmd::FromDeckForEnchantment {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                                .model(id("ENCHANTMENT.SOWN"))
+                                .amount(1),
+                        ]),
                         enchantment: id("ENCHANTMENT.SOWN"),
                         amount: 1,
                         filter: sts2_engine::CardFilter::Any,
@@ -1552,6 +1597,10 @@ pub fn aroma_of_chaos() -> EventDefinition {
                 "Let go",
                 vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                     sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                                .rolled(),
+                        ]),
                         prefs: sts2_engine::SelectorPrefs::exactly(1),
                         then: vec![sts2_engine::Command::Card(
                             sts2_engine::CardCmd::TransformDeckCards {
@@ -1571,6 +1620,10 @@ pub fn aroma_of_chaos() -> EventDefinition {
                 "Maintain control",
                 vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                     sts2_engine::CardSelectCmd::FromDeckForUpgrade {
+                        semantics: ChoiceSemantics::known(vec![ChoiceOp::new(
+                            ChoiceOperationKind::Upgrade,
+                            ChoiceScope::Run,
+                        )]),
                         prefs: sts2_engine::SelectorPrefs::exactly(1),
                         then: vec![sts2_engine::Command::Card(sts2_engine::CardCmd::Upgrade {
                             cards: sts2_engine::CardSelector::Chosen,
@@ -1700,6 +1753,10 @@ pub fn trial(pool: &sts2_engine::GeneratedRewardSpec) -> EventDefinition {
                             curse("CARD.SHAME"),
                             EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                                 sts2_engine::CardSelectCmd::FromDeckForUpgrade {
+                                    semantics: ChoiceSemantics::known(vec![ChoiceOp::new(
+                                        ChoiceOperationKind::Upgrade,
+                                        ChoiceScope::Run,
+                                    )]),
                                     prefs: sts2_engine::SelectorPrefs::exactly(2),
                                     then: vec![sts2_engine::Command::Card(
                                         sts2_engine::CardCmd::Upgrade {
@@ -1747,6 +1804,13 @@ pub fn trial(pool: &sts2_engine::GeneratedRewardSpec) -> EventDefinition {
                             curse("CARD.DOUBT"),
                             EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                                 sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                                    semantics: ChoiceSemantics::known(vec![
+                                        ChoiceOp::new(
+                                            ChoiceOperationKind::Transform,
+                                            ChoiceScope::Run,
+                                        )
+                                        .rolled(),
+                                    ]),
                                     prefs: sts2_engine::SelectorPrefs::exactly(2),
                                     then: vec![sts2_engine::Command::Card(
                                         sts2_engine::CardCmd::TransformDeckCards {
@@ -2062,6 +2126,10 @@ pub fn whispering_hollow() -> EventDefinition {
                 vec![EventEffect::Run(vec![
                     sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                                    .rolled(),
+                            ]),
                             prefs: sts2_engine::SelectorPrefs::exactly(1),
                             then: vec![sts2_engine::Command::Card(
                                 sts2_engine::CardCmd::TransformDeckCards {
@@ -2132,6 +2200,10 @@ fn ungated(option: EventOption) -> sts2_engine::ConditionalOption {
 fn remove_for_a_curse(count: usize, curse: &str) -> EventEffect {
     EventEffect::Run(vec![sts2_engine::Command::CardSelect(
         sts2_engine::CardSelectCmd::FromDeckForRemoval {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Remove, ChoiceScope::Run)
+                    .to(ChoiceDestination::Removed),
+            ]),
             prefs: sts2_engine::SelectorPrefs::exactly(count),
             filter: sts2_engine::CardFilter::Any,
             then: vec![
@@ -2151,6 +2223,11 @@ fn remove_for_a_curse(count: usize, curse: &str) -> EventEffect {
 fn enchant_deck_cards(enchantment: &str, picks: usize) -> EventEffect {
     EventEffect::Run(vec![sts2_engine::Command::CardSelect(
         sts2_engine::CardSelectCmd::FromDeckForEnchantment {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                    .model(id(enchantment))
+                    .amount(1),
+            ]),
             enchantment: id(enchantment),
             amount: 1,
             filter: sts2_engine::CardFilter::Any,
@@ -2356,6 +2433,10 @@ pub fn morphic_grove() -> EventDefinition {
                     )),
                     sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                                    .rolled(),
+                            ]),
                             prefs: sts2_engine::SelectorPrefs::exactly(2),
                             then: vec![sts2_engine::Command::Card(
                                 sts2_engine::CardCmd::TransformDeckCards {
@@ -2495,6 +2576,11 @@ pub fn wood_carvings() -> EventDefinition {
             name,
             vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromDeckGeneric {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                            .model(id(into))
+                            .inheriting(true, false),
+                    ]),
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
                     filter: sts2_engine::CardFilter::BasicTransformable,
                     then: vec![sts2_engine::Command::Card(
@@ -2891,6 +2977,10 @@ pub fn battleworn_dummy(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
 /// list from the second roll on and is the one plate that costs nothing —
 /// though the option is still locked where the purse cannot pay the forty.
 #[must_use]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one event with its explicit selection effect"
+)]
 pub fn endless_conveyor(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
     let dish = |id: &str, weight: i32, effects: Vec<EventEffect>| sts2_engine::ConveyorDish {
         id: id.to_owned(),
@@ -2916,6 +3006,10 @@ pub fn endless_conveyor(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
                     3,
                     vec![EventEffect::Run(vec![sts2_engine::Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                                    .rolled(),
+                            ]),
                             prefs: sts2_engine::SelectorPrefs::exactly(1),
                             then: vec![sts2_engine::Command::Card(
                                 sts2_engine::CardCmd::TransformDeckCards {

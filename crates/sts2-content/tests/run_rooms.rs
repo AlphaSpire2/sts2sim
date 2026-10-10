@@ -618,6 +618,7 @@ fn a_relic_obtained_outside_a_combat_holds_the_rest_of_its_own_body() {
         keeps_first_hand: false,
         on_obtained: vec![
             sts2_engine::Command::CardSelect(sts2_engine::CardSelectCmd::FromDeckGeneric {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 prefs: sts2_engine::SelectorPrefs::exactly(1).confirmed(),
                 filter: sts2_engine::CardFilter::Any,
                 then: Vec::new(),

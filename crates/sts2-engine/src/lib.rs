@@ -5,6 +5,7 @@
 
 mod ascension;
 mod belief;
+mod choice_semantics;
 mod command;
 mod model;
 mod netsort;
@@ -15,6 +16,7 @@ mod simulator;
 
 pub use ascension::*;
 pub use belief::{ACT_BELIEF_MODEL_VERSION, ActBeliefState, BELIEF_MODEL_VERSION, BeliefState};
+pub use choice_semantics::*;
 pub use command::*;
 pub use model::*;
 pub use run::*;

@@ -79,6 +79,7 @@ fn block(amount: i32) -> Command {
 /// the hand holds at least one.
 fn hand_screen(then: Vec<Command>) -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: sts2_engine::ChoiceSemantics::default(),
         maximum: None,
         exact_count: None,
         prefs: SelectorPrefs::exactly(1),

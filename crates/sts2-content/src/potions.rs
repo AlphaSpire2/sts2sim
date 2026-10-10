@@ -11,6 +11,10 @@ use sts2_engine::{
     PotionCmd, PotionDefinition, PotionOrigin, PotionRarity, PotionUsage, PowerCmd, SelectorPrefs,
     TargetType, TemporaryCost, ValueProps,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
+    ChoiceScope, ChoiceSemantics,
+};
 
 use crate::id;
 
@@ -114,6 +118,14 @@ fn offers_a_card(
         PotionRarity::Common,
         TargetType::SelfTarget,
         vec![Command::CardSelect(CardSelectCmd::ChooseAGeneratedCard {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                    .to(ChoiceDestination::Hand),
+                ChoiceOp::new(ChoiceOperationKind::SetCost, ChoiceScope::Combat)
+                    .amount(0)
+                    .lasting(ChoiceDuration::UntilPlayedOrTurnEnds)
+                    .including_stars(),
+            ]),
             pool,
             count: 3,
             filter,
@@ -381,6 +393,10 @@ fn ironclad_potions() -> Vec<PotionDefinition> {
             PotionRarity::Uncommon,
             TargetType::SelfTarget,
             vec![Command::CardSelect(CardSelectCmd::FromHand {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Exhaust, ChoiceScope::Combat)
+                        .to(ChoiceDestination::Exhaust),
+                ]),
                 maximum: None,
                 exact_count: None,
                 // As many as the hand holds, none of them if that is what the
@@ -496,6 +512,10 @@ fn shared_potions() -> Vec<PotionDefinition> {
             PotionRarity::Rare,
             TargetType::SelfTarget,
             vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                        .to(ChoiceDestination::Hand),
+                ]),
                 exact_count: None,
                 pile: PileName::Draw,
                 prefs: SelectorPrefs::exactly(1),
@@ -607,6 +627,10 @@ fn shared_potions() -> Vec<PotionDefinition> {
             PotionRarity::Uncommon,
             TargetType::SelfTarget,
             vec![Command::CardSelect(CardSelectCmd::FromHandForDiscard {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Discard, ChoiceScope::Combat)
+                        .to(ChoiceDestination::Discard),
+                ]),
                 maximum: None,
                 exact_count: None,
                 prefs: SelectorPrefs::between(0, 999_999_999),
@@ -643,6 +667,14 @@ fn shared_potions() -> Vec<PotionDefinition> {
             PotionRarity::Rare,
             TargetType::SelfTarget,
             vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::SetCost, ChoiceScope::Combat)
+                        .amount(0)
+                        .lasting(ChoiceDuration::UntilPlayedOrTurnEnds)
+                        .including_stars(),
+                    ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                        .to(ChoiceDestination::Hand),
+                ]),
                 exact_count: None,
                 pile: PileName::Discard,
                 prefs: SelectorPrefs::exactly(1),
@@ -806,6 +838,12 @@ fn shared_potions() -> Vec<PotionDefinition> {
             PotionRarity::Uncommon,
             TargetType::SelfTarget,
             vec![Command::CardSelect(CardSelectCmd::FromHand {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::SetCost, ChoiceScope::Combat)
+                        .amount(0)
+                        .lasting(ChoiceDuration::Combat)
+                        .including_stars(),
+                ]),
                 maximum: None,
                 exact_count: None,
                 prefs: SelectorPrefs::between(1, 1),

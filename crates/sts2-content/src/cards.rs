@@ -8,6 +8,10 @@ use sts2_engine::{
     CardType, CardUpgrade, Command, Condition, Count, CreatureCmd, CreatureSelector, DamageCmd,
     PileName, PlayerCmd, PowerCmd, PowerRef, TargetType, ValueProps,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
+    ChoiceSemantics,
+};
 
 use crate::id;
 
@@ -347,8 +351,13 @@ pub fn ironclad_cards() -> Vec<CardDefinition> {
 
 /// A card the play puts a screen up for: the selection is a first-class
 /// decision, and the commands after it act on what came back.
-pub(crate) fn choosing_from_hand(prefs: sts2_engine::SelectorPrefs, then: Vec<Command>) -> Command {
+pub(crate) fn choosing_from_hand(
+    prefs: sts2_engine::SelectorPrefs,
+    semantics: ChoiceSemantics,
+    then: Vec<Command>,
+) -> Command {
     Command::CardSelect(sts2_engine::CardSelectCmd::FromHand {
+        semantics,
         maximum: None,
         exact_count: None,
         prefs,
@@ -362,6 +371,10 @@ pub(crate) fn choosing_from_hand(prefs: sts2_engine::SelectorPrefs, then: Vec<Co
 fn exhaust_one_of_hand() -> Command {
     choosing_from_hand(
         sts2_engine::SelectorPrefs::exactly(1),
+        ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Exhaust, ChoiceScope::Combat)
+                .to(ChoiceDestination::Exhaust),
+        ]),
         vec![Command::Card(CardCmd::Exhaust {
             cards: CardSelector::Chosen,
         })],
@@ -531,6 +544,10 @@ fn pool_skills() -> Vec<CardDefinition> {
                 vec![
                     block(5),
                     Command::CardSelect(sts2_engine::CardSelectCmd::FromHandForUpgrade {
+                        semantics: ChoiceSemantics::known(vec![ChoiceOp::new(
+                            ChoiceOperationKind::Upgrade,
+                            ChoiceScope::Combat,
+                        )]),
                         then: vec![Command::Card(CardCmd::Upgrade {
                             cards: CardSelector::Chosen,
                         })],
@@ -1127,6 +1144,10 @@ fn headbutt(damage: i32) -> Vec<Command> {
     vec![
         attack(damage),
         Command::CardSelect(sts2_engine::CardSelectCmd::FromCombatPile {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                    .to(ChoiceDestination::DrawTop),
+            ]),
             exact_count: None,
             pile: PileName::Discard,
             prefs: sts2_engine::SelectorPrefs::exactly(1),

@@ -826,6 +826,7 @@ enum CombatOutcome {
 fn choose_cards_decision(choice: &SuspendedChoice) -> DecisionContext {
     DecisionContext::ChooseCards {
         choice_id: choice.id,
+        semantics: choice.semantics.clone().from_origin(choice.identity),
         identity: choice.identity,
         screen: choice.screen,
         minimum: choice.minimum,
@@ -7006,6 +7007,7 @@ impl Simulator {
                     cancelable: false,
                     alternatives: Vec::new(),
                     bundles: Vec::new(),
+                    semantics: crate::ChoiceSemantics::deck_gain(),
                     purpose: ChoicePurpose::AddChosenCardsToDeck,
                     picked: Vec::new(),
                     hand_filters: None,
@@ -7038,6 +7040,7 @@ impl Simulator {
                     cancelable: false,
                     alternatives: Vec::new(),
                     bundles: Vec::new(),
+                    semantics: crate::ChoiceSemantics::deck_gain(),
                     purpose: ChoicePurpose::AddChosenCardsToDeck,
                     picked: Vec::new(),
                     hand_filters: None,
@@ -7210,6 +7213,7 @@ impl Simulator {
                 };
                 self.run_out_of_combat(&Command::CardSelect(
                     CardSelectCmd::SimpleGridForRewards {
+                        semantics: crate::ChoiceSemantics::deck_gain(),
                         creations: vec![
                             creation(crate::CardRarity::Common),
                             creation(crate::CardRarity::Uncommon),
@@ -13776,6 +13780,7 @@ impl Simulator {
                 exact_count,
                 filter,
                 then,
+                ..
             }
             // The gold glow on the cards worth discarding is the only thing the
             // discard-flavoured hand screen adds, and a glow does not cross this
@@ -13786,6 +13791,7 @@ impl Simulator {
                 exact_count,
                 filter,
                 then,
+                ..
             } => {
                 let mut prefs = *prefs;
                 if let Some(count) = exact_count {
@@ -13810,7 +13816,7 @@ impl Simulator {
                     then,
                 )
             }
-            CardSelectCmd::FromHandForUpgrade { then } => (
+            CardSelectCmd::FromHandForUpgrade { then, .. } => (
                 SelectionSource::CombatPile(PileName::Hand),
                 SelectorPrefs::exactly(1),
                 vec![CardFilter::Upgradable],
@@ -13824,6 +13830,7 @@ impl Simulator {
                 restricted_to_chosen,
                 filter,
                 then,
+                ..
             } => {
                 if *restricted_to_chosen {
                     only = Some(card_ids(&context.chosen));
@@ -13850,7 +13857,7 @@ impl Simulator {
                 }
                 (SelectionSource::CombatPile(*pile), prefs, vec![*filter], then)
             }
-            CardSelectCmd::FromDeckForUpgrade { prefs, then } => (
+            CardSelectCmd::FromDeckForUpgrade { prefs, then, .. } => (
                 SelectionSource::Deck,
                 *prefs,
                 vec![CardFilter::Upgradable],
@@ -13862,6 +13869,7 @@ impl Simulator {
                 prefs,
                 filter,
                 then,
+                ..
             } => (
                 SelectionSource::Deck,
                 *prefs,
@@ -13872,6 +13880,7 @@ impl Simulator {
                 prefs,
                 filter,
                 then,
+                ..
             } => (SelectionSource::Deck, *prefs, vec![*filter], then),
             // The same roll, laid out as a grid rather than as the
             // three-card screen.
@@ -13881,6 +13890,7 @@ impl Simulator {
                 filter,
                 prefs,
                 then,
+                ..
             } => {
                 let rolled = self.roll_pool_cards(pool, *count, true, *filter, None)?;
                 (
@@ -13897,6 +13907,7 @@ impl Simulator {
                 upgraded,
                 can_skip,
                 then,
+                ..
             } => {
                 let mut rolled = self.roll_pool_cards(pool, *count, true, *filter, None)?;
                 // The whole offer is upgraded before the screen goes up: what is
@@ -13928,6 +13939,7 @@ impl Simulator {
                 cards,
                 can_skip,
                 then,
+                ..
             } => {
                 if cards.len() > 3 {
                     return Err(EngineError::new(ErrorCode::InternalInvariant)
@@ -13950,6 +13962,7 @@ impl Simulator {
                 cards,
                 prefs,
                 then,
+                ..
             } => (
                 SelectionSource::Offered(cards.clone()),
                 *prefs,
@@ -13963,6 +13976,7 @@ impl Simulator {
                 creations,
                 prefs,
                 then,
+                ..
             } => {
                 let mut cards = Vec::new();
                 for creation in creations.clone() {
@@ -13979,6 +13993,7 @@ impl Simulator {
                 creation,
                 can_skip,
                 then,
+                ..
             } => {
                 let cards = self.create_cards(&creation.clone())?;
                 if cards.len() > 3 {
@@ -14002,7 +14017,7 @@ impl Simulator {
             // and nothing else: the build builds its previews off canonical
             // models and rolls nothing for them. What crosses this boundary is
             // the cards it offers, which are the deck's transformable ones.
-            CardSelectCmd::FromDeckForTransformation { prefs, then } => (
+            CardSelectCmd::FromDeckForTransformation { prefs, then, .. } => (
                 SelectionSource::Deck,
                 *prefs,
                 vec![CardFilter::NotOfType(crate::CardType::Quest), CardFilter::Removable],
@@ -14053,6 +14068,7 @@ impl Simulator {
                 commons,
                 uncommons,
                 then,
+                ..
             } => {
                 let (cards, groups) =
                     self.generate_card_bundles(pools, *count, *commons, *uncommons)?;
@@ -14086,6 +14102,7 @@ impl Simulator {
             &filters,
             only.as_deref(),
             bundles,
+            screen.semantics().clone(),
             purpose,
             choice_screen(screen),
             screen_name(screen),
@@ -14132,6 +14149,7 @@ impl Simulator {
             filters,
             only,
             Vec::new(),
+            purpose.semantics(),
             purpose,
             screen_kind,
             screen,
@@ -14148,10 +14166,15 @@ impl Simulator {
         filters: &[CardFilter],
         only: Option<&[CardInstanceId]>,
         bundles: Vec<Vec<usize>>,
+        semantics: crate::ChoiceSemantics,
         purpose: ChoicePurpose,
         screen_kind: ChoiceScreen,
         screen: &'static str,
     ) -> Result<Option<Vec<ChosenCard>>, EngineError> {
+        let semantics = semantics.from_origin(source.identity());
+        semantics.validate().map_err(|error| {
+            EngineError::new(ErrorCode::InvalidConfig).with_detail("choice_semantics", error)
+        })?;
         let candidates = self.selection_candidates(source, filters, only)?;
         if candidates.is_empty() {
             return Ok(Some(Vec::new()));
@@ -14203,6 +14226,7 @@ impl Simulator {
                 only: only.map(<[CardInstanceId]>::to_vec),
                 bundles: bundles.clone(),
                 purpose: purpose.clone(),
+                semantics: semantics.clone(),
                 screen_kind,
                 screen: screen.to_owned(),
                 owed: Vec::new(),
@@ -14219,6 +14243,7 @@ impl Simulator {
             alternatives: Vec::new(),
             bundles,
             purpose,
+            semantics,
             picked: Vec::new(),
             hand_filters: (matches!(source, SelectionSource::CombatPile(PileName::Hand))
                 && only.is_none())
@@ -21778,6 +21803,7 @@ impl Simulator {
                     }))
                     .collect(),
                 bundles: Vec::new(),
+                semantics: crate::ChoiceSemantics::deck_gain(),
                 purpose: ChoicePurpose::AddRewardCard {
                     set_id,
                     reward_index,
@@ -24220,6 +24246,7 @@ impl Simulator {
                 alternatives: Vec::new(),
                 bundles: screen.bundles,
                 purpose: screen.purpose,
+                semantics: screen.semantics,
                 picked: Vec::new(),
                 hand_filters: None,
             };
@@ -27509,6 +27536,46 @@ impl Simulator {
             })
     }
 
+    fn removal_opportunity(&self, gold_cost: i32) -> crate::ChoiceOpportunity {
+        crate::ChoiceOpportunity {
+            semantics: crate::ChoiceSemantics::deck_removal(),
+            candidate_indices: self
+                .state
+                .run_player
+                .deck
+                .iter()
+                .enumerate()
+                .filter(|(_, card)| self.fingerprint_passes(card, &[CardFilter::Removable]))
+                .map(|(index, _)| index)
+                .collect(),
+            gold_cost,
+        }
+    }
+
+    fn visible_rewards(&self, set: &crate::RewardSet) -> Vec<crate::VisibleReward> {
+        crate::VisibleReward::of_set(set)
+            .into_iter()
+            .map(|mut offer| {
+                offer.choice = if offer.reward_type == "card_removal" {
+                    Some(self.removal_opportunity(0))
+                } else if !offer.offered_cards.is_empty() || offer.special_card.is_some() {
+                    Some(crate::ChoiceOpportunity {
+                        semantics: crate::ChoiceSemantics::deck_gain(),
+                        candidate_indices: (0..offer
+                            .offered_cards
+                            .len()
+                            .max(usize::from(offer.special_card.is_some())))
+                            .collect(),
+                        gold_cost: 0,
+                    })
+                } else {
+                    None
+                };
+                offer
+            })
+            .collect()
+    }
+
     fn compute_decision(&self) -> DecisionContext {
         if let Some(result) = self.state.terminal {
             return DecisionContext::Terminal { result };
@@ -27523,7 +27590,7 @@ impl Simulator {
                     |reward_set| DecisionContext::Rewards {
                         set_id: reward_set.id,
                         player_slot: reward_set.player_slot.clone(),
-                        offers: crate::VisibleReward::of_set(reward_set),
+                        offers: self.visible_rewards(reward_set),
                     },
                 );
             }
@@ -27542,7 +27609,7 @@ impl Simulator {
             return DecisionContext::Rewards {
                 set_id: reward_set.id,
                 player_slot: reward_set.player_slot.clone(),
-                offers: crate::VisibleReward::of_set(reward_set),
+                offers: self.visible_rewards(reward_set),
             };
         }
         // The fog board stands over the event's own page: while it is up, the
@@ -27592,6 +27659,7 @@ impl Simulator {
                 offers: offers.clone(),
                 removal_price: *removal_price,
                 removal_used: *removal_used,
+                removal_choice: self.removal_opportunity(*removal_price),
             },
             (RunPhase::Room, Some(ActiveRoom::RestSite { options, left_open })) => {
                 DecisionContext::RestSite {
@@ -29247,6 +29315,7 @@ struct KeyPreviewView<'a> {
 #[serde(untagged)]
 enum DecisionKeyView<'a> {
     ChooseCards {
+        semantics: &'a crate::ChoiceSemantics,
         choice_id: &'a ChoiceId,
         identity: &'a crate::ChoiceIdentity,
         screen: &'a crate::ChoiceScreen,
@@ -29265,6 +29334,7 @@ impl<'a> DecisionKeyView<'a> {
     fn of(decision: &'a DecisionContext) -> Self {
         match decision {
             DecisionContext::ChooseCards {
+                semantics,
                 choice_id,
                 identity,
                 screen,
@@ -29285,6 +29355,7 @@ impl<'a> DecisionKeyView<'a> {
                 let mut picked = key_handle_views(picked);
                 sort_card_views(&mut picked, |view| &view.fingerprint.model_id);
                 Self::ChooseCards {
+                    semantics,
                     choice_id,
                     identity,
                     screen,

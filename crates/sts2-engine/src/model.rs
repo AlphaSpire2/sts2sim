@@ -4225,6 +4225,9 @@ pub struct SuspendedHookScreen {
     #[serde(default)]
     pub bundles: Vec<Vec<usize>>,
     pub purpose: ChoicePurpose,
+    /// Public meaning retained independently of the execution continuation.
+    #[serde(default)]
+    pub semantics: crate::ChoiceSemantics,
     /// The semantic screen family used by recorder-compatible consumers.
     #[serde(default)]
     pub screen_kind: ChoiceScreen,
@@ -4831,6 +4834,9 @@ pub struct SuspendedChoice {
     #[serde(default)]
     pub bundles: Vec<Vec<usize>>,
     pub purpose: ChoicePurpose,
+    /// Public meaning retained independently of the execution continuation.
+    #[serde(default)]
+    pub semantics: crate::ChoiceSemantics,
     /// What the player has clicked into the selection so far. The screen is
     /// worked one card at a time — a click toggles a card in or out, and the
     /// selection completes once it holds enough — so a screen with more
@@ -5213,6 +5219,9 @@ pub struct RewardSet {
 )]
 pub struct VisibleReward {
     pub index: usize,
+    /// Selection opportunity associated with this reward line.
+    #[serde(default)]
+    pub choice: Option<crate::ChoiceOpportunity>,
     /// Which kind of reward line this is — gold, a card offer, a relic, a
     /// potion — under the name the fingerprint carries.
     pub reward_type: String,
@@ -5243,6 +5252,7 @@ impl VisibleReward {
     pub fn of(item: &RewardItem) -> Self {
         Self {
             index: item.index,
+            choice: None,
             reward_type: item.fingerprint.reward_type.clone(),
             model_id: item.fingerprint.model_id.clone(),
             gold_amount: item.fingerprint.gold_amount,
@@ -5844,6 +5854,7 @@ pub enum DecisionContext {
         offers: Vec<crate::ShopOffer>,
         removal_price: i32,
         removal_used: bool,
+        removal_choice: crate::ChoiceOpportunity,
     },
     RestSite {
         options: Vec<crate::RestSiteOptionState>,
@@ -5866,6 +5877,8 @@ pub enum DecisionContext {
         turn: u32,
     },
     ChooseCards {
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         choice_id: ChoiceId,
         /// How the candidates are named, so that a caller knows whether an
         /// index is a combat-pile position, a deck position, or a place in a
@@ -6127,10 +6140,11 @@ pub struct VisibleCreature {
 /// entries plus a digest of the older prefix, instead of the whole event
 /// log. Version 8 carries the resolved numbers the cards in hand display —
 /// [`CardPreview`], with the aimed number against each enemy the play can
-/// name. Version 9 retains the concrete card-selection screen and its
+/// name. Version 10 adds public selection semantics and macro opportunities.
+/// Version 9 retains the concrete card-selection screen and its
 /// non-card alternatives, so a consumer can reproduce the exact offer
 /// context and positional indexes.
-pub const AGENT_OBSERVATION_VERSION: u32 = 9;
+pub const AGENT_OBSERVATION_VERSION: u32 = 10;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AgentObservation {
@@ -6360,4 +6374,22 @@ pub enum InvariantViolation {
     StaleTarget(CreatureCombatId),
     ChoiceMismatch,
     UnsettledQueue,
+}
+
+impl ChoicePurpose {
+    /// Explicit engine-owned purposes share metadata with their public offers.
+    #[must_use]
+    pub fn semantics(&self) -> crate::ChoiceSemantics {
+        match self {
+            Self::RunCommands { .. } => crate::ChoiceSemantics::default(),
+            Self::AddChosenCardsToDeck | Self::AddRewardCard { .. } => {
+                crate::ChoiceSemantics::deck_gain()
+            }
+            Self::RestSmith { .. } => crate::ChoiceSemantics::deck_upgrade(),
+            Self::RestCook { .. }
+            | Self::RemoveDeckCardsForGold { .. }
+            | Self::RemoveDeckCardForReward { .. }
+            | Self::RemoveDeckCardAtShop { .. } => crate::ChoiceSemantics::deck_removal(),
+        }
+    }
 }

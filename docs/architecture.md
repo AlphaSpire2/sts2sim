@@ -2349,3 +2349,10 @@ Every ordinary decision boundary must satisfy at least:
 
 The information classification and compatibility/error rules in
 [`fidelity-contract.md`](fidelity-contract.md) are part of this API.
+
+### Public selection effects
+
+Observation 10 carries producer-authored choice semantics on active and deferred
+selections and public macro opportunities. The descriptor travels with suspended
+state and canonical decision keys independently of execution commands. See the
+[public choice contract](choice-semantics.md) for its vocabulary and coverage checks.

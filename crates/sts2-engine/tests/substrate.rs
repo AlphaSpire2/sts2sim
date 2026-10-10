@@ -169,6 +169,7 @@ fn registry() -> Arc<ContentRegistry> {
         // A hand selection, and behind it a hit worth four for each card
         // picked: the shape of a card that asks before it lands.
         effects: vec![Command::CardSelect(CardSelectCmd::FromHand {
+            semantics: sts2_engine::ChoiceSemantics::default(),
             maximum: None,
             exact_count: None,
             prefs: SelectorPrefs::exactly(1).confirmed(),

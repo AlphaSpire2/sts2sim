@@ -12,6 +12,10 @@ use sts2_engine::{
     MoveBranch, MoveCondition, MoveIntent, MoveRepeat, PileName, PowerCmd, PowerRef, SpawnSlot,
     StunFollowUp, ValueProps, value_if_ascension,
 };
+use sts2_engine::{
+    ChoiceCondition, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
+    ChoiceSemantics, ChoiceSubject,
+};
 
 use crate::id;
 
@@ -4000,6 +4004,18 @@ fn curse_of_knowledge(
             times: round,
         },
         then: vec![Command::CardSelect(CardSelectCmd::ChooseACard {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::ApplyPower, ChoiceScope::Combat)
+                    .on(ChoiceSubject::Player)
+                    .model(id("POWER.DISINTEGRATION_POWER"))
+                    .amount(disintegration)
+                    .when(ChoiceCondition::SelectedModel(id("CARD.DISINTEGRATION"))),
+                ChoiceOp::new(ChoiceOperationKind::ApplyPower, ChoiceScope::Combat)
+                    .on(ChoiceSubject::Player)
+                    .model(id(other_power))
+                    .amount(other_amount)
+                    .when(ChoiceCondition::SelectedModel(id(other))),
+            ]),
             cards: vec![
                 sts2_engine::CardFingerprint::base(id("CARD.DISINTEGRATION")),
                 sts2_engine::CardFingerprint::base(id(other)),

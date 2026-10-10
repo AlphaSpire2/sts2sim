@@ -733,6 +733,13 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
         "combat ending cancels the discard screen"
     );
     assert!(combat.queue.is_empty(), "the paused setup is cancelled");
+    assert!(
+        !matches!(
+            simulator.agent_observation().decision,
+            sts2_engine::DecisionContext::ChooseCards { .. }
+        ),
+        "cancelled choice semantics must not survive victory"
+    );
     assert!(combat.has_ended && combat.rewards_open);
     assert!(
         simulator.legal_actions().contains(&Action::Proceed),

@@ -996,6 +996,9 @@ impl SelectorPrefs {
 pub enum CardSelectCmd {
     /// A screen over the hand.
     FromHand {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         prefs: SelectorPrefs,
         /// The cap a body works out where the screen opens rather than
         /// declaring, which stands over `prefs.maximum`.
@@ -1011,6 +1014,9 @@ pub enum CardSelectCmd {
     /// The same screen over the hand with a gold glow on the cards worth
     /// discarding, which is presentation only.
     FromHandForDiscard {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         prefs: SelectorPrefs,
         #[serde(default)]
         maximum: Option<Amount>,
@@ -1021,12 +1027,20 @@ pub enum CardSelectCmd {
     },
     /// Exactly one upgradable card of the hand, taken without asking when
     /// there is only one.
-    FromHandForUpgrade { then: Vec<Command> },
+    FromHandForUpgrade {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
+        then: Vec<Command>,
+    },
     /// A screen over one of the combat piles. The pile must be a combat pile;
     /// a screen over the draw pile is presented in a stable order of the
     /// build's own rather than in pile order, so it leaks nothing about the
     /// draw.
     FromCombatPile {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         pile: PileName,
         prefs: SelectorPrefs,
         /// The cap a body works out before it opens the screen, where it does:
@@ -1051,18 +1065,27 @@ pub enum CardSelectCmd {
     },
     /// A screen over the upgradable cards of the run deck.
     FromDeckForUpgrade {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         prefs: SelectorPrefs,
         then: Vec<Command>,
     },
     /// A screen over the removable cards of the run deck, with a filter on
     /// top of the removability the screen applies itself.
     FromDeckForRemoval {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         prefs: SelectorPrefs,
         filter: CardFilter,
         then: Vec<Command>,
     },
     /// A screen over the run deck with no purpose of its own attached.
     FromDeckGeneric {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         prefs: SelectorPrefs,
         filter: CardFilter,
         then: Vec<Command>,
@@ -1070,6 +1093,9 @@ pub enum CardSelectCmd {
     /// One of at most three cards that stand in no pile, with an optional
     /// skip.
     ChooseACard {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         cards: Vec<CardFingerprint>,
         can_skip: bool,
         then: Vec<Command>,
@@ -1078,6 +1104,9 @@ pub enum CardSelectCmd {
     /// three-card screen, which is what a body laying out five of them
     /// needs.
     SimpleGridOfGeneratedCards {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         pool: CardPoolRef,
         count: usize,
         #[serde(default = "any_card")]
@@ -1090,6 +1119,9 @@ pub enum CardSelectCmd {
     /// shuffles what is left on the combat card-generation stream, and takes
     /// the first `count`.
     ChooseAGeneratedCard {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         pool: CardPoolRef,
         count: usize,
         /// A narrowing a body puts over the pool before the roll, which is how
@@ -1106,6 +1138,9 @@ pub enum CardSelectCmd {
     },
     /// A grid over a list of cards that stand in no pile.
     SimpleGrid {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         cards: Vec<CardFingerprint>,
         prefs: SelectorPrefs,
         then: Vec<Command>,
@@ -1122,12 +1157,18 @@ pub enum CardSelectCmd {
     /// of its own, so the same card can stand twice in a grid built from
     /// two.
     SimpleGridForRewards {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         creations: Vec<CardCreation>,
         prefs: SelectorPrefs,
         then: Vec<Command>,
     },
     /// The three-card screen over cards a reward creation has just made.
     ChooseACreatedCard {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         creation: CardCreation,
         can_skip: bool,
         then: Vec<Command>,
@@ -1136,6 +1177,9 @@ pub enum CardSelectCmd {
     /// become. Working out what a card would turn into needs the card pools a
     /// transform rolls against, which is not a subsystem this baseline has.
     FromDeckForTransformation {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         prefs: SelectorPrefs,
         then: Vec<Command>,
     },
@@ -1154,6 +1198,9 @@ pub enum CardSelectCmd {
     /// range, which makes the two the same thing, so the shared shortcut
     /// stands here.
     FromDeckForEnchantment {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         enchantment: ModelId,
         /// What the preview over each card shows the enchantment as being
         /// worth. Nothing acts on it.
@@ -1181,6 +1228,9 @@ pub enum CardSelectCmd {
     /// tested first, so a run of any other character reads no dice for it and
     /// reaches no such bundle.
     ChooseAGeneratedBundle {
+        /// Public effect explicitly supplied by the selection producer.
+        #[serde(default)]
+        semantics: crate::ChoiceSemantics,
         pools: Vec<CardPoolRef>,
         count: usize,
         commons: usize,
@@ -3210,5 +3260,29 @@ impl CommandContext {
     pub fn from_relic(mut self, relic: ModelId) -> Self {
         self.relic = Some(relic);
         self
+    }
+}
+
+impl CardSelectCmd {
+    #[must_use]
+    pub fn semantics(&self) -> &crate::ChoiceSemantics {
+        match self {
+            Self::FromHand { semantics, .. }
+            | Self::FromHandForDiscard { semantics, .. }
+            | Self::FromHandForUpgrade { semantics, .. }
+            | Self::FromCombatPile { semantics, .. }
+            | Self::FromDeckForUpgrade { semantics, .. }
+            | Self::FromDeckForRemoval { semantics, .. }
+            | Self::FromDeckGeneric { semantics, .. }
+            | Self::ChooseACard { semantics, .. }
+            | Self::SimpleGridOfGeneratedCards { semantics, .. }
+            | Self::ChooseAGeneratedCard { semantics, .. }
+            | Self::SimpleGrid { semantics, .. }
+            | Self::SimpleGridForRewards { semantics, .. }
+            | Self::ChooseACreatedCard { semantics, .. }
+            | Self::FromDeckForTransformation { semantics, .. }
+            | Self::FromDeckForEnchantment { semantics, .. }
+            | Self::ChooseAGeneratedBundle { semantics, .. } => semantics,
+        }
     }
 }

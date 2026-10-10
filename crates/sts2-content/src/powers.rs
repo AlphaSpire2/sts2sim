@@ -13,6 +13,10 @@ use sts2_engine::{
     PowerInstanceType, PowerRef, PowerStackType, PowerType, SelectorPrefs, StunFollowUp,
     TemporaryPower, ValueProps,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
+    ChoiceScope, ChoiceSemantics,
+};
 
 use crate::id;
 
@@ -2648,6 +2652,10 @@ pub fn shared_powers() -> Vec<PowerDefinition> {
             hooks: vec![ModifierHook::every_turn(
                 HookEvent::AfterShuffle,
                 vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                            .to(ChoiceDestination::Hand),
+                    ]),
                     pile: PileName::Draw,
                     prefs: SelectorPrefs::exactly(0),
                     maximum: None,
@@ -3848,6 +3856,10 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
                 ModifierHook::every_turn(
                     HookEvent::AfterPlayerTurnStart,
                     vec![Command::CardSelect(CardSelectCmd::FromHandForDiscard {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Discard, ChoiceScope::Combat)
+                                .to(ChoiceDestination::Discard),
+                        ]),
                         prefs: SelectorPrefs::exactly(0),
                         maximum: None,
                         exact_count: Some(stacks()),
@@ -3890,6 +3902,11 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
                 ModifierHook::every_turn(
                     HookEvent::BeforeFlushLate,
                     vec![Command::CardSelect(CardSelectCmd::FromHand {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::GrantKeyword, ChoiceScope::Combat)
+                                .keyword(sts2_engine::CardKeyword::Retain)
+                                .lasting(ChoiceDuration::Turn),
+                        ]),
                         prefs: SelectorPrefs::unbounded_range(),
                         maximum: Some(stacks()),
                         exact_count: None,
@@ -4445,6 +4462,9 @@ pub fn underdocks_powers() -> Vec<PowerDefinition> {
         hooks: vec![ModifierHook::every_turn(
             HookEvent::AfterPlayerTurnStart,
             vec![Command::CardSelect(CardSelectCmd::FromHand {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Combat).rolled(),
+                ]),
                 prefs: SelectorPrefs::exactly(0),
                 maximum: None,
                 exact_count: Some(stacks()),
@@ -4580,6 +4600,10 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
                 vec![
                     Command::CardPile(CardPileCmd::ShuffleIfNecessary),
                     Command::CardSelect(CardSelectCmd::FromCombatPile {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                                .to(ChoiceDestination::Hand),
+                        ]),
                         pile: PileName::Draw,
                         prefs: SelectorPrefs::exactly(0),
                         maximum: None,
@@ -4880,6 +4904,10 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
                 ModifierHook::every_turn(
                     HookEvent::AfterPlayerTurnStart,
                     vec![Command::CardSelect(CardSelectCmd::FromHand {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Exhaust, ChoiceScope::Combat)
+                                .to(ChoiceDestination::Exhaust),
+                        ]),
                         prefs: SelectorPrefs::exactly(0),
                         maximum: None,
                         exact_count: Some(stacks()),

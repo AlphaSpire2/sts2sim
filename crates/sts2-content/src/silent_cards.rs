@@ -19,6 +19,10 @@ use sts2_engine::{
     DrawPilePosition, HookCondition, HookEvent, ModifierHook, PileName, PowerCmd, PowerRef,
     RewardsCmd, SelectorPrefs, TargetType, ValueProps,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
+    ChoiceScope, ChoiceSemantics, ChoiceSubject, ChoiceTiming,
+};
 
 use crate::cards::{
     apply_power, attack, block, buff, card, costing_x, debuff, defending, draw, energy, exhausting,
@@ -96,6 +100,10 @@ fn discard(cards: CardSelector) -> Command {
 /// hand holds no more than that.
 fn discard_from_hand(count: usize) -> Command {
     Command::CardSelect(CardSelectCmd::FromHandForDiscard {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Discard, ChoiceScope::Combat)
+                .to(ChoiceDestination::Discard),
+        ]),
         prefs: SelectorPrefs::exactly(count),
         maximum: None,
         exact_count: None,
@@ -1370,6 +1378,11 @@ fn playable_on_an_empty_draw_pile(mut definition: CardDefinition) -> CardDefinit
 /// for this turn.
 fn hand_trick() -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::GrantKeyword, ChoiceScope::Combat)
+                .keyword(sts2_engine::CardKeyword::Sly)
+                .lasting(ChoiceDuration::Turn),
+        ]),
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
         exact_count: None,
@@ -1410,6 +1423,13 @@ fn malaise(bonus: i32) -> Vec<Command> {
 /// a copy of it and deals three of them into the next hand.
 fn nightmare() -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Copy, ChoiceScope::Combat)
+                .on(ChoiceSubject::Copy)
+                .count(3)
+                .at(ChoiceTiming::NextTurn)
+                .to(ChoiceDestination::Hand),
+        ]),
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
         exact_count: None,

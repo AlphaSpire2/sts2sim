@@ -169,6 +169,7 @@ fn block(amount: i32) -> Command {
 /// holds more than one.
 fn hand_screen(then: Vec<Command>) -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: sts2_engine::ChoiceSemantics::default(),
         maximum: None,
         exact_count: None,
         prefs: SelectorPrefs::exactly(1),
@@ -205,6 +206,7 @@ fn cards() -> Vec<CardDefinition> {
             CardRarity::Basic,
             vec![
                 Command::CardSelect(CardSelectCmd::FromCombatPile {
+                    semantics: sts2_engine::ChoiceSemantics::default(),
                     exact_count: None,
                     pile: PileName::Exhaust,
                     prefs: SelectorPrefs::exactly(1),
@@ -228,6 +230,7 @@ fn cards() -> Vec<CardDefinition> {
             "CARD.ASK_DRAW_PILE",
             CardRarity::Basic,
             vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 exact_count: None,
                 pile: PileName::Draw,
                 prefs: SelectorPrefs::exactly(1),
@@ -242,6 +245,7 @@ fn cards() -> Vec<CardDefinition> {
             CardRarity::Basic,
             vec![
                 Command::CardSelect(CardSelectCmd::FromHand {
+                    semantics: sts2_engine::ChoiceSemantics::default(),
                     maximum: None,
                     exact_count: None,
                     prefs: SelectorPrefs::exactly(1).cancelable().confirmed(),
@@ -255,6 +259,7 @@ fn cards() -> Vec<CardDefinition> {
             "CARD.ASK_HAND_UPGRADE",
             CardRarity::Basic,
             vec![Command::CardSelect(CardSelectCmd::FromHandForUpgrade {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 then: vec![Command::Card(CardCmd::Upgrade {
                     cards: CardSelector::Chosen,
                 })],
@@ -265,6 +270,7 @@ fn cards() -> Vec<CardDefinition> {
             "CARD.ASK_DECK_REMOVAL",
             CardRarity::Basic,
             vec![Command::CardSelect(CardSelectCmd::FromDeckForRemoval {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 prefs: SelectorPrefs::exactly(1).confirmed(),
                 filter: CardFilter::Any,
                 then: vec![Command::CardPile(CardPileCmd::RemoveFromDeck {
@@ -277,6 +283,7 @@ fn cards() -> Vec<CardDefinition> {
             "CARD.ASK_ENCHANT",
             CardRarity::Basic,
             vec![Command::CardSelect(CardSelectCmd::FromDeckForEnchantment {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 enchantment: id("ENCHANTMENT.TEST"),
                 amount: 1,
                 filter: CardFilter::Any,
@@ -290,6 +297,7 @@ fn cards() -> Vec<CardDefinition> {
             "CARD.ASK_GRID",
             CardRarity::Basic,
             vec![Command::CardSelect(CardSelectCmd::SimpleGridForRewards {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 creations: vec![
                     sts2_engine::CardCreation {
                         pools: vec![sts2_engine::CardPoolRef::Named(id("CARD_POOL.TEST"))],
@@ -328,6 +336,7 @@ fn cards() -> Vec<CardDefinition> {
             "CARD.ASK_BUNDLE",
             CardRarity::Basic,
             vec![Command::CardSelect(CardSelectCmd::ChooseAGeneratedBundle {
+                semantics: sts2_engine::ChoiceSemantics::default(),
                 pools: vec![sts2_engine::CardPoolRef::Named(id("CARD_POOL.TEST"))],
                 count: 2,
                 commons: 2,
@@ -481,6 +490,7 @@ fn powers() -> Vec<PowerDefinition> {
             vec![ModifierHook::every_turn(
                 HookEvent::BeforeSideTurnStart,
                 vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+                    semantics: sts2_engine::ChoiceSemantics::default(),
                     pile: PileName::Discard,
                     prefs: SelectorPrefs::exactly(1),
                     maximum: None,

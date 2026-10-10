@@ -12,6 +12,10 @@ use sts2_engine::{
     RelicSpawnCondition, RestSiteOffer, RestSiteOption, RewardsCmd, SelectorPrefs, ValueProps,
 };
 use sts2_engine::{CardCreation, CardPoolRef, CardRarity};
+use sts2_engine::{
+    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
+    ChoiceScope, ChoiceSemantics, ChoiceSubject, ChoiceTiming,
+};
 
 use crate::id;
 
@@ -76,6 +80,11 @@ fn never_in_shops(mut definition: RelicDefinition) -> RelicDefinition {
 /// cards the player chooses comes to.
 fn enchant_chosen_deck_cards(enchantment: &str, amount: i32, prefs: SelectorPrefs) -> Command {
     Command::CardSelect(CardSelectCmd::FromDeckForEnchantment {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                .model(id(enchantment))
+                .amount(amount),
+        ]),
         enchantment: id(enchantment),
         amount,
         filter: CardFilter::Any,
@@ -2081,6 +2090,11 @@ fn shop_relics() -> Vec<RelicDefinition> {
         upon_pickup(RelicDefinition {
             on_obtained: vec![Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromDeckGeneric {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Copy, ChoiceScope::Run)
+                            .on(ChoiceSubject::Copy)
+                            .to(ChoiceDestination::RunDeck),
+                    ]),
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
                     filter: sts2_engine::CardFilter::NotOfType(sts2_engine::CardType::Quest),
                     then: vec![Command::CardPile(CardPileCmd::AddToDeck {
@@ -2135,6 +2149,11 @@ fn shop_relics() -> Vec<RelicDefinition> {
         // order, so what the shuffle comes to is the dice it read.
         upon_pickup(RelicDefinition {
             on_obtained: vec![Command::CardSelect(CardSelectCmd::FromDeckForEnchantment {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                        .model(id("ENCHANTMENT.ROYALLY_APPROVED"))
+                        .amount(1),
+                ]),
                 enchantment: id("ENCHANTMENT.ROYALLY_APPROVED"),
                 amount: 1,
                 filter: CardFilter::Any,
@@ -2282,6 +2301,10 @@ fn shop_relics() -> Vec<RelicDefinition> {
                     HookEvent::BeforeHandDraw,
                     vec![Command::CardSelect(
                         sts2_engine::CardSelectCmd::ChooseAGeneratedCard {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                                    .to(ChoiceDestination::Hand),
+                            ]),
                             pool: sts2_engine::CardPoolRef::Named(id(
                                 "CARD_POOL.COLORLESS_CARD_POOL",
                             )),
@@ -2570,6 +2593,10 @@ fn rare_relics() -> Vec<RelicDefinition> {
                     HookEvent::AfterPlayerTurnStart,
                     vec![Command::CardSelect(
                         sts2_engine::CardSelectCmd::FromHandForDiscard {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Discard, ChoiceScope::Combat)
+                                    .to(ChoiceDestination::Discard),
+                            ]),
                             maximum: None,
                             exact_count: None,
                             prefs: sts2_engine::SelectorPrefs::between(0, 999_999_999),
@@ -4628,6 +4655,15 @@ fn ancient_relics() -> Vec<RelicDefinition> {
         upon_pickup(RelicDefinition {
             saved_card_array_property: Some("SerializableCards".to_owned()),
             on_obtained: vec![Command::CardSelect(CardSelectCmd::FromDeckForRemoval {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Store, ChoiceScope::Run)
+                        .to(ChoiceDestination::RelicStorage),
+                    ChoiceOp::new(ChoiceOperationKind::Upgrade, ChoiceScope::Run)
+                        .at(ChoiceTiming::AfterEachCombat),
+                    ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Run)
+                        .to(ChoiceDestination::RunDeck)
+                        .at(ChoiceTiming::AfterEachCombat),
+                ]),
                 prefs: SelectorPrefs::exactly(5),
                 filter: CardFilter::Upgradable,
                 then: vec![Command::Relic(RelicCmd::KeepChosenCards)],
@@ -4840,6 +4876,10 @@ fn joins_the_deck(model_id: &str) -> Command {
 /// then done with what came back.
 fn removes_from_the_deck(count: usize, then: Vec<Command>) -> Command {
     Command::CardSelect(sts2_engine::CardSelectCmd::FromDeckForRemoval {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Remove, ChoiceScope::Run)
+                .to(ChoiceDestination::Removed),
+        ]),
         prefs: sts2_engine::SelectorPrefs::exactly(count),
         filter: sts2_engine::CardFilter::Any,
         then,
@@ -4857,6 +4897,10 @@ fn removes_the_chosen() -> Command {
 /// upgrade that then runs on what came back.
 fn upgrades_from_the_deck(count: usize) -> Command {
     Command::CardSelect(sts2_engine::CardSelectCmd::FromDeckForUpgrade {
+        semantics: ChoiceSemantics::known(vec![ChoiceOp::new(
+            ChoiceOperationKind::Upgrade,
+            ChoiceScope::Run,
+        )]),
         prefs: sts2_engine::SelectorPrefs::exactly(count),
         then: vec![Command::Card(sts2_engine::CardCmd::Upgrade {
             cards: sts2_engine::CardSelector::Chosen,
@@ -5761,8 +5805,13 @@ fn ancient_combat_relics() -> Vec<RelicDefinition> {
 /// The exact number of cards a relic asks to transform: the screen takes that
 /// many and needs no confirming, because the minimum and the maximum it is
 /// given are the same number.
-fn transforms_from_the_deck(count: usize, then: Vec<Command>) -> Command {
+fn transforms_from_the_deck(
+    count: usize,
+    semantics: ChoiceSemantics,
+    then: Vec<Command>,
+) -> Command {
     Command::CardSelect(sts2_engine::CardSelectCmd::FromDeckForTransformation {
+        semantics,
         prefs: sts2_engine::SelectorPrefs::exactly(count),
         then,
     })
@@ -5792,6 +5841,11 @@ fn transforming_relics() -> Vec<RelicDefinition> {
         upon_pickup(RelicDefinition {
             on_obtained: vec![transforms_from_the_deck(
                 3,
+                ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run).rolled(),
+                    ChoiceOp::new(ChoiceOperationKind::Upgrade, ChoiceScope::Run)
+                        .on(ChoiceSubject::Replacement),
+                ]),
                 vec![rolls_a_replacement(
                     sts2_engine::TransformStream::Niche,
                     true,
@@ -5804,6 +5858,9 @@ fn transforming_relics() -> Vec<RelicDefinition> {
         upon_pickup(RelicDefinition {
             on_obtained: vec![transforms_from_the_deck(
                 1,
+                ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run).rolled(),
+                ]),
                 vec![rolls_a_replacement(
                     sts2_engine::TransformStream::Niche,
                     false,
@@ -5863,6 +5920,11 @@ fn transforming_relics() -> Vec<RelicDefinition> {
         RelicDefinition {
             on_obtained: vec![Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromDeckForTransformation {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
+                            .model(id("CARD.MAUL"))
+                            .inheriting(true, true),
+                    ]),
                     prefs: sts2_engine::SelectorPrefs::between(0, 6),
                     then: vec![Command::Card(sts2_engine::CardCmd::TransformDeckCards {
                         cards: sts2_engine::CardSelector::Chosen,
@@ -5997,6 +6059,16 @@ fn neow_relics() -> Vec<RelicDefinition> {
                     HookEvent::AfterPlayerTurnStart,
                     vec![Command::CardSelect(
                         CardSelectCmd::SimpleGridOfGeneratedCards {
+                            semantics: ChoiceSemantics::known(vec![
+                                ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                                    .to(ChoiceDestination::Hand),
+                                ChoiceOp::new(
+                                    ChoiceOperationKind::GrantKeyword,
+                                    ChoiceScope::Combat,
+                                )
+                                .keyword(sts2_engine::CardKeyword::Retain)
+                                .lasting(ChoiceDuration::Combat),
+                            ]),
                             pool: sts2_engine::CardPoolRef::OwnCharacter,
                             count: 5,
                             filter: CardFilter::Any,
@@ -6044,6 +6116,10 @@ fn neow_relics() -> Vec<RelicDefinition> {
         // joins the deck whole.
         RelicDefinition {
             on_obtained: vec![Command::CardSelect(CardSelectCmd::ChooseAGeneratedBundle {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Run)
+                        .to(ChoiceDestination::RunDeck),
+                ]),
                 pools: vec![CardPoolRef::OwnCharacter],
                 count: 2,
                 commons: 2,
@@ -6095,6 +6171,10 @@ fn neow_relics() -> Vec<RelicDefinition> {
         // injury for it whether or not one is picked.
         upon_pickup(RelicDefinition {
             on_obtained: vec![Command::CardSelect(CardSelectCmd::ChooseACreatedCard {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Run)
+                        .to(ChoiceDestination::RunDeck),
+                ]),
                 creation: creates(3, CardRarity::Rare),
                 can_skip: true,
                 then: vec![
@@ -6116,6 +6196,10 @@ fn neow_relics() -> Vec<RelicDefinition> {
         // the rarity, one for the pick, and one for the upgrade.
         RelicDefinition {
             on_obtained: vec![Command::CardSelect(CardSelectCmd::ChooseACreatedCard {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Run)
+                        .to(ChoiceDestination::RunDeck),
+                ]),
                 creation: CardCreation {
                     pools: vec![CardPoolRef::Named(id("CARD_POOL.COLORLESS_CARD_POOL"))],
                     filter: CardFilter::Any,
@@ -6226,6 +6310,11 @@ fn enchanting_ancients() -> Vec<RelicDefinition> {
         RelicDefinition {
             adds_rest_site_option: Some(RestSiteOffer::of(RestSiteOption::Clone)),
             on_obtained: vec![Command::CardSelect(CardSelectCmd::FromDeckForEnchantment {
+                semantics: ChoiceSemantics::known(vec![
+                    ChoiceOp::new(ChoiceOperationKind::Enchant, ChoiceScope::Run)
+                        .model(id("ENCHANTMENT.CLONE"))
+                        .amount(4),
+                ]),
                 enchantment: id("ENCHANTMENT.CLONE"),
                 amount: 1,
                 filter: CardFilter::Any,

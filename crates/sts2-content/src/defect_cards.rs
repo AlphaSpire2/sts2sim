@@ -19,6 +19,10 @@ use sts2_engine::{
     CreatureSelector, DamageCmd, DrawPilePosition, OrbCmd, OrbSelector, OrbSource, PileName,
     PlayerCmd, SelectorPrefs, ShuffleStream, TargetType, TemporaryCost, ValueProps,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
+    ChoiceSemantics,
+};
 
 use crate::cards::{
     apply_power, attack, block, buff, card, costing_x, debuff, draw, exhausting, multi_attack,
@@ -475,6 +479,10 @@ fn free_for_the_combat() -> Command {
 /// an empty pile hands nothing back.
 fn one_card_of_the_discard_back() -> Command {
     Command::CardSelect(CardSelectCmd::FromCombatPile {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                .to(ChoiceDestination::Hand),
+        ]),
         pile: PileName::Discard,
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
@@ -1016,6 +1024,10 @@ fn dearer_for_the_combat(amount: i32) -> Command {
 /// A Scavenge's screen: one card of the hand, burned.
 fn burn_one_card_of_the_hand() -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Exhaust, ChoiceScope::Combat)
+                .to(ChoiceDestination::Exhaust),
+        ]),
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
         exact_count: None,

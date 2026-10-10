@@ -20,6 +20,10 @@ use sts2_engine::{
     DamageCmd, DrawPilePosition, HookEvent, ModifierHook, OstyCmd, PileName, PowerCmd,
     SelectorPrefs, TargetType, ValueProps,
 };
+use sts2_engine::{
+    ChoiceCondition, ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp,
+    ChoiceOperationKind, ChoiceScope, ChoiceSemantics,
+};
 
 use crate::cards::{
     apply_power, attack, block, buff, card, costing_x, debuff, defending, draw, energy, exhausting,
@@ -661,6 +665,10 @@ fn deaths_door(block_amount: i32, repeat: i32) -> Vec<Command> {
 /// that comes to nothing.
 fn dredge(count: i32) -> Vec<Command> {
     vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                .to(ChoiceDestination::Hand),
+        ]),
         pile: PileName::Discard,
         prefs: SelectorPrefs::exactly(0),
         maximum: Some(Amount::Least(vec![
@@ -743,6 +751,15 @@ fn rattle(damage: i32) -> Vec<Command> {
 /// of its own body either way.
 fn transfigure() -> Vec<Command> {
     vec![Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::AddCost, ChoiceScope::Combat)
+                .amount(1)
+                .lasting(ChoiceDuration::Combat)
+                .when(ChoiceCondition::WritableEnergyCost),
+            ChoiceOp::new(ChoiceOperationKind::AddReplay, ChoiceScope::Combat)
+                .amount(1)
+                .lasting(ChoiceDuration::Combat),
+        ]),
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
         exact_count: None,
@@ -1638,6 +1655,10 @@ fn the_souls_and_the_screens() -> Vec<CardDefinition> {
                 TargetType::SelfTarget,
                 1,
                 vec![Command::CardSelect(CardSelectCmd::FromCombatPile {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Combat)
+                            .model(id("CARD.SOUL")),
+                    ]),
                     pile: PileName::Draw,
                     prefs: SelectorPrefs::exactly(1),
                     maximum: None,
@@ -1866,6 +1887,10 @@ fn severance_souls() -> Command {
 /// One card picked out of the draw pile, and the burn behind it.
 fn exhaust_one_of_the_draw_pile() -> Command {
     Command::CardSelect(CardSelectCmd::FromCombatPile {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Exhaust, ChoiceScope::Combat)
+                .to(ChoiceDestination::Exhaust),
+        ]),
         pile: PileName::Draw,
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
@@ -1881,6 +1906,10 @@ fn exhaust_one_of_the_draw_pile() -> Command {
 /// One card picked out of the discard pile, and taken back into the hand.
 fn one_card_back_from_the_discard() -> Command {
     Command::CardSelect(CardSelectCmd::FromCombatPile {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                .to(ChoiceDestination::Hand),
+        ]),
         pile: PileName::Discard,
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
@@ -1898,6 +1927,11 @@ fn one_card_back_from_the_discard() -> Command {
 /// One card of the hand that is not already ethereal, made ethereal.
 fn make_a_hand_card_ethereal() -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::GrantKeyword, ChoiceScope::Combat)
+                .keyword(sts2_engine::CardKeyword::Ethereal)
+                .lasting(ChoiceDuration::Combat),
+        ]),
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
         exact_count: None,
@@ -1912,6 +1946,11 @@ fn make_a_hand_card_ethereal() -> Command {
 /// One card of the hand that is not already kept, given Retain.
 fn make_a_hand_card_retain() -> Command {
     Command::CardSelect(CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::GrantKeyword, ChoiceScope::Combat)
+                .keyword(sts2_engine::CardKeyword::Retain)
+                .lasting(ChoiceDuration::Combat),
+        ]),
         prefs: SelectorPrefs::exactly(1),
         maximum: None,
         exact_count: None,

@@ -14,6 +14,10 @@ use sts2_engine::{
     CreatureSelector, DrawPilePosition, PileName, PlayerCmd, PowerCmd, StunFollowUp, TargetType,
     ValueProps,
 };
+use sts2_engine::{
+    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
+    ChoiceScope, ChoiceSemantics, ChoiceSubject,
+};
 
 use crate::cards::{
     apply_power, attack, block, buff, card, costing_x, debuff, draw, energy, eternal, ethereal,
@@ -496,6 +500,14 @@ fn unattributed_debuff(power: &str, amount: i32) -> Command {
 fn splash(upgraded: bool) -> Vec<Command> {
     vec![Command::CardSelect(
         sts2_engine::CardSelectCmd::ChooseAGeneratedCard {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                    .to(ChoiceDestination::Hand),
+                ChoiceOp::new(ChoiceOperationKind::SetCost, ChoiceScope::Combat)
+                    .amount(0)
+                    .lasting(ChoiceDuration::UntilPlayedOrTurnEnds)
+                    .including_stars(),
+            ]),
             pool: sts2_engine::CardPoolRef::EveryOtherCharacter,
             count: 3,
             filter: CardFilter::OfType(CardType::Attack),
@@ -1229,6 +1241,10 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                 0,
                 vec![Command::CardSelect(
                     sts2_engine::CardSelectCmd::FromCombatPile {
+                        semantics: ChoiceSemantics::known(vec![
+                            ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                                .to(ChoiceDestination::Hand),
+                        ]),
                         exact_count: None,
                         pile: PileName::Draw,
                         prefs: sts2_engine::SelectorPrefs::exactly(1),
@@ -1288,6 +1304,12 @@ fn brightest_flame(energy_gained: i32, cards: i32) -> Vec<Command> {
 /// it into the hand.
 fn dual_wield(copies: i32) -> Vec<Command> {
     vec![Command::CardSelect(sts2_engine::CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Copy, ChoiceScope::Combat)
+                .on(ChoiceSubject::Copy)
+                .count(copies)
+                .to(ChoiceDestination::Hand),
+        ]),
         maximum: None,
         exact_count: None,
         prefs: sts2_engine::SelectorPrefs::exactly(1),
@@ -1344,6 +1366,10 @@ fn neows_fury(damage: i32, cards: i32) -> Vec<Command> {
     vec![
         attack(damage),
         Command::CardSelect(sts2_engine::CardSelectCmd::FromCombatPile {
+            semantics: ChoiceSemantics::known(vec![
+                ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                    .to(ChoiceDestination::Hand),
+            ]),
             exact_count: None,
             pile: PileName::Discard,
             prefs: sts2_engine::SelectorPrefs::between(0, usize::try_from(cards).unwrap_or(0)),
@@ -1520,6 +1546,14 @@ pub(crate) fn colorless_cards() -> Vec<CardDefinition> {
             1,
             vec![Command::CardSelect(
                 sts2_engine::CardSelectCmd::ChooseAGeneratedCard {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                            .to(ChoiceDestination::Hand),
+                        ChoiceOp::new(ChoiceOperationKind::SetCost, ChoiceScope::Combat)
+                            .amount(0)
+                            .lasting(ChoiceDuration::UntilPlayedOrTurnEnds)
+                            .including_stars(),
+                    ]),
                     pool: sts2_engine::CardPoolRef::OwnCharacter,
                     count: 3,
                     filter: CardFilter::Any,
@@ -1798,6 +1832,10 @@ pub(crate) fn colorless_cards() -> Vec<CardDefinition> {
             0,
             vec![Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromCombatPile {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                            .to(ChoiceDestination::Hand),
+                    ]),
                     exact_count: None,
                     pile: PileName::Draw,
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
@@ -1871,6 +1909,10 @@ pub(crate) fn colorless_cards() -> Vec<CardDefinition> {
             vec![
                 draw(2),
                 Command::CardSelect(sts2_engine::CardSelectCmd::FromHand {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                            .to(ChoiceDestination::DrawTop),
+                    ]),
                     maximum: None,
                     exact_count: None,
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
@@ -2043,6 +2085,10 @@ pub(crate) fn offered_colorless_cards() -> Vec<CardDefinition> {
             0,
             vec![Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromCombatPile {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                            .to(ChoiceDestination::Hand),
+                    ]),
                     exact_count: None,
                     pile: PileName::Draw,
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
@@ -2161,6 +2207,10 @@ fn fisticuffs(damage: i32) -> Command {
 /// Purity, played: up to this many cards of the hand, burned.
 fn purity(cards: i32) -> Command {
     Command::CardSelect(sts2_engine::CardSelectCmd::FromHand {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Exhaust, ChoiceScope::Combat)
+                .to(ChoiceDestination::Exhaust),
+        ]),
         maximum: None,
         exact_count: None,
         prefs: sts2_engine::SelectorPrefs::between(0, usize::try_from(cards).unwrap_or(0)),
@@ -2357,6 +2407,10 @@ fn seeker_strike(damage: i32) -> Vec<Command> {
             },
             then: vec![Command::CardSelect(
                 sts2_engine::CardSelectCmd::FromCombatPile {
+                    semantics: ChoiceSemantics::known(vec![
+                        ChoiceOp::new(ChoiceOperationKind::Move, ChoiceScope::Combat)
+                            .to(ChoiceDestination::Hand),
+                    ]),
                     exact_count: None,
                     pile: PileName::Draw,
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
