@@ -1473,7 +1473,58 @@ impl Simulator {
         if let Some(run) = self.state.run.as_mut() {
             run.next_reward_set_id = next_reward_set_id;
         }
+        self.renumber_waiting_choices();
         self.rebuild_boundary()
+    }
+
+    /// Hands the reloaded run's fresh choice synchronizer the screens the save
+    /// still has waiting.
+    ///
+    /// The save stands where the room was entered, and a screen standing over
+    /// it — or a listener's screen banked on the queue to be shown — went up
+    /// as the room was entered. The load enters the room again, so each of
+    /// them is asked for again, in the order they were first asked for, and
+    /// takes the next id the fresh synchronizer hands out: the first of them
+    /// is `p0:0` however many the session before had numbered.
+    fn renumber_waiting_choices(&mut self) {
+        let mut waiting: Vec<ChoiceId> = Vec::new();
+        if let Some(run) = self.state.run.as_ref() {
+            waiting.extend(run.suspended_choice.as_ref().map(|choice| choice.id));
+            waiting.extend(run.pending.iter().filter_map(banked_screen_id));
+        }
+        if let Some(combat) = self.state.combat.as_ref() {
+            waiting.extend(combat.suspended_choice.as_ref().map(|choice| choice.id));
+            waiting.extend(combat.queue.iter().filter_map(banked_screen_id));
+        }
+        waiting.sort_unstable();
+        waiting.dedup();
+        let fresh = |id: ChoiceId| {
+            let index = waiting
+                .binary_search(&id)
+                .expect("every waiting id was collected");
+            ChoiceId::from(index as u64)
+        };
+        if let Some(run) = self.state.run.as_mut() {
+            if let Some(choice) = run.suspended_choice.as_mut() {
+                choice.id = fresh(choice.id);
+            }
+            for effect in &mut run.pending {
+                if let Effect::HookScreen(screen) = effect {
+                    screen.id = fresh(screen.id);
+                }
+            }
+            run.next_choice_id = waiting.len() as u64;
+        }
+        if let Some(combat) = self.state.combat.as_mut() {
+            if let Some(choice) = combat.suspended_choice.as_mut() {
+                choice.id = fresh(choice.id);
+            }
+            for effect in &mut combat.queue {
+                if let Effect::HookScreen(screen) = effect {
+                    screen.id = fresh(screen.id);
+                }
+            }
+        }
     }
 
     /// The load of a run that was quit while a turn handover was under way —
@@ -2188,7 +2239,15 @@ impl Simulator {
             // and nothing the potion does runs.
             Action::DiscardPotion { slot, .. } => {
                 self.suspension_block = None;
-                self.run_out_of_combat(&Command::Potion(PotionCmd::Discard { slot: *slot }))?;
+                let discard = Command::Potion(PotionCmd::Discard { slot: *slot });
+                if self.suspended() {
+                    self.run_beside_the_standing_screen(
+                        "a potion discarded beside a screen",
+                        &discard,
+                    )?;
+                } else {
+                    self.run_out_of_combat(&discard)?;
+                }
                 let victory = self.settle_queue(events)?;
                 self.push_checkpoint("action.settled")?;
                 if victory {
@@ -10994,6 +11053,38 @@ impl Simulator {
     /// aimed at.
     fn run_out_of_combat(&mut self, command: &Command) -> Result<(), EngineError> {
         self.run_out_of_combat_commands(std::slice::from_ref(command))
+    }
+
+    /// Runs one command beside the screen standing out of a fight, which is
+    /// where the belt is acted on while a screen waits: the screen stands
+    /// beside the action queue rather than at its front, so the command runs
+    /// now and nothing in it waits on the screen. The screen is marked as not
+    /// its own so the command runs through where it stands, and whatever the
+    /// screen's body still owes keeps its place. A screen the command opened
+    /// itself would park its continuation ahead of the standing one's, a
+    /// resume order no answer could unwind, so it fails loudly instead.
+    fn run_beside_the_standing_screen(
+        &mut self,
+        site: &'static str,
+        command: &Command,
+    ) -> Result<(), EngineError> {
+        let outer_screen = self.unawaited_screen;
+        let standing = self.standing_choices().next();
+        self.unawaited_screen = standing;
+        let outer_cursor = std::mem::replace(&mut self.resume_cursor, 0);
+        let mut events = Vec::new();
+        let ran = self.without_suspension(site, false, |engine| {
+            engine
+                .run_commands(
+                    std::slice::from_ref(command),
+                    &CommandContext::default(),
+                    &mut events,
+                )
+                .map(|_| ())
+        });
+        self.resume_cursor = outer_cursor;
+        self.unawaited_screen = outer_screen;
+        ran
     }
 
     /// A run of them, which is what an option body with more than one call in it
@@ -27913,14 +28004,27 @@ impl Simulator {
     )]
     fn compute_legal_actions(&self) -> Result<Vec<Action>, EngineError> {
         let mut actions = self.compute_decision_actions()?;
-        // The belt answers wherever the player is free to act: discarding a
-        // potion is a non-combat action out of a fight and a play-phase-only one
-        // inside one, so a screen standing over either is the one place it cannot
-        // be taken.
-        if !matches!(
-            self.decision,
-            DecisionContext::ChooseCards { .. } | DecisionContext::Terminal { .. }
-        ) {
+        // Drinking or discarding a potion is an action on the player's queue,
+        // and the queue holds an action back only behind one of the player's
+        // own that is waiting for an answer. Out of a fight no screen is such
+        // an action: rewards, events, rooms, merchants and obtained relics put
+        // their screens up beside the queue, so the belt answers whatever
+        // screen stands. Inside one every screen belongs to the card, potion or
+        // listener that opened it, still at the front of the queue; a potion
+        // asked for there runs only once that action has finished, which is the
+        // next decision, and that is where it is offered.
+        let in_a_fight = self
+            .state
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.in_progress);
+        let decision_holds_the_belt = match self.decision {
+            DecisionContext::Terminal { .. } => true,
+            DecisionContext::ChooseCards { .. } => in_a_fight,
+            _ => false,
+        };
+        let belt_answers = !decision_holds_the_belt && !self.belt_is_held();
+        if belt_answers {
             actions.extend(self.state.run_player.potions.iter().enumerate().filter_map(
                 |(slot, held)| {
                     held.as_ref().map(|model_id| Action::DiscardPotion {
@@ -27930,19 +28034,9 @@ impl Simulator {
                 },
             ));
         }
-        // A potion drunk outside a fight is queued as a non-combat action, and
-        // the only thing that stops one is being in a combat: the queue skips a
-        // non-combat action while a fight is standing and nothing else. A
-        // screen does not — a card reward waiting to be answered is an action
-        // gathering a choice at the front of the queue, and a drink enqueued
-        // behind it runs all the same. What the belt may offer here is narrower than
-        // in a fight: a `CombatOnly` potion has no fight to be drunk in.
-        let in_a_fight = self
-            .state
-            .combat
-            .as_ref()
-            .is_some_and(|combat| combat.in_progress);
-        if !in_a_fight && !matches!(self.decision, DecisionContext::Terminal { .. }) {
+        // Out of a fight a drink is narrower than a discard: a `CombatOnly`
+        // potion has no fight to be drunk in.
+        if belt_answers && !in_a_fight {
             actions.extend(self.out_of_combat_potion_actions());
         }
         Ok(actions)
@@ -28303,9 +28397,31 @@ impl Simulator {
             .collect()
     }
 
+    /// Whether the event the player stands in holds the belt: from the moment
+    /// such an event begins until it finishes, no potion is drunk or thrown
+    /// away. Its room stands until its option body has run through, screens
+    /// and rewards included, so the room standing is the event not having
+    /// finished.
+    fn belt_is_held(&self) -> bool {
+        let Some(ActiveRoom::Event { model_id, .. }) = self
+            .state
+            .run
+            .as_ref()
+            .and_then(|run| run.active_room.as_ref())
+        else {
+            return false;
+        };
+        self.content
+            .event(model_id)
+            .is_some_and(|event| event.locks_potions)
+    }
+
     /// The potions the player can drink right now, in slot order.
     fn potion_actions(&self, combat: &CombatState) -> Vec<Action> {
         let mut actions = Vec::new();
+        if self.belt_is_held() {
+            return actions;
+        }
         for (slot, held) in self.state.run_player.potions.iter().enumerate() {
             let Some(model_id) = held else {
                 continue;
@@ -29648,6 +29764,14 @@ fn stepped_off_the_graph(run: &crate::RunState, destination: crate::MapCoord) ->
             .iter()
             .any(|point| point.coord == current && point.children.contains(&destination))
     })
+}
+
+/// The id a listener's banked screen reserved, for a queue entry that is one.
+fn banked_screen_id(effect: &Effect) -> Option<ChoiceId> {
+    match effect {
+        Effect::HookScreen(screen) => Some(screen.id),
+        _ => None,
+    }
 }
 
 /// The amount an event effect carries, where it carries one.

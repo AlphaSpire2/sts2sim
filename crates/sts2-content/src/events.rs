@@ -33,6 +33,7 @@ pub fn darv() -> EventDefinition {
         model_id: id("EVENT.DARV"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::AncientRelics {
@@ -68,6 +69,7 @@ pub fn stone_of_all_time() -> EventDefinition {
         model_id: id("EVENT.STONE_OF_ALL_TIME"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: true,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexIs(1),
             EventCondition::PotionsAtLeast(1),
@@ -143,6 +145,7 @@ pub fn ranwid_the_elder() -> EventDefinition {
         model_id: id("EVENT.RANWID_THE_ELDER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: true,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexAbove(0),
             EventCondition::TradableRelicsAtLeast(1),
@@ -201,6 +204,7 @@ pub fn vakuu() -> EventDefinition {
         model_id: id("EVENT.VAKUU"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::ShuffledRelicPools {
@@ -248,6 +252,7 @@ pub fn war_historian_repy() -> EventDefinition {
         model_id: id("EVENT.WAR_HISTORIAN_REPY"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // Never allowed: the act never offers it.
         allowed: EventCondition::Never,
         vars: Vec::new(),
@@ -286,6 +291,7 @@ pub fn brain_leech() -> EventDefinition {
         model_id: id("EVENT.BRAIN_LEECH"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // Offered in the first two acts only.
         allowed: EventCondition::ActIndexBelow(2),
         vars: Vec::new(),
@@ -382,6 +388,7 @@ pub fn self_help_book() -> EventDefinition {
         model_id: id("EVENT.SELF_HELP_BOOK"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Conditional(vec![
@@ -412,6 +419,7 @@ pub fn lost_wisp() -> EventDefinition {
         model_id: id("EVENT.LOST_WISP"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -447,6 +455,7 @@ pub fn dense_vegetation() -> EventDefinition {
         model_id: id("EVENT.DENSE_VEGETATION"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // Single-player answers yes before the loop that tests every player.
         allowed: EventCondition::Always,
         vars: Vec::new(),
@@ -496,6 +505,7 @@ pub fn symbiote() -> EventDefinition {
         model_id: id("EVENT.SYMBIOTE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // Not offered in act one.
         allowed: EventCondition::ActIndexAbove(0),
         vars: Vec::new(),
@@ -569,6 +579,7 @@ pub fn spiraling_whirlpool() -> EventDefinition {
         model_id: id("EVENT.SPIRALING_WHIRLPOOL"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::DeckCardsAtLeast {
             filter: EventCardFilter::EnchantableBasicStrikeOrDefend,
             count: 1,
@@ -629,6 +640,7 @@ pub fn the_lantern_key() -> EventDefinition {
         // standing there from the moment it is entered.
         combat_layout: Some(id("ENCOUNTER.MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER")),
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -697,6 +709,7 @@ pub fn amalgamator() -> EventDefinition {
         model_id: id("EVENT.AMALGAMATOR"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::DeckCardsAtLeast {
                 filter: EventCardFilter::BasicRemovableTagged(CardTag::Strike),
@@ -775,6 +788,7 @@ pub fn colorful_philosophers(character: &sts2_core::ModelId) -> EventDefinition 
         model_id: id("EVENT.COLORFUL_PHILOSOPHERS"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // Only where every player has more than one card pool unlocked.
         allowed: EventCondition::MultipleCharacterPoolsUnlocked,
         vars: Vec::new(),
@@ -797,6 +811,7 @@ pub fn tezcatara() -> EventDefinition {
         model_id: id("EVENT.TEZCATARA"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::RolledRelicPools {
@@ -836,6 +851,7 @@ pub fn the_future_of_potions(pool: Vec<sts2_engine::PoolCard>) -> EventDefinitio
         model_id: id("EVENT.THE_FUTURE_OF_POTIONS"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: true,
         allowed: EventCondition::PotionsAtLeast(2),
         vars: Vec::new(),
         generation: EventGeneration::PotionTrade { pool },
@@ -849,6 +865,7 @@ pub fn orobas() -> EventDefinition {
         model_id: id("EVENT.OROBAS"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::OrobasRelics {
@@ -913,6 +930,7 @@ pub fn trash_heap() -> EventDefinition {
         model_id: id("EVENT.TRASH_HEAP"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::CurrentHpAbove(5),
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -972,6 +990,7 @@ pub fn the_legends_were_true(potions: Vec<sts2_core::ModelId>) -> EventDefinitio
         model_id: id("EVENT.THE_LEGENDS_WERE_TRUE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexIs(0),
             EventCondition::DeckCardsAtLeast {
@@ -1010,6 +1029,7 @@ pub fn spirit_grafter() -> EventDefinition {
         model_id: id("EVENT.SPIRIT_GRAFTER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1055,6 +1075,7 @@ pub fn tea_master() -> EventDefinition {
         model_id: id("EVENT.TEA_MASTER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexBelow(2),
             EventCondition::GoldAtLeast(150),
@@ -1106,6 +1127,7 @@ pub fn doors_of_light_and_dark() -> EventDefinition {
         model_id: id("EVENT.DOORS_OF_LIGHT_AND_DARK"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1139,6 +1161,7 @@ pub fn round_tea_party() -> EventDefinition {
         model_id: id("EVENT.ROUND_TEA_PARTY"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::CurrentHpAtLeast(12),
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1179,6 +1202,7 @@ pub fn nonupeipe() -> EventDefinition {
         model_id: id("EVENT.NONUPEIPE"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::ShuffledRelicPool {
@@ -1252,6 +1276,7 @@ pub fn colossal_flower() -> EventDefinition {
         model_id: id("EVENT.COLOSSAL_FLOWER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::CurrentHpAtLeast(19),
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1277,6 +1302,7 @@ pub fn zen_weaver() -> EventDefinition {
         model_id: id("EVENT.ZEN_WEAVER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // The page is only pulled for a player who could afford the middle
         // option.
         allowed: EventCondition::GoldAtLeast(125),
@@ -1348,6 +1374,7 @@ pub fn infested_automaton(pool: &[sts2_engine::PoolCard]) -> EventDefinition {
         model_id: id("EVENT.INFESTED_AUTOMATON"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1375,6 +1402,7 @@ pub fn pael() -> EventDefinition {
         model_id: id("EVENT.PAEL"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::PaelRelics {
@@ -1433,6 +1461,7 @@ pub fn sunken_statue() -> EventDefinition {
         model_id: id("EVENT.SUNKEN_STATUE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1467,6 +1496,7 @@ pub fn jungle_maze_adventure() -> EventDefinition {
         model_id: id("EVENT.JUNGLE_MAZE_ADVENTURE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1501,6 +1531,7 @@ pub fn this_or_that() -> EventDefinition {
         model_id: id("EVENT.THIS_OR_THAT"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1532,6 +1563,7 @@ pub fn sapphire_seed() -> EventDefinition {
         model_id: id("EVENT.SAPPHIRE_SEED"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1589,6 +1621,7 @@ pub fn aroma_of_chaos() -> EventDefinition {
         model_id: id("EVENT.AROMA_OF_CHAOS"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1643,6 +1676,7 @@ pub fn potion_courier(uncommon_potions: Vec<sts2_core::ModelId>) -> EventDefinit
         model_id: id("EVENT.POTION_COURIER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::ActIndexAbove(0),
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1682,6 +1716,7 @@ pub fn reflections() -> EventDefinition {
         model_id: id("EVENT.REFLECTIONS"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1838,6 +1873,7 @@ pub fn trial(pool: &sts2_engine::GeneratedRewardSpec) -> EventDefinition {
         model_id: id("EVENT.TRIAL"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1883,6 +1919,7 @@ pub fn fake_merchant() -> EventDefinition {
         model_id: id("EVENT.FAKE_MERCHANT"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexAbove(0),
             EventCondition::Any(vec![
@@ -1965,6 +2002,7 @@ pub fn tablet_of_truth() -> EventDefinition {
         model_id: id("EVENT.TABLET_OF_TRUTH"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -1995,6 +2033,7 @@ pub fn room_full_of_cheese(commons: Vec<sts2_core::ModelId>) -> EventDefinition 
         model_id: id("EVENT.ROOM_FULL_OF_CHEESE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         // Offered in the first two acts only.
         allowed: EventCondition::ActIndexBelow(2),
         vars: Vec::new(),
@@ -2032,6 +2071,7 @@ pub fn slippery_bridge() -> EventDefinition {
         model_id: id("EVENT.SLIPPERY_BRIDGE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::TotalFloorAbove(6),
             EventCondition::DeckCardsAtLeast {
@@ -2057,6 +2097,7 @@ pub fn crystal_sphere() -> EventDefinition {
         model_id: id("EVENT.CRYSTAL_SPHERE"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::GoldAtLeast(100),
             EventCondition::ActIndexAbove(0),
@@ -2099,6 +2140,7 @@ pub fn whispering_hollow() -> EventDefinition {
         model_id: id("EVENT.WHISPERING_HOLLOW"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::GoldAtLeast(44),
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -2163,6 +2205,7 @@ fn plain(model_id: &str, allowed: EventCondition, options: Vec<EventOption>) -> 
         model_id: id(model_id),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(options),
@@ -2179,6 +2222,7 @@ fn gated(
         model_id: id(model_id),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed,
         vars: Vec::new(),
         generation: EventGeneration::Conditional(options),
@@ -2683,6 +2727,7 @@ pub fn luminous_choir() -> EventDefinition {
         model_id: id("EVENT.LUMINOUS_CHOIR"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::GoldAtLeast(149),
             EventCondition::RelicGrabBagHasRelics,
@@ -2806,6 +2851,7 @@ pub fn relic_trader() -> EventDefinition {
         model_id: id("EVENT.RELIC_TRADER"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexAbove(0),
             EventCondition::TradableRelicsAtLeast(5),
@@ -2823,6 +2869,7 @@ pub fn welcome_to_wongos() -> EventDefinition {
         model_id: id("EVENT.WELCOME_TO_WONGOS"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::All(vec![
             EventCondition::ActIndexIs(1),
             EventCondition::GoldAtLeast(100),
@@ -2850,6 +2897,7 @@ pub fn punch_off() -> EventDefinition {
         model_id: id("EVENT.PUNCH_OFF"),
         combat_layout: Some(id("ENCOUNTER.PUNCH_OFF_EVENT_ENCOUNTER")),
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::TotalFloorAtLeast(6),
         // A purse of 91 to 98, which only the page's text reads.
         vars: vec![EventAmount::Rolled { min: 91, max: 99 }],
@@ -2917,6 +2965,7 @@ pub fn tanx() -> EventDefinition {
         model_id: id("EVENT.TANX"),
         combat_layout: None,
         heals_on_entry: true,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::ShuffledRelicPool { relics, offered: 3 },
@@ -2953,6 +3002,7 @@ pub fn battleworn_dummy(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
         model_id: id("EVENT.BATTLEWORN_DUMMY"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![
@@ -2994,6 +3044,7 @@ pub fn endless_conveyor(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
         model_id: id("EVENT.ENDLESS_CONVEYOR"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::GoldAtLeast(120),
         vars: Vec::new(),
         generation: EventGeneration::EndlessConveyor {
@@ -3126,6 +3177,7 @@ pub fn tinker_time() -> EventDefinition {
         model_id: id("EVENT.TINKER_TIME"),
         combat_layout: None,
         heals_on_entry: false,
+        locks_potions: false,
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::Fixed(vec![option(

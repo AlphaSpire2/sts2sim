@@ -42,8 +42,10 @@ count, every map point becoming modifiable again, a combat in progress coming
 back on its first round, and the reward-set and player-choice synchronizers
 being rebuilt, so the ids they hand out start over — a rewards screen the save
 left owed is rebuilt along with them and takes the first id the fresh
-synchronizer gives. Nothing else about a save is modelled, because nothing else
-about it is observable through this boundary.
+synchronizer gives, and a selection screen the room's entrance put up, standing
+or banked by a listener, is asked for again and takes the first choice ids in
+the order it was first asked for. Nothing else about a save is modelled,
+because nothing else about it is observable through this boundary.
 
 The command surface covers the gameplay operations the registered content
 reaches, and the modifier hooks and room resolution cover the hook events and
@@ -1108,6 +1110,21 @@ target when the potion takes one. A potion that targets a player names that
 creature explicitly rather than being untargeted, because multiplayer targets
 another player the same way. Using a potion clears its slot before its body
 runs, and drinking one consumes no randomness of its own.
+
+Drinking or discarding a potion is an action on the player's action queue, and
+where the belt is offered follows from where that queue would run it: the
+queue holds an action back only behind one of the player's own that is waiting
+for an answer. Out of a fight no screen is such an action — a reward set, an
+event, a room, a merchant, and an obtained relic's screen all stand beside the
+queue — so `Action::DiscardPotion`, and `Action::UsePotion` for a potion that
+may be drunk out of a fight, are offered at every decision but the run's end,
+a card screen included, and run at once beside whatever screen stands. Inside
+a fight every screen belongs to the card, potion, or listener that opened it,
+which waits at the front of the queue; a potion asked for there runs only once
+that action has finished, so the belt is offered at the next decision rather
+than beside the screen. An event whose definition sets `locks_potions` holds
+the belt from the moment it begins until it finishes: its page names potions
+by slot, and nothing is drunk or thrown away in between.
 
 One potion is not drunk at all outside a fight: it is thrown, and what it is
 thrown at is a merchant, who is not a creature. That is a `TargetType`

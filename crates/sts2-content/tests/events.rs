@@ -291,6 +291,124 @@ fn deck_holds(simulator: &Simulator, card: &str) -> bool {
         .any(|held| held.model_id == id(card))
 }
 
+/// What the belt offers at the decision the run is standing on.
+fn belt_actions(simulator: &Simulator) -> Vec<Action> {
+    simulator
+        .legal_actions()
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                Action::UsePotion { .. } | Action::DiscardPotion { .. }
+            )
+        })
+        .cloned()
+        .collect()
+}
+
+/// An event whose page picks a potion out of the belt holds the belt from the
+/// moment it begins: a slot the page named still holds the potion it named,
+/// because nothing is drunk or thrown away in between.
+#[test]
+fn an_event_that_picks_from_the_belt_holds_it_while_it_stands() {
+    let ranwid = Visit::new("EVENT.RANWID_THE_ELDER")
+        .act(1)
+        .gold(100)
+        .potion("POTION.BLOOD_POTION")
+        .relics(&["RELIC.LANTERN"])
+        .bag(&["RELIC.WHETSTONE"]);
+    let stone = Visit::new("EVENT.STONE_OF_ALL_TIME").potion("POTION.BLOOD_POTION");
+    let mut future = Visit::new("EVENT.THE_FUTURE_OF_POTIONS").potion("POTION.BLOOD_POTION");
+    future.potions = 2;
+    for visit in [ranwid, stone, future] {
+        let simulator = visit.enter();
+        assert!(
+            belt_actions(&simulator).is_empty(),
+            "{}: the belt is held: {:?}",
+            visit.event,
+            belt_actions(&simulator)
+        );
+    }
+}
+
+/// An event that picks nothing out of the belt leaves it in reach.
+#[test]
+fn an_event_that_picks_nothing_from_the_belt_leaves_it_in_reach() {
+    let simulator = Visit::new("EVENT.UNREST_SITE")
+        .potion("POTION.BLOOD_POTION")
+        .enter();
+    let belt = belt_actions(&simulator);
+    assert!(
+        belt.iter()
+            .any(|action| matches!(action, Action::DiscardPotion { .. })),
+        "a potion can be thrown away: {belt:?}"
+    );
+    assert!(
+        belt.iter()
+            .any(|action| matches!(action, Action::UsePotion { .. })),
+        "and drunk: {belt:?}"
+    );
+}
+
+/// The Future of Potions holds the belt through the card reward its trade
+/// pays, which is still the event, and lets go once that reward is taken and
+/// the event has finished.
+#[test]
+fn the_future_of_potions_holds_the_belt_until_its_trade_is_paid() {
+    let mut visit = Visit::new("EVENT.THE_FUTURE_OF_POTIONS").potion("POTION.BLOOD_POTION");
+    visit.potions = 2;
+    let mut simulator = visit.enter();
+    let option = page(&simulator).remove(0);
+    choose(&mut simulator, &option.option_id);
+    assert!(
+        belt_actions(&simulator).is_empty(),
+        "the reward the trade pays is still the event"
+    );
+    let claim = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, Action::ClaimReward { fingerprint, .. }
+                if fingerprint.reward_type == "card")
+        })
+        .cloned()
+        .expect("the traded potion paid a card offer");
+    simulator.step(claim).unwrap();
+    assert!(
+        matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::ChooseCards { .. }
+        ),
+        "the card offer is open"
+    );
+    assert!(
+        belt_actions(&simulator).is_empty(),
+        "and the belt still held"
+    );
+
+    let pick = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+        .cloned()
+        .expect("the offer lays out its cards");
+    simulator.step(pick).unwrap();
+    assert!(
+        simulator
+            .state()
+            .run
+            .as_ref()
+            .is_some_and(|run| run.active_room.is_none()),
+        "the event finished once its reward was taken"
+    );
+    assert!(
+        belt_actions(&simulator)
+            .iter()
+            .any(|action| matches!(action, Action::DiscardPotion { .. })),
+        "the potion the trade left is in reach again"
+    );
+}
+
 #[test]
 fn ranwid_awaits_the_pickup_effects_of_the_relics_he_hands_over() {
     let mut simulator = Visit::new("EVENT.RANWID_THE_ELDER")

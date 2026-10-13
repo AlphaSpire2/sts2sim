@@ -182,6 +182,33 @@ rather than a state the build settles on, and it is not replayed past it.
 observation is recorder timing, not run state, and a recorder that snapshots
 after the settle records the reading this simulator gives.
 
+## A potion asked for beside a screen inside a fight is offered after it
+
+**The build.** Inside a fight every selection screen belongs to the card,
+potion, or listener action that opened it, which waits at the front of the
+player's action queue for the answer. The belt is still in reach, and a potion
+drunk or discarded meanwhile is accepted onto the queue behind that action. It
+runs once the action has finished, or is cancelled if the fight ends first.
+
+**This simulator.** The belt is not offered beside a screen inside a fight. It
+is offered again at the next decision, once the action that opened the screen
+has finished.
+
+**Whether it can reach a conformance claim.** Through action order alone, and
+only in one shape. The recorder writes a potion when it starts to run, so a
+trace shows the potion after the answer and after the opening action settled,
+exactly where this simulator offers it, and a request the fight's end
+cancelled is never written. What a trace could show and this simulator would
+not reproduce is a potion requested beside the screen running ahead of a
+listener's own queued screen that the answer set going. That listener would be
+put on the queue behind the potion, while here it settles before the next
+decision offers the belt.
+
+**What would change this.** A recording in which a potion runs between an
+in-combat answer and a listener screen that answer queued. Reproducing it would
+need a potion request that waits on the queue beside the screen rather than an
+action offered at a decision.
+
 ## Not on this list
 
 **A potion offer the belt has no room for is not a divergence.** The build

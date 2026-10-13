@@ -1041,6 +1041,13 @@ pub struct EventDefinition {
     pub combat_layout: Option<ModelId>,
     /// An ancient restores whoever walks in before it says anything.
     pub heals_on_entry: bool,
+    /// Whether the event holds the potion belt while it stands. An event
+    /// whose page picks potions out of the belt keeps every potion where it
+    /// is from the moment it begins until it finishes, so a slot the page
+    /// named still holds the potion it named: none is drunk or thrown away
+    /// in between.
+    #[serde(default)]
+    pub locks_potions: bool,
     /// Whether the act may pull this event right now. An event that answers
     /// no is counted as visited and passed over, and the act moves on to the
     /// next candidate in its list.

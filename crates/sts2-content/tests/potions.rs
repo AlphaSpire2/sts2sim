@@ -663,6 +663,45 @@ fn a_blessing_of_the_forge_upgrades_the_whole_hand() {
     assert_eq!(levels, [1, 1]);
 }
 
+/// Inside a fight a screen belongs to the action that opened it, which waits
+/// at the front of the player's queue for its answer, and a potion asked for
+/// meanwhile runs only once that action has finished. So the belt is offered
+/// again once the screen is answered, and not beside it.
+#[test]
+fn a_screen_inside_a_fight_keeps_the_belt_until_it_is_answered() {
+    let mut simulator = fight(&["POTION.ATTACK_POTION", "POTION.BLOCK_POTION"], &[], &[]);
+    let belt = |simulator: &Simulator| {
+        simulator
+            .legal_actions()
+            .iter()
+            .filter(|action| {
+                matches!(
+                    action,
+                    Action::UsePotion { .. } | Action::DiscardPotion { .. }
+                )
+            })
+            .count()
+    };
+    drink(&mut simulator, "POTION.ATTACK_POTION");
+    assert!(matches!(
+        simulator.decision(),
+        DecisionContext::ChooseCards { .. }
+    ));
+    assert_eq!(belt(&simulator), 0, "nothing on the belt beside the screen");
+
+    let pick = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+        .cloned()
+        .expect("the potion's screen offers its cards");
+    simulator.step(pick).expect("the pick answers");
+    assert!(
+        belt(&simulator) > 0,
+        "the block potion is in reach once the screen is answered"
+    );
+}
+
 /// Ashwater lays the hand out and burns whatever is picked; taking nothing
 /// burns nothing.
 #[test]

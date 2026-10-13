@@ -2155,6 +2155,44 @@ fn a_toolbox_offers_three_colorless_cards() {
     assert_eq!(hand_size(&simulator), 0);
 }
 
+/// A run reloaded into a fight whose entrance put a screen up enters the room
+/// again with a fresh choice synchronizer, so the toolbox asks again and its
+/// pick is the reloaded run's first choice, however many the session before
+/// had numbered.
+#[test]
+fn a_reload_into_a_toolbox_fight_numbers_its_pick_afresh() {
+    let mut state = run_holding(&["RELIC.TOOLBOX"]).state().clone();
+    state.run.as_mut().expect("a run").next_choice_id = 7;
+    let mut simulator = Simulator::from_generated_state(state, sts2_content::standard_registry())
+        .expect("the run builds");
+    walk_to(&mut simulator, 3);
+    let standing = |simulator: &Simulator| match simulator.decision() {
+        sts2_engine::DecisionContext::ChooseCards { choice_id, .. } => *choice_id,
+        other => panic!("expected the toolbox's pick, found {other:?}"),
+    };
+    assert_eq!(standing(&simulator), sts2_core::ChoiceId::from(7));
+
+    simulator.resumed_from_save().expect("the run resumes");
+    assert_eq!(standing(&simulator), sts2_core::ChoiceId::from(0));
+    assert_eq!(
+        simulator
+            .state()
+            .run
+            .as_ref()
+            .expect("a run")
+            .next_choice_id,
+        1,
+        "the next screen takes the id after the pick's"
+    );
+    let pick = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+        .cloned()
+        .expect("the pick is offered under its new id");
+    simulator.step(pick).expect("the pick answers");
+}
+
 /// The shop relics whose bodies need a subsystem this baseline has not built
 /// are registered with the rarity a merchant prices them by.
 #[test]
@@ -8256,12 +8294,13 @@ fn a_lords_parasol_buys_the_shelf_one_purchase_at_a_time_after_entering() {
     let gold = simulator.state().run_player.gold;
     let deck = simulator.state().run_player.deck.len();
     assert_eq!(unsold(&simulator), 2);
+    // The belt stays in reach beside it: a potion can still be thrown away.
     assert!(
-        simulator
-            .legal_actions()
-            .iter()
-            .all(|action| matches!(action, Action::ChooseCards { .. })),
-        "the removal's screen is what is offered: {:?}",
+        simulator.legal_actions().iter().all(|action| matches!(
+            action,
+            Action::ChooseCards { .. } | Action::DiscardPotion { .. }
+        )),
+        "the removal's screen and the belt are what is offered: {:?}",
         simulator.legal_actions()
     );
 

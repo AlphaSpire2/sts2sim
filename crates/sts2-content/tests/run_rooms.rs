@@ -691,12 +691,48 @@ fn a_relic_obtained_outside_a_combat_holds_the_rest_of_its_own_body() {
         deck_before,
         "and the call after the screen has not run"
     );
+    // The belt stays in reach out of a fight: the screen stands beside the
+    // action queue, so nothing but answers to it and the belt is on offer.
     assert!(
-        simulator
-            .legal_actions()
-            .iter()
-            .all(|action| matches!(action, Action::ChooseCards { .. })),
-        "nothing but answers to the screen is on offer"
+        simulator.legal_actions().iter().all(|action| matches!(
+            action,
+            Action::ChooseCards { .. } | Action::DiscardPotion { .. } | Action::UsePotion { .. }
+        )),
+        "nothing but answers to the screen and the belt is on offer"
+    );
+
+    // A potion thrown away beside the screen goes at once: the screen stays
+    // up, and the rest of the body still waits on its answer.
+    let mut thrown = simulator.clone();
+    let discard = thrown
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::DiscardPotion { .. }))
+        .cloned()
+        .expect("the belt is in reach beside the screen");
+    let Action::DiscardPotion { slot, .. } = discard else {
+        unreachable!("the action was found as a discard");
+    };
+    thrown
+        .step(discard)
+        .expect("the discard applies beside the screen");
+    assert!(thrown.state().run_player.potions[slot].is_none());
+    assert!(matches!(
+        thrown.decision(),
+        DecisionContext::ChooseCards { .. }
+    ));
+    assert_eq!(thrown.state().run_player.deck.len(), deck_before);
+    let answer = thrown
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ChooseCards { .. }))
+        .cloned()
+        .expect("the screen still stands");
+    thrown.step(answer).unwrap();
+    assert_eq!(
+        thrown.state().run_player.deck.len(),
+        deck_before + 1,
+        "the rest of the body ran once the player answered"
     );
 
     // The same state cloned at the screen answers to the same place.
