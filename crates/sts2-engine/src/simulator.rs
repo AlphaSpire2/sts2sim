@@ -1527,15 +1527,11 @@ impl Simulator {
         }
     }
 
-    /// The load of a run that was quit while a turn handover was under way —
-    /// after the player ended their turn and before their next one opened.
-    ///
-    /// It is [`Self::resumed_from_save`] and one thing more. The handover's
-    /// second-phase mark is put up as the handover begins and taken down only
-    /// as it ends, and a quit in between tears the fight down without ending
-    /// it. Nothing else takes the mark down, so the fight the load stands back
-    /// up opens with it up, and it stays up through that fight's first turn
-    /// until its own first handover has run to its end.
+    /// Resume an active combat with a second-phase flag retained by the game
+    /// process. The caller must establish that the flag is still set at load;
+    /// quitting during a handover alone does not establish this, since a fresh
+    /// process resets it. The retained flag survives the first player turn
+    /// until a new handover completes.
     pub fn resumed_from_save_inside_a_handover(&mut self) -> Result<(), EngineError> {
         self.resumed_from_save()?;
         if let Some(combat) = self.state.combat.as_mut()

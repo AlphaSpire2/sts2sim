@@ -2302,6 +2302,16 @@ a difference, replay stops with a state-divergence error carrying the first
 differing field, its expected and simulated values, and the last matching
 checkpoint.
 
+On resume, the adapter restores its save point and applies the recorded
+`combat_runtime.ending_player_turn_phase_two` input. A true flag on an active
+restored combat remains set through its first player turn until another handover
+finishes; false takes the ordinary reload path and clears any flag retained by a
+previous reload. The last pre-load turn checkpoint does not select this behavior:
+a restarted game process and a retained process can have different flags after
+identical recorded actions. Missing input is unsupported, malformed input is an
+error, and a retained flag without an active restored combat is unsupported.
+Subsequent observations still compare the flag normally.
+
 A replay reports, for the recording it ran, how many observations it compared,
 the exact set of recorded fields the renderer does not emit, and how the run
 ended. What goes uncovered is metrics, mechanics no registered content uses, and

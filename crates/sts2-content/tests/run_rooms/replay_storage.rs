@@ -110,7 +110,7 @@ fn repeated_resumes_rewind_the_same_actions_with_full_delta_and_gzip_input() {
             "action.settled",
             &observation::render(source.simulator()),
         ));
-        let resume = record(resume_sequence, "run.resume", json!({}));
+        let resume = record(resume_sequence, "run.resume", resume_data(false));
         source.accept(&resume).unwrap();
         records.push(resume);
         records.push(observe(
@@ -154,6 +154,170 @@ fn repeated_resumes_rewind_the_same_actions_with_full_delta_and_gzip_input() {
             reference.simulator().state().terminal
         );
     }
+}
+
+fn resume_data(phase_two: bool) -> Value {
+    json!({"data":{"combat_runtime":{"ending_player_turn_phase_two":phase_two}}})
+}
+
+#[test]
+fn resume_runtime_overrides_checkpoint_timing_without_changing_rng_or_actions() {
+    for context in ["action.settled", "combat.enemy_turn.start"] {
+        for retained in [false, true] {
+            let mut adapter = ReplayAdapter::new(super::generated_run()).verifying_observations();
+            adapter
+                .accept(&record(1, "map.choose", json!({"data":{"col":4,"row":1}})))
+                .unwrap();
+            let entrance = adapter.simulator().state().clone();
+            adapter
+                .accept(&record(2, "combat.end_turn", json!({})))
+                .unwrap();
+            let state = observation::render(adapter.simulator());
+            adapter.accept(&observe(3, 2, context, &state)).unwrap();
+            adapter
+                .accept(&record(4, "run.resume", resume_data(retained)))
+                .unwrap();
+
+            let restored = adapter.simulator().state();
+            assert_eq!(restored.run.as_ref().unwrap().reloads, 1);
+            assert_eq!(restored.rng, entrance.rng, "resume does not consume RNG");
+            assert_eq!(restored.player_rng, entrance.player_rng);
+            let combat = restored.combat.as_ref().unwrap();
+            assert_eq!(combat.round, 1);
+            assert_eq!(
+                combat.player.energy,
+                entrance.combat.as_ref().unwrap().player.energy
+            );
+            assert_eq!(
+                restored.run_player.current_hp,
+                entrance.run_player.current_hp
+            );
+            assert_eq!(combat.ending_player_turn_phase_two, retained);
+            assert_eq!(adapter.resumes(), 1);
+            assert_eq!(adapter.rewound_actions(), 1);
+            assert_eq!(adapter.actions_since_save(), 0);
+
+            let mut continued = adapter.simulator().clone();
+            super::strike(&mut continued);
+            assert_eq!(
+                continued
+                    .state()
+                    .combat
+                    .as_ref()
+                    .unwrap()
+                    .ending_player_turn_phase_two,
+                retained
+            );
+            super::end_turn(&mut continued);
+            super::strike(&mut continued);
+            assert!(
+                !continued
+                    .state()
+                    .combat
+                    .as_ref()
+                    .unwrap()
+                    .ending_player_turn_phase_two
+            );
+
+            // A second load supplies fresh process state; the previous load's
+            // retained flag in the saved simulator snapshot cannot override it.
+            adapter
+                .accept(&record(5, "run.resume", resume_data(!retained)))
+                .unwrap();
+            assert_eq!(adapter.simulator().state().run.as_ref().unwrap().reloads, 2);
+            assert_eq!(adapter.simulator().state().rng, entrance.rng);
+            assert_eq!(
+                adapter
+                    .simulator()
+                    .state()
+                    .combat
+                    .as_ref()
+                    .unwrap()
+                    .ending_player_turn_phase_two,
+                !retained
+            );
+
+            // Verification still compares the flag, even when no next action
+            // follows. It is never used to choose the resume behavior.
+            let mut wrong = observation::render(adapter.simulator());
+            wrong["combat"]["ending_player_turn_phase_two"] = json!(retained);
+            adapter
+                .accept(&observe(6, 5, "combat.player_turn.start", &wrong))
+                .unwrap();
+            let error = adapter.verify_pending_observation().unwrap_err();
+            assert_eq!(error.code, sts2_replay::AdapterErrorCode::StateDivergence);
+            assert!(
+                error
+                    .divergence
+                    .unwrap()
+                    .differences
+                    .iter()
+                    .any(|difference| difference.pointer == "/combat/ending_player_turn_phase_two")
+            );
+        }
+    }
+}
+
+#[test]
+fn resume_requires_explicit_well_typed_runtime_input() {
+    use sts2_replay::AdapterErrorCode;
+    for (payload, code) in [
+        (json!({}), AdapterErrorCode::UnsupportedContent),
+        (
+            json!({"data":{"combat_runtime":null}}),
+            AdapterErrorCode::MalformedRecord,
+        ),
+        (
+            json!({"data":{"combat_runtime":{}}}),
+            AdapterErrorCode::MalformedRecord,
+        ),
+        (
+            json!({"data":{"combat_runtime":{"ending_player_turn_phase_two":"false"}}}),
+            AdapterErrorCode::MalformedRecord,
+        ),
+    ] {
+        let mut adapter = ReplayAdapter::new(super::generated_run());
+        let before = adapter.simulator().snapshot();
+        let error = adapter
+            .accept(&record(1, "run.resume", payload))
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert_eq!(error.record_sequence, 1);
+        assert_eq!(adapter.simulator().snapshot(), before);
+        assert_eq!(adapter.resumes(), 0);
+    }
+}
+
+#[test]
+fn a_retained_runtime_flag_without_active_combat_is_explicitly_unsupported() {
+    let mut adapter = ReplayAdapter::new(super::generated_run());
+    let error = adapter
+        .accept(&record(1, "run.resume", resume_data(true)))
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        sts2_replay::AdapterErrorCode::UnsupportedContent
+    );
+    assert_eq!(adapter.resumes(), 0);
+}
+
+#[test]
+fn an_earlier_state_divergence_is_reported_before_missing_resume_metadata() {
+    let mut adapter = ReplayAdapter::new(super::generated_run()).verifying_observations();
+    adapter
+        .accept(&record(1, "map.choose", json!({"data":{"col":4,"row":1}})))
+        .unwrap();
+    let mut wrong = observation::render(adapter.simulator());
+    wrong["players"][0]["gold"] = json!(123_456);
+    adapter
+        .accept(&observe(2, 1, "action.settled", &wrong))
+        .unwrap();
+    let error = adapter
+        .accept(&record(3, "run.resume", json!({})))
+        .unwrap_err();
+    assert_eq!(error.code, sts2_replay::AdapterErrorCode::StateDivergence);
+    assert_eq!(error.record_sequence, 2);
+    assert_eq!(adapter.resumes(), 0);
 }
 
 #[test]

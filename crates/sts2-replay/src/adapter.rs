@@ -510,13 +510,29 @@ impl ReplayAdapter {
     /// checked against the state it describes, then that state is dropped for
     /// the save point, and the load's own marks are applied on top of it.
     fn resume(&mut self, record: &Record) -> Result<(), AdapterError> {
-        // The last thing the quit session wrote was a stage of a turn
-        // handover: the run was quit with the enemy's turn under way.
-        let quit_inside_a_handover = self.pending_stage == ObservationStage::Handover;
         if self.verify_observations {
             self.pass_over_stage_observation();
             self.verify_pending_observation()?;
         }
+        // This flag belongs to the game process, not its save. A previous
+        // checkpoint cannot establish whether the process survived the quit.
+        let runtime = record.payload.pointer("/data/combat_runtime").ok_or_else(|| {
+            Self::error(
+                record,
+                AdapterErrorCode::UnsupportedContent,
+                "resume lacks combat_runtime; legacy traces do not establish the process's handover state",
+            )
+        })?;
+        let phase_two = runtime
+            .get("ending_player_turn_phase_two")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| {
+                Self::error(
+                    record,
+                    AdapterErrorCode::MalformedRecord,
+                    "resume combat_runtime requires boolean ending_player_turn_phase_two",
+                )
+            })?;
         let Some(save_point) = self.save_point.as_ref() else {
             return Err(Self::error(
                 record,
@@ -527,10 +543,24 @@ impl ReplayAdapter {
         self.simulator.restore(save_point).map_err(|error| {
             Self::error(record, AdapterErrorCode::IllegalAction, error.to_string())
         })?;
+        if phase_two
+            && self
+                .simulator
+                .state()
+                .combat
+                .as_ref()
+                .is_none_or(|combat| combat.has_ended)
+        {
+            return Err(Self::error(
+                record,
+                AdapterErrorCode::UnsupportedContent,
+                "a retained handover flag outside an active resumed combat is not supported",
+            ));
+        }
         self.rewound_actions += self.actions_since_save;
         self.actions_since_save = 0;
         self.resumes += 1;
-        let resumed = if quit_inside_a_handover {
+        let resumed = if phase_two {
             self.simulator.resumed_from_save_inside_a_handover()
         } else {
             self.simulator.resumed_from_save()

@@ -27,7 +27,14 @@ quit, and loaded again is supported: the recorder continues the same trace
 after a `run.resume` record, and replay puts the run back where the build last
 saved it, drops the actions played between that save and the quit, and replays
 the resumed records on from there. The report counts the reloads and the
-rewound actions.
+rewound actions. Each resume requires the explicit boolean
+`data.combat_runtime.ending_player_turn_phase_two` emitted by recorder 0.17.0 and
+later. It identifies process state absent from the save. Missing metadata in an
+older recording is reported as `unsupported_content` at the resume, without
+claiming a state mismatch or a complete match. Malformed metadata is invalid
+input. A true flag is currently supported only when restoring an active combat;
+retention through a noncombat or finished-room checkpoint is unsupported. No
+prior checkpoint or later expected observation substitutes for this input.
 
 A `Mods` header states which mods were loaded, in whichever order the loader
 enumerated them. There is no allowlist: any mod may be loaded, and neither ids

@@ -2628,7 +2628,7 @@ fn reloading_a_finished_ordinary_event_rewinds_to_its_entrance() {
             .accept(&Record {
                 sequence: sequence + 2,
                 kind: "run.resume".into(),
-                payload: json!({"data": {}}),
+                payload: json!({"data": {"combat_runtime": {"ending_player_turn_phase_two": false}}}),
             })
             .unwrap();
         let restored = render(adapter.simulator());
