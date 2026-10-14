@@ -1660,6 +1660,13 @@ such a set does not come back until the set is done with, so what the body wrote
 after the offer happens after the last reward has been taken: Neow's bones deal
 two relics and only then charge the curse they cost.
 
+A relic's acquisition can open a card-selection screen while its reward set
+remains active. The claim's continuation runs before the body waiting for the
+set. A completion frame preserves that boundary across snapshots and marks the
+relic selected only after its acquisition finishes. Precarious Shears therefore
+removes the chosen cards and deals its damage before Neow's Bones can charge
+the curse, regardless of which relic is claimed first.
+
 A room's reward set is not settled when the room has rolled it.
 `TryModifyRewards` runs two passes over it and then a third over exactly the
 listeners that put something on the list, and what they added is rolled behind

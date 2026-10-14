@@ -2386,12 +2386,20 @@ impl Simulator {
             // while it stands. A frame that cannot put itself down never
             // waited on the offer — a potion drunk beside the screen is the one
             // that reaches this — and parking its continuation would leave a
-            // frame on the list that nothing picks up.
+            // frame on the list that nothing picks up. A suspended relic claim
+            // likewise owns the entries ahead of its completion frame; those
+            // entries must finish before the set can wait on another claim.
             || (self.suspension_block.is_none()
                 && self.state.run.as_ref().is_some_and(|run| {
                     run.reward_set
                         .as_ref()
-                        .is_some_and(|set| set.disallow_skipping)
+                        .is_some_and(|set| {
+                            set.disallow_skipping
+                                && !run.pending.iter().any(|effect| {
+                                    matches!(effect, Effect::FinishRelicReward { set_id, .. }
+                                        if *set_id == set.id)
+                                })
+                        })
                 }))
     }
 
@@ -9711,6 +9719,7 @@ impl Simulator {
                 // all.
                 Effect::Resume(_)
                 | Effect::HookScreen(_)
+                | Effect::FinishRelicReward { .. }
                 | Effect::SettlePurchase { .. }
                 | Effect::SettleConveyorGrab { .. }
                 | Effect::BuyTheRestOfTheShelf { .. }
@@ -10006,6 +10015,10 @@ impl Simulator {
             // settled where nothing has to be asked, and reports a won fight
             // the way any other entry does.
             Effect::HookScreen(screen) => return self.open_hook_screen(*screen, events),
+            Effect::FinishRelicReward { .. } => {
+                return Err(EngineError::new(ErrorCode::InternalInvariant)
+                    .with_detail("combat_effect", "a run relic reward on the combat queue"));
+            }
             // The rest of a purchase never stands on a combat queue: the shop
             // has no fight, and the fight has no shop.
             Effect::SettlePurchase { .. } => {
@@ -11166,6 +11179,10 @@ impl Simulator {
                 return Ok(());
             };
             match effect {
+                Effect::FinishRelicReward {
+                    set_id,
+                    reward_index,
+                } => self.mark_reward_selected(set_id, reward_index)?,
                 Effect::Run(queued) => {
                     self.run_command(&queued.command, &queued.context, events)?;
                 }
@@ -21834,7 +21851,22 @@ impl Simulator {
                     return Ok(());
                 }
             }
-            self.mark_reward_selected(set_id, reward_index)?;
+            if self.state.combat.is_none() && reward.reward_type == "relic" && self.suspended() {
+                // A choice keeps the acquisition active. Its completion frame
+                // separates the claimed relic's remaining work from the body
+                // waiting for the set, including across snapshots.
+                self.state
+                    .run
+                    .as_mut()
+                    .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))?
+                    .pending
+                    .push_back(Effect::FinishRelicReward {
+                        set_id,
+                        reward_index,
+                    });
+            } else {
+                self.mark_reward_selected(set_id, reward_index)?;
+            }
         } else {
             let candidates = reward
                 .offered_cards
@@ -29858,6 +29890,7 @@ const fn effect_target(effect: &Effect) -> Option<CreatureCombatId> {
         | Effect::RunRemaining(_)
         | Effect::ResumeHookPass(_)
         | Effect::HookScreen(_)
+        | Effect::FinishRelicReward { .. }
         | Effect::SettlePurchase { .. }
         | Effect::SettleConveyorGrab { .. }
         | Effect::BuyTheRestOfTheShelf { .. }

@@ -4277,6 +4277,13 @@ pub enum Effect {
     RunRemaining(Box<QueuedCommands>),
     /// The rest of a listener pass a selection screen interrupted.
     ResumeHookPass(Box<SuspendedHookPass>),
+    /// Completes a run relic reward after its acquisition effects and choices.
+    /// Earlier queue entries belong to the claim; later entries belong to the
+    /// body waiting for the reward set.
+    FinishRelicReward {
+        set_id: RewardSetId,
+        reward_index: usize,
+    },
     /// A deferred listener's screen waiting to be shown, which stands on the
     /// action queue. The pass that deferred it has already run on past it;
     /// opening it is what waiting for the pass waits for.

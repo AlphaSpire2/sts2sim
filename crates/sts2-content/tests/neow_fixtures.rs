@@ -214,3 +214,97 @@ fn neows_bones_wait_for_both_relics_without_holding_the_claimed_relics_body() {
     );
     assert!(simulator.state().run.as_ref().unwrap().pending.is_empty());
 }
+
+#[test]
+fn neows_bones_wait_for_shears_acquisition_in_either_claim_order() {
+    use sts2_engine::{Action, Simulator};
+    use sts2_rng::RunStream;
+
+    for shears_first in [true, false] {
+        let mut simulator = sts2_content::standard_ironclad_run("N3EWU9Z7TK").unwrap();
+        let bones = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| {
+                matches!(action, Action::ChooseEvent { option_id, .. }
+                if option_id.ends_with(".NEOWS_BONES"))
+            })
+            .cloned()
+            .unwrap();
+        simulator.step(bones).unwrap();
+        // Choose the offered relics independently of the seeded shuffle.
+        let mut state = simulator.state().clone();
+        let set = state.run.as_mut().unwrap().reward_set.as_mut().unwrap();
+        for (reward, model) in set
+            .rewards
+            .iter_mut()
+            .zip(["RELIC.PRECARIOUS_SHEARS", "RELIC.SILVER_CRUCIBLE"])
+        {
+            reward.fingerprint.model_id = Some(model.parse().unwrap());
+        }
+        let mut simulator =
+            Simulator::from_generated_state(state, sts2_content::standard_registry()).unwrap();
+        let hp = simulator.state().run_player.current_hp;
+        let deck = simulator.state().run_player.deck.len();
+        let niche = simulator.state().rng.stream(RunStream::Niche).counter();
+        let claim = |simulator: &mut Simulator, relic: &str| {
+            let action = simulator
+                .legal_actions()
+                .iter()
+                .find(|action| {
+                    matches!(action, Action::ClaimReward { fingerprint, .. }
+                    if fingerprint.model_id.as_ref().is_some_and(|id| id.entry() == relic))
+                })
+                .cloned()
+                .unwrap();
+            simulator.step(action).unwrap();
+        };
+        if !shears_first {
+            claim(&mut simulator, "SILVER_CRUCIBLE");
+        }
+        claim(&mut simulator, "PRECARIOUS_SHEARS");
+        assert_eq!(simulator.state().run_player.current_hp, hp);
+        assert_eq!(simulator.state().run_player.deck.len(), deck);
+        assert_eq!(
+            simulator.state().rng.stream(RunStream::Niche).counter(),
+            niche
+        );
+        let run = simulator.state().run.as_ref().unwrap();
+        assert!(!run.reward_set.as_ref().unwrap().rewards[0].selected);
+
+        // A saved choice retains the claim's continuation and its parent wait.
+        let mut saved = simulator.state().clone();
+        let run_json = serde_json::to_vec(&saved.run).unwrap();
+        saved.run = serde_json::from_slice(&run_json).unwrap();
+        let restored =
+            Simulator::from_generated_state(saved, sts2_content::standard_registry()).unwrap();
+        simulator.restore(&restored.snapshot()).unwrap();
+        let choice = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 2))
+            .cloned()
+            .unwrap();
+        simulator.step(choice).unwrap();
+        assert_eq!(simulator.state().run_player.current_hp, hp - 16);
+        if shears_first {
+            assert_eq!(simulator.state().run_player.deck.len(), deck - 2);
+            assert_eq!(
+                simulator.state().rng.stream(RunStream::Niche).counter(),
+                niche
+            );
+            let run = simulator.state().run.as_ref().unwrap();
+            assert!(run.reward_set.as_ref().unwrap().rewards[0].selected);
+            claim(&mut simulator, "SILVER_CRUCIBLE");
+        }
+        assert_eq!(simulator.state().run_player.deck.len(), deck - 1);
+        assert_eq!(
+            simulator.state().rng.stream(RunStream::Niche).counter(),
+            niche + 1
+        );
+        let run = simulator.state().run.as_ref().unwrap();
+        assert!(run.reward_set.is_none());
+        assert!(run.pending.is_empty());
+        assert!(run.suspended_choice.is_none());
+    }
+}
