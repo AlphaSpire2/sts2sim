@@ -326,7 +326,7 @@ pub fn registry_at(character: &ModelId, ascension: u8) -> Arc<ContentRegistry> {
     }
 
     let transcribed_events = vec![
-        events::darv(),
+        events::darv(character),
         events::doors_of_light_and_dark(),
         events::tea_master(),
         events::whispering_hollow(),

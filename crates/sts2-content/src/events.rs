@@ -28,7 +28,17 @@ fn act_group(act: usize, relics: &[&str]) -> AncientRelicGroup {
 
 /// Darv, the ancient who deals relics.
 #[must_use]
-pub fn darv() -> EventDefinition {
+pub fn darv(character: &sts2_core::ModelId) -> EventDefinition {
+    // Each supported character has one ancient left after excluding the
+    // starter upgrade reserved for Archaic Tooth.
+    let ancient = match character.to_string().as_str() {
+        "CHARACTER.IRONCLAD" => Some("CARD.CORRUPTION"),
+        "CHARACTER.SILENT" => Some("CARD.WRAITH_FORM"),
+        "CHARACTER.NECROBINDER" => Some("CARD.FORBIDDEN_GRIMOIRE"),
+        "CHARACTER.REGENT" => Some("CARD.THE_SEALED_THRONE"),
+        "CHARACTER.DEFECT" => Some("CARD.BIASED_COGNITION"),
+        _ => None,
+    };
     EventDefinition {
         model_id: id("EVENT.DARV"),
         combat_layout: None,
@@ -51,12 +61,8 @@ pub fn darv() -> EventDefinition {
                 act_group(2, &["RELIC.PHILOSOPHERS_STONE", "RELIC.VELVET_CHOKER"]),
             ],
             keepsake: id("RELIC.DUSTY_TOME"),
-            // The tome offers the ancient cards of the character's own pool,
-            // minus the ones the Archaic Tooth turns a starter into. The
-            // Ironclad's pool holds two ancients and
-            // the tooth claims one of them, so one is left — and the roll
-            // between one still reads a die.
-            keepsake_cards: vec![id("CARD.CORRUPTION")],
+            // Setup still consumes a rewards draw for a one-card pool.
+            keepsake_cards: ancient.into_iter().map(id).collect(),
         },
     }
 }

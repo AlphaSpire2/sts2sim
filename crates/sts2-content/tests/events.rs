@@ -45,6 +45,7 @@ fn walk_map() -> ActMap {
 /// A run standing one step in front of an event room.
 struct Visit {
     event: &'static str,
+    character: &'static str,
     act: usize,
     gold: i32,
     current_hp: i32,
@@ -63,6 +64,7 @@ impl Visit {
     fn new(event: &'static str) -> Self {
         Self {
             event,
+            character: "CHARACTER.IRONCLAD",
             act: 0,
             gold: 0,
             current_hp: 80,
@@ -78,6 +80,11 @@ impl Visit {
 
     fn seed(mut self, seed: &'static str) -> Self {
         self.seed = Some(seed);
+        self
+    }
+
+    fn character(mut self, character: &'static str) -> Self {
+        self.character = character;
         self
     }
 
@@ -228,8 +235,10 @@ impl Visit {
             owed_removal: false,
             unknown_room_odds: sts2_engine::UnknownRoomOdds::start_of_act(),
         });
+        state.run.as_mut().unwrap().config.players[0].character = id(self.character);
         let mut simulator =
-            Simulator::from_generated_state(state, sts2_content::standard_registry()).unwrap();
+            Simulator::from_generated_state(state, sts2_content::registry_for(&id(self.character)))
+                .unwrap();
         simulator
             .step(Action::ChooseMap {
                 destination: MapCoord { col: 0, row: 1 },
@@ -1026,6 +1035,64 @@ fn a_punch_off_nabs_an_injury_and_a_relic_or_takes_them_both_on() {
     choose(&mut fought, "PUNCH_OFF.pages.I_CAN_TAKE_THEM.options.FIGHT");
     // The fight the event was standing in front of is the one that starts.
     assert!(fought.state().combat.is_some());
+}
+
+#[test]
+fn dusty_tome_grants_each_characters_eligible_ancient_upgraded() {
+    for (character, card) in [
+        ("CHARACTER.IRONCLAD", "CARD.CORRUPTION"),
+        ("CHARACTER.SILENT", "CARD.WRAITH_FORM"),
+        ("CHARACTER.NECROBINDER", "CARD.FORBIDDEN_GRIMOIRE"),
+        ("CHARACTER.REGENT", "CARD.THE_SEALED_THRONE"),
+        ("CHARACTER.DEFECT", "CARD.BIASED_COGNITION"),
+    ] {
+        let mut simulator = ["N3Z9EE2CXB", "N3Z9EE2CXA", "N3Z9EE2CXC", "N3Z9EE2CXD"]
+            .into_iter()
+            .map(|seed| {
+                Visit::new("EVENT.DARV")
+                    .seed(seed)
+                    .character(character)
+                    .act(1)
+                    .enter()
+            })
+            .find(|simulator| {
+                option_ids(simulator)
+                    .iter()
+                    .any(|option| option == "DARV.pages.INITIAL.options.DUSTY_TOME")
+            })
+            .expect("one of the scenarios offers the Tome");
+        let rewards_before = simulator
+            .state()
+            .player_rng
+            .stream(sts2_rng::PlayerStream::Rewards)
+            .counter();
+        assert_eq!(rewards_before, 1, "setting up the Tome consumes one draw");
+        let deck_before = simulator.state().run_player.deck.len();
+        choose(&mut simulator, "DARV.pages.INITIAL.options.DUSTY_TOME");
+        let player = &simulator.state().run_player;
+        assert_eq!(player.deck.len(), deck_before + 1);
+        let added = player.deck.last().unwrap();
+        assert_eq!(added.model_id, id(card), "{character}");
+        assert_eq!(added.upgrade_level, 1, "{character}");
+        let tome = player
+            .relics
+            .iter()
+            .find(|relic| relic.model_id == id("RELIC.DUSTY_TOME"))
+            .unwrap();
+        assert_eq!(
+            tome.saved_models,
+            vec![("AncientCard".to_owned(), id(card))]
+        );
+        assert_eq!(
+            simulator
+                .state()
+                .player_rng
+                .stream(sts2_rng::PlayerStream::Rewards)
+                .counter(),
+            rewards_before,
+            "claiming the Tome must not roll its card again"
+        );
+    }
 }
 
 #[test]
