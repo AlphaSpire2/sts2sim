@@ -547,6 +547,19 @@ pub struct OwedPurchase {
     pub on_a_merchants_shelf: bool,
 }
 
+/// A reward screen below the active one, with the work that waits on it.
+/// Restoring it preserves its identity and completes the nested acquisition
+/// before the body that offered this set can continue.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SuspendedRewardSet {
+    pub set: RewardSet,
+    pub pending: std::collections::VecDeque<crate::Effect>,
+    pub owed_by_rewards: std::collections::VecDeque<crate::Effect>,
+    pub purchase_owed_by_rewards: Option<OwedPurchase>,
+    pub finish_event_after_rewards: bool,
+    pub finish_event_after_pending: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[allow(
     clippy::struct_excessive_bools,
@@ -615,6 +628,10 @@ pub struct RunState {
     #[serde(default)]
     pub marked_map_coord: Option<MapCoord>,
     pub reward_set: Option<RewardSet>,
+    /// Suspended reward screens in opening order. Only `reward_set` accepts
+    /// actions; the most recently suspended screen is restored when it closes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reward_parents: Vec<SuspendedRewardSet>,
     /// A combat reward set retained only for replay observations until the next
     /// map point is entered. Proceed finalizes reward decisions: this set is
     /// not actionable and cannot resume an event body.

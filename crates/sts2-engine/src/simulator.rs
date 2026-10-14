@@ -2301,6 +2301,7 @@ impl Simulator {
                 reward_index,
                 ..
             } => {
+                self.suspension_block = None;
                 // A claim runs its own acquisition body. Keep the body that
                 // offered the standing set aside while that work settles.
                 let offered_by = if self.state.combat.is_none() {
@@ -2312,24 +2313,26 @@ impl Simulator {
                     None
                 };
                 self.claim_reward(*set_id, *reward_index, events)?;
+                if let Some(mut offered_by) = offered_by {
+                    let run = self.state.run.as_mut().expect("a run reward has a run");
+                    if let Some(parent) = run
+                        .reward_parents
+                        .iter_mut()
+                        .find(|parent| parent.set.id == *set_id)
+                    {
+                        parent.pending.extend(offered_by);
+                    } else if run.reward_set.as_ref().is_some_and(|set| set.id != *set_id) {
+                        // A completed child restored its parent. Finish the
+                        // child's offering body before the parent's claim.
+                        offered_by.append(&mut run.pending);
+                        run.pending = offered_by;
+                    } else {
+                        run.pending.extend(offered_by);
+                    }
+                }
                 if self.state.combat.is_none() {
                     self.settle_run_pending(events)?;
                     self.settle_purchase_owed_by_rewards(events)?;
-                }
-                if let Some(offered_by) = offered_by {
-                    let run = self.state.run.as_mut().expect("a run reward has a run");
-                    run.pending.extend(offered_by);
-                    // Only a mandatory set or a nested card choice keeps
-                    // the offering body suspended.
-                    if !run
-                        .reward_set
-                        .as_ref()
-                        .is_some_and(|set| set.disallow_skipping)
-                        && run.suspended_choice.is_none()
-                    {
-                        self.settle_run_pending(events)?;
-                        self.settle_purchase_owed_by_rewards(events)?;
-                    }
                 }
                 self.push_checkpoint("reward.claim.settled")?;
             }
@@ -2347,13 +2350,6 @@ impl Simulator {
     fn suspended(&self) -> bool {
         self.standing_choices()
             .any(|choice| Some(choice) != self.unawaited_screen)
-        // A reward set the player may not walk away from is a screen the body
-        // behind it genuinely waits on: the offer does not come back until the
-        // set is done with, so what a body wrote after the offer happens after
-        // the set is taken. A set that may be skipped is waited on just the
-        // same, but what its body still owes is carried apart from the queue —
-        // `finish_event_after_rewards`, `purchase_owed_by_rewards`,
-        // `owed_by_rewards` — so the queue is not held for it.
     }
 
     /// The screens standing right now, whoever they belong to.
@@ -2374,12 +2370,10 @@ impl Simulator {
 
     /// Whether a body that has already started is still waiting on the player.
     ///
-    /// A card-selection screen is one such wait. So is a reward set the player
-    /// may not walk away from: the offer does not come back until the set is
-    /// done with, so what a body wrote after the offer happens after the set is
-    /// taken. A set that may be skipped is waited on just the same, but what its
-    /// body still owes is carried apart from the queue, in `owed_by_rewards` and
-    /// its siblings, so the queue is not held for it.
+    /// Card selections, mandatory reward sets, and nested reward sets hold
+    /// their offering bodies until answered. A claim within a set runs its
+    /// own acquisition first, up to its completion frame. Top-level skippable
+    /// sets carry their waiting work in `owed_by_rewards` and its siblings.
     fn queue_is_held(&self) -> bool {
         self.suspended()
             // The set holds the body that offered it, not every body that runs
@@ -2394,7 +2388,7 @@ impl Simulator {
                     run.reward_set
                         .as_ref()
                         .is_some_and(|set| {
-                            set.disallow_skipping
+                            (set.disallow_skipping || !run.reward_parents.is_empty())
                                 && !run.pending.iter().any(|effect| {
                                     matches!(effect, Effect::FinishRelicReward { set_id, .. }
                                         if *set_id == set.id)
@@ -2663,15 +2657,18 @@ impl Simulator {
         }
         if let Some(run) = &mut self.state.run {
             if run.reward_set.is_some() {
+                self.suspension_block = None;
                 // A set an event or a room put up is a nested loot screen, and
                 // its button skips the set outright: the set is completed and
                 // off the stack at once. Only a combat room's terminal set
                 // waits for the room to be left, which is the branch below.
-                // Walking on abandons a screen and whatever body was waiting
-                // behind it, the way leaving the room cancels the flow.
+                // A nested screen releases its acquisition continuation;
+                // abandoning the outer screen cancels its pending choices.
                 run.suspended_choice = None;
-                run.pending.clear();
-                run.finish_event_after_pending = false;
+                if run.reward_parents.is_empty() {
+                    run.pending.clear();
+                    run.finish_event_after_pending = false;
+                }
                 // Skipping the set finishes it the same as taking everything
                 // on it would have, and a body waiting on the set goes on from
                 // its offer.
@@ -9390,6 +9387,7 @@ impl Simulator {
         self.state.combat = None;
         if let Some(run) = &mut self.state.run {
             run.reward_set = None;
+            run.reward_parents.clear();
             run.dismissed_reward_set = None;
             run.suspended_choice = None;
             run.pending.clear();
@@ -21794,6 +21792,21 @@ impl Simulator {
             return Ok(());
         }
         if reward.offered_cards.is_empty() {
+            let deferred_relic = self.state.combat.is_none() && reward.reward_type == "relic";
+            if deferred_relic {
+                // The claim owns its acquisition body, including any reward
+                // screens it opens. Its completion follows those effects and
+                // precedes the body waiting on this set.
+                self.state
+                    .run
+                    .as_mut()
+                    .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))?
+                    .pending
+                    .push_back(Effect::FinishRelicReward {
+                        set_id,
+                        reward_index,
+                    });
+            }
             if reward.gold_amount != 0 {
                 // A gold reward is claimed as an ordinary gold gain, so
                 // listeners such as Bowler Hat modify the amount when it is
@@ -21851,20 +21864,7 @@ impl Simulator {
                     return Ok(());
                 }
             }
-            if self.state.combat.is_none() && reward.reward_type == "relic" && self.suspended() {
-                // A choice keeps the acquisition active. Its completion frame
-                // separates the claimed relic's remaining work from the body
-                // waiting for the set, including across snapshots.
-                self.state
-                    .run
-                    .as_mut()
-                    .ok_or_else(|| EngineError::new(ErrorCode::InternalInvariant))?
-                    .pending
-                    .push_back(Effect::FinishRelicReward {
-                        set_id,
-                        reward_index,
-                    });
-            } else {
+            if !deferred_relic {
                 self.mark_reward_selected(set_id, reward_index)?;
             }
         } else {
@@ -27536,6 +27536,16 @@ impl Simulator {
             .run
             .as_mut()
             .ok_or_else(|| EngineError::new(ErrorCode::WrongDecisionContext))?;
+        if let Some(set) = run.reward_set.take() {
+            run.reward_parents.push(crate::SuspendedRewardSet {
+                set,
+                pending: std::mem::take(&mut run.pending),
+                owed_by_rewards: std::mem::take(&mut run.owed_by_rewards),
+                purchase_owed_by_rewards: run.purchase_owed_by_rewards.take(),
+                finish_event_after_rewards: std::mem::take(&mut run.finish_event_after_rewards),
+                finish_event_after_pending: std::mem::take(&mut run.finish_event_after_pending),
+            });
+        }
         run.reward_set = Some(RewardSet {
             id: set_id,
             player_slot: slot,
@@ -27557,7 +27567,8 @@ impl Simulator {
         // both walked out of through the map, so each stands with its own
         // screen on it once the rewards standing over it have been taken — an
         // orrery bought at a merchant leaves the shelf up behind its offers.
-        run.finish_event_after_rewards = matches!(run.active_room, Some(ActiveRoom::Event { .. }));
+        run.finish_event_after_rewards = run.reward_parents.is_empty()
+            && matches!(run.active_room, Some(ActiveRoom::Event { .. }));
         Ok(())
     }
 
@@ -28677,6 +28688,7 @@ impl Simulator {
             // A reward set the player may not walk away from holds the body
             // behind it the way a card-selection screen does.
             let held = run.suspended_choice.is_some()
+                || !run.reward_parents.is_empty()
                 || run
                     .reward_set
                     .as_ref()
@@ -28988,6 +29000,21 @@ fn reward_set_done(run: &mut crate::RunState) {
     run.reward_set = None;
     let owed = std::mem::take(&mut run.owed_by_rewards);
     run.pending.extend(owed);
+    if let Some(parent) = run.reward_parents.pop() {
+        if let Some(purchase) = run.purchase_owed_by_rewards.take() {
+            run.pending.push_back(Effect::SettlePurchase {
+                offer_index: purchase.offer_index,
+                on_a_merchants_shelf: purchase.on_a_merchants_shelf,
+            });
+        }
+        run.reward_set = Some(parent.set);
+        run.pending.extend(parent.pending);
+        run.owed_by_rewards = parent.owed_by_rewards;
+        run.purchase_owed_by_rewards = parent.purchase_owed_by_rewards;
+        run.finish_event_after_rewards = parent.finish_event_after_rewards;
+        run.finish_event_after_pending = parent.finish_event_after_pending;
+        return;
+    }
     if run.finish_event_after_rewards {
         run.finish_event_after_rewards = false;
         if run.pending.is_empty() {

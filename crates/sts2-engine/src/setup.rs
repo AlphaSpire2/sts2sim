@@ -492,6 +492,7 @@ fn walk_onto(run: &mut crate::RunState, setup: &CombatSetup, point_type: MapPoin
     run.pushed_room = None;
     run.begun_event = None;
     run.reward_set = None;
+    run.reward_parents.clear();
     run.dismissed_reward_set = None;
     run.rest_option_owed = None;
     run.rest_options_owed.clear();

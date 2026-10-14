@@ -308,3 +308,243 @@ fn neows_bones_wait_for_shears_acquisition_in_either_claim_order() {
         assert!(run.suspended_choice.is_none());
     }
 }
+
+fn bones_offering_kaleidoscope() -> sts2_engine::Simulator {
+    use sts2_engine::{Action, Simulator};
+
+    let mut simulator = sts2_content::standard_ironclad_run("N3EWU9Z7TK").unwrap();
+    let bones = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, Action::ChooseEvent { option_id, .. }
+            if option_id.ends_with(".NEOWS_BONES"))
+        })
+        .cloned()
+        .unwrap();
+    simulator.step(bones).unwrap();
+    let mut state = simulator.state().clone();
+    let set = state.run.as_mut().unwrap().reward_set.as_mut().unwrap();
+    for (reward, model) in set
+        .rewards
+        .iter_mut()
+        .zip(["RELIC.KALEIDOSCOPE", "RELIC.SILVER_CRUCIBLE"])
+    {
+        reward.fingerprint.model_id = Some(model.parse().unwrap());
+    }
+    Simulator::from_generated_state(state, sts2_content::standard_registry()).unwrap()
+}
+
+fn claim_relic(simulator: &mut sts2_engine::Simulator, relic: &str) {
+    let action = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, sts2_engine::Action::ClaimReward { fingerprint, .. }
+            if fingerprint.model_id.as_ref().is_some_and(|id| id.entry() == relic))
+        })
+        .cloned()
+        .unwrap();
+    simulator.step(action).unwrap();
+}
+
+fn restore_reward_snapshot(simulator: &mut sts2_engine::Simulator) {
+    let key = simulator.state_key().unwrap();
+    let mut saved = simulator.state().clone();
+    saved.run = serde_json::from_slice(&serde_json::to_vec(&saved.run).unwrap()).unwrap();
+    let restored =
+        sts2_engine::Simulator::from_generated_state(saved, simulator.content().clone().into())
+            .unwrap();
+    simulator.restore(&restored.snapshot()).unwrap();
+    assert_eq!(simulator.state_key().unwrap(), key);
+}
+
+fn cancel_card_reward(simulator: &mut sts2_engine::Simulator) {
+    use sts2_engine::Action;
+
+    let open = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ClaimReward { .. }))
+        .cloned()
+        .unwrap();
+    simulator.step(open.clone()).unwrap();
+    restore_reward_snapshot(simulator);
+    let cancel = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.is_empty()))
+        .cloned()
+        .unwrap();
+    simulator.step(cancel).unwrap();
+    assert!(simulator.legal_actions().contains(&open));
+}
+
+#[test]
+fn kaleidoscope_rewards_preserve_neows_bones_until_acquisition_finishes() {
+    use sts2_engine::Action;
+    use sts2_rng::RunStream;
+
+    for kaleidoscope_first in [true, false] {
+        for cards_taken in 0..=2 {
+            let mut simulator = bones_offering_kaleidoscope();
+            let deck = simulator.state().run_player.deck.len();
+            let niche = simulator.state().rng.stream(RunStream::Niche).counter();
+            let parent_id = simulator
+                .state()
+                .run
+                .as_ref()
+                .unwrap()
+                .reward_set
+                .as_ref()
+                .unwrap()
+                .id;
+            if !kaleidoscope_first {
+                claim_relic(&mut simulator, "SILVER_CRUCIBLE");
+            }
+            claim_relic(&mut simulator, "KALEIDOSCOPE");
+            let projection = sts2_replay::observation::render(&simulator);
+            let sets = projection["choices"]["rewards"].as_array().unwrap();
+            assert_eq!(sets.len(), 2, "both reward sets remain outstanding");
+            assert_eq!(sets[0]["set_id"], parent_id.get());
+            assert_eq!(sets[0]["rewards"][0]["selected"], false);
+            assert_eq!(sets[0]["rewards"][1]["selected"], !kaleidoscope_first);
+            assert_eq!(sets[1]["rewards"].as_array().unwrap().len(), 2);
+            assert_eq!(simulator.state().run_player.deck.len(), deck);
+            assert_eq!(
+                simulator.state().rng.stream(RunStream::Niche).counter(),
+                niche + 6
+            );
+            assert!(simulator.legal_actions().iter().all(|action|
+                !matches!(action, Action::ClaimReward { set_id, .. } if *set_id == parent_id)));
+            restore_reward_snapshot(&mut simulator);
+
+            // Dismissing one card offer leaves it available on the nested set.
+            cancel_card_reward(&mut simulator);
+            for taken in 0..cards_taken {
+                let open = simulator
+                    .legal_actions()
+                    .iter()
+                    .find(|action| matches!(action, Action::ClaimReward { .. }))
+                    .cloned()
+                    .unwrap();
+                simulator.step(open).unwrap();
+                let take = simulator.legal_actions().iter()
+                    .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 1))
+                    .cloned().unwrap();
+                simulator.step(take).unwrap();
+                if taken == 0 {
+                    assert_eq!(simulator.state().run_player.deck.len(), deck + 1);
+                    assert_eq!(
+                        simulator.state().rng.stream(RunStream::Niche).counter(),
+                        niche + 6
+                    );
+                    restore_reward_snapshot(&mut simulator);
+                }
+            }
+            if cards_taken < 2 {
+                simulator.step(Action::Proceed).unwrap();
+            }
+            if kaleidoscope_first {
+                let run = simulator.state().run.as_ref().unwrap();
+                let parent = run.reward_set.as_ref().unwrap();
+                assert_eq!(parent.id, parent_id);
+                assert!(parent.rewards[0].selected);
+                assert!(!parent.rewards[1].selected);
+                assert_eq!(simulator.state().run_player.deck.len(), deck + cards_taken);
+                assert_eq!(
+                    simulator.state().rng.stream(RunStream::Niche).counter(),
+                    niche + 6
+                );
+                assert!(!simulator.legal_actions().contains(&Action::Proceed));
+                restore_reward_snapshot(&mut simulator);
+                claim_relic(&mut simulator, "SILVER_CRUCIBLE");
+            }
+            assert_eq!(
+                simulator.state().run_player.deck.len(),
+                deck + cards_taken + 1
+            );
+            assert_eq!(
+                simulator.state().rng.stream(RunStream::Niche).counter(),
+                niche + 7
+            );
+            let run = simulator.state().run.as_ref().unwrap();
+            assert!(run.reward_set.is_none());
+            assert_eq!(run.reward_parents, []);
+            assert!(run.pending.is_empty());
+            assert!(run.owed_by_rewards.is_empty());
+            assert!(run.suspended_choice.is_none());
+            assert_eq!(run.phase, sts2_engine::RunPhase::Map);
+            assert_eq!(
+                sts2_replay::observation::render(&simulator)["choices"]["rewards"],
+                serde_json::json!([])
+            );
+        }
+    }
+}
+
+#[test]
+fn nested_reward_completion_runs_the_acquisition_tail_before_the_parent_body() {
+    use sts2_engine::{
+        Action, Amount, Command, PlayerCmd, RewardFingerprint, RewardsCmd, Simulator,
+    };
+
+    for skip in [false, true] {
+        let simulator = bones_offering_kaleidoscope();
+        let mut registry = sts2_content::standard_registry();
+        // An immediate reward and a delayed grant make both continuation
+        // boundaries observable without opening a card-selection screen.
+        let mut relic = registry
+            .relic(&"RELIC.KALEIDOSCOPE".parse().unwrap())
+            .unwrap()
+            .clone();
+        relic.on_obtained = vec![
+            Command::Rewards(RewardsCmd::OfferCustom(vec![
+                RewardFingerprint::of("gold").with_gold(10),
+            ])),
+            Command::Player(PlayerCmd::GainGold(Amount::Fixed(7))),
+        ];
+        std::sync::Arc::make_mut(&mut registry).add_relic(relic);
+        let mut simulator =
+            Simulator::from_generated_state(simulator.state().clone(), registry).unwrap();
+        let gold = simulator.state().run_player.gold;
+        let deck = simulator.state().run_player.deck.len();
+        claim_relic(&mut simulator, "KALEIDOSCOPE");
+        assert_eq!(simulator.state().run_player.gold, gold);
+        restore_reward_snapshot(&mut simulator);
+        let action = if skip {
+            Action::Proceed
+        } else {
+            simulator
+                .legal_actions()
+                .iter()
+                .find(|action| matches!(action, Action::ClaimReward { .. }))
+                .cloned()
+                .unwrap()
+        };
+        simulator.step(action).unwrap();
+        assert_eq!(
+            simulator.state().run_player.gold,
+            gold + if skip { 7 } else { 17 }
+        );
+        assert_eq!(simulator.state().run_player.deck.len(), deck);
+        assert!(
+            simulator
+                .state()
+                .run
+                .as_ref()
+                .unwrap()
+                .reward_set
+                .as_ref()
+                .unwrap()
+                .rewards[0]
+                .selected
+        );
+        claim_relic(&mut simulator, "SILVER_CRUCIBLE");
+        assert_eq!(
+            simulator.state().run_player.gold,
+            gold + if skip { 7 } else { 17 }
+        );
+        assert_eq!(simulator.state().run_player.deck.len(), deck + 1);
+    }
+}

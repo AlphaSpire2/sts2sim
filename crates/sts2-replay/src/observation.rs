@@ -553,10 +553,15 @@ fn render_choices(state: &GameState) -> Value {
                 .as_ref()
                 .and_then(|run| run.dismissed_reward_set.as_ref())
         });
-    choices.insert(
-        "rewards".to_owned(),
-        reward_set.map_or_else(|| json!([]), |set| json!([render_reward_set(state, set)])),
-    );
+    let mut rewards: Vec<_> = state
+        .run
+        .as_ref()
+        .into_iter()
+        .flat_map(|run| &run.reward_parents)
+        .map(|parent| render_reward_set(state, &parent.set))
+        .collect();
+    rewards.extend(reward_set.map(|set| render_reward_set(state, set)));
+    choices.insert("rewards".to_owned(), json!(rewards));
     let active = state.run.as_ref().and_then(|run| run.active_room.as_ref());
     choices.insert(
         "treasure".to_owned(),

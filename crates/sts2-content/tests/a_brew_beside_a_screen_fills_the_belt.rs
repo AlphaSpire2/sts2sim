@@ -133,6 +133,7 @@ fn a_brew_beside(standing: Standing) -> Simulator {
             }],
             disallow_skipping: true,
         }),
+        reward_parents: Vec::new(),
         dismissed_reward_set: None,
         rest_option_owed: None,
         rest_options_owed: Vec::new(),

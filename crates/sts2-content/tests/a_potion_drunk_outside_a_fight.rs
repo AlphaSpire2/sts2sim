@@ -104,6 +104,7 @@ fn standing_on_the_map(current_hp: i32, max_hp: i32, held: &[&str]) -> Simulator
         player_relic_grab_bag: RelicGrabBagState::default(),
         marked_map_coord: None,
         reward_set: None,
+        reward_parents: Vec::new(),
         dismissed_reward_set: None,
         rest_option_owed: None,
         rest_options_owed: Vec::new(),

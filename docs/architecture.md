@@ -1654,9 +1654,9 @@ everything behind it — the event finishing among them — runs from there: the
 state after a rewards screen is dismissed is the state the recorder's
 observations in front of the skip already show.
 
-A set the player may *not* skip is the exception, and the only kind of screen
-out of combat that holds a body the way a card-selection screen does. Offering
-such a set does not come back until the set is done with, so what the body wrote
+A set the player may *not* skip holds its offering body the way a
+card-selection screen does. Offering such a set does not come back until the
+set is done with, so what the body wrote
 after the offer happens after the last reward has been taken: Neow's bones deal
 two relics and only then charge the curse they cost.
 
@@ -1666,6 +1666,15 @@ set. A completion frame preserves that boundary across snapshots and marks the
 relic selected only after its acquisition finishes. Precarious Shears therefore
 removes the chosen cards and deals its damage before Neow's Bones can charge
 the curse, regardless of which relic is claimed first.
+
+An acquisition can also offer a nested reward set. The parent set retains its
+identity, selected rewards, and waiting continuations below the new set. Only
+the top set accepts actions, while replay observations include all outstanding
+sets in opening order. Taking or skipping the nested set restores its parent
+and finishes the acquisition before completing the parent claim. Closing a
+nested set cannot finish the room or release the parent's waiting body. This
+state survives snapshots: Kaleidoscope's card offers finish before Neow's Bones
+can complete its relic set and charge its curse.
 
 A room's reward set is not settled when the room has rolled it.
 `TryModifyRewards` runs two passes over it and then a third over exactly the

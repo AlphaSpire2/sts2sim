@@ -531,6 +531,7 @@ fn build_run_against(
         player_relic_grab_bag: generated.player_relics,
         marked_map_coord: None,
         reward_set: None,
+        reward_parents: Vec::new(),
         dismissed_reward_set: None,
         rest_option_owed: None,
         rest_options_owed: Vec::new(),
