@@ -201,8 +201,7 @@ player's turn end, the enemy side's whole turn, and the opening of the player's
 next one. It may stop early only for a genuine nested player choice or terminal
 state — not at animation or command boundaries.
 
-The player's turn has a phase, carried per player and projected by the recorder,
-and the handover has two flags of its own:
+The player's turn has a phase, carried per player and projected by the recorder:
 
 ```text
 Start        block clears, energy refills, the hand is drawn
@@ -213,14 +212,14 @@ End          from the moment the turn is ended until the sides switch
 None         between turns, during the enemy's turn, and once combat is over
 ```
 
-`ending_player_turn_phase_one` covers the end-of-turn listeners and what the
-hand does to whoever still holds it. `ending_player_turn_phase_two` covers
-putting the hand down and switching sides, and it stays set until the player
-next acts, because the handover it belongs to is not over until the next player
-turn is standing. Answering a screen the handover itself opened is
-not the player acting again: the flag stays up while the handover is still
-owed. `player_actions_disabled` is set for the whole handover in both
+Phase one of the handover covers the end-of-turn listeners and what the hand
+does to whoever still holds it; phase two covers putting the hand down and
+switching sides. `player_actions_disabled` is set for the whole handover in both
 directions.
+
+The game also keeps a pair of flags, one per phase, that say a turn is ending.
+No gameplay reads them, so the engine does not model them. The recorder
+projects them, and replay leaves them uncompared.
 
 A fight is stood up before it is announced. Every creature joins, each runs what
 it does as it joins, and only then is the combat marked `in_progress`. A whole
@@ -291,14 +290,6 @@ rewards are on the table. A fight the player loses ends the same way, at the
 same points — the check settles a pending loss first, which is the build's
 order. A won fight is finished by whoever asked, which is where a settled queue
 finishes one too; a lost one has already taken the combat with it.
-
-One thing about this chain the game does not settle observably.
-`ending_player_turn_phase_two` is cleared when the handover that set it is over,
-and the player's own turn setup is the one screen the handover does not wait
-for. What the flag reads in the observation written for that screen therefore
-depends on ordering the game never pins. The engine keeps the rule it applies
-everywhere else: the flag stands until the player acts again, and answering the
-screen is that act. The turn-setup resumption test pins that reading.
 
 ### Illegal stale target
 
@@ -2182,26 +2173,11 @@ command run to the action that started it. A fight ended that way finishes where
 every other fight finishes, on the action's own settle. What is owed by the
 frames the fight interrupted is dropped rather than run out.
 
-What the end of a fight does not touch is the turn handover itself. Ending a
-combat puts every player's phase back to none and lets their actions be taken
-again, and does not clear the flags that say a player's turn is ending. Whether
-they are still up when the dust settles is decided by how the chain that set
-them comes apart, and a win and a loss come apart differently.
-
-A won fight comes apart the ordinary way. Every check along the chain simply
-stops where it stands once the fight is no longer in progress, so the switch
-into the enemy side stops and clears
-`ending_player_turn_phase_two` on the way out; phase one is cleared the same
-way, and a fight won by an end-of-turn listener never queued the enemy turn at
-all. A lost fight does not come apart at all: the game-over screen goes up from
-inside the very kill that ended it, everything paused is abandoned, and the
-flags stay exactly as they stood — which is why the projection of a defeat can
-show a player still standing in the middle of a turn ending.
-
-The flag is racing the recorder's snapshot in the game itself, so a defeat can
-be recorded either way. This engine takes the settled reading; a recording
-that caught the flag up is a listed divergence (see
-[`fidelity-divergences.md`](fidelity-divergences.md)).
+Ending a combat puts every player's phase back to none and lets their actions
+be taken again. A fight won inside the turn handover stops the chain at the
+next check, so a fight won by an end-of-turn listener never queues the enemy
+turn. A lost fight raises the game-over screen from inside the very kill that
+ended it, and everything paused is abandoned.
 
 A blow settles its own dead. Killing what the blow killed is the last thing
 `CreatureCmd::Damage` does, so a listener body that kills with a plain damage
@@ -2305,18 +2281,11 @@ a difference, replay stops with a state-divergence error carrying the first
 differing field, its expected and simulated values, and the last matching
 checkpoint.
 
-On resume, the adapter restores its save point and applies the recorded
-`combat_runtime.ending_player_turn_phase_two` input. A true flag on an active
-restored combat remains set through its first player turn until another handover
-finishes; false takes the ordinary reload path and clears any flag retained by a
-previous reload. The last pre-load turn checkpoint does not select this behavior:
-a restarted game process and a retained process can have different flags after
-identical recorded actions. Missing input is derived as false only when the
-recording last showed the flag down in a fight observation, with no fight input
-since, or showed no fight yet; both process outcomes then agree. Otherwise
-missing input is unsupported. Malformed input is an error, and a retained flag
-without an active restored combat is unsupported.
-Subsequent observations still compare the flag normally.
+On resume, the adapter restores its save point and applies the load's own
+marks; every resume takes this one path. The recorder's
+`combat_runtime` block describes only the turn-handover flags, which the
+renderer does not emit, so it is not read. The flags in recorded observations
+are listed among the uncovered fields.
 
 A replay reports, for the recording it ran, how many observations it compared,
 the exact set of recorded fields the renderer does not emit, and how the run

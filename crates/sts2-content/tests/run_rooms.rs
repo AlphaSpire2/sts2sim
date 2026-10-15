@@ -976,52 +976,6 @@ fn a_reload_into_a_fight_still_standing_keeps_what_the_turn_was_given() {
     assert_eq!(fight_standing(&simulator), spent);
 }
 
-/// The second-phase mark of a turn handover is put up as the handover begins
-/// and taken down only as it ends. A run quit with the enemy's turn under way
-/// never reaches that end, and nothing else takes the mark down: the fight the
-/// load stands back up opens with it up, keeps it through the whole of its
-/// first turn, and loses it the ordinary way once a handover of its own has
-/// run out. Seed `2CKB2N4LNB`, records 807 to 826.
-#[test]
-fn a_run_quit_inside_a_handover_comes_back_with_the_mark_still_up() {
-    let phase_two = |simulator: &Simulator| {
-        simulator
-            .state()
-            .combat
-            .as_ref()
-            .expect("the fight is standing")
-            .ending_player_turn_phase_two
-    };
-    let mut simulator = generated_run();
-    choose_map(&mut simulator, 4);
-    let entrance = simulator.snapshot();
-    assert!(!phase_two(&simulator));
-    end_turn(&mut simulator);
-
-    // The quit, mid-handover, and the load over the save the entrance wrote.
-    simulator.restore(&entrance).expect("the save restores");
-    simulator
-        .resumed_from_save_inside_a_handover()
-        .expect("the run resumes");
-    assert!(phase_two(&simulator), "the fight opens with the mark up");
-    strike(&mut simulator);
-    assert!(phase_two(&simulator), "and acting does not take it down");
-    end_turn(&mut simulator);
-    assert!(phase_two(&simulator), "a handover of its own is what does");
-    strike(&mut simulator);
-    assert!(
-        !phase_two(&simulator),
-        "once the player has acted behind it"
-    );
-
-    // A load that interrupted nothing leaves no mark.
-    let mut plain = generated_run();
-    choose_map(&mut plain, 4);
-    plain.resumed_from_save().expect("the run resumes");
-    strike(&mut plain);
-    assert!(!phase_two(&plain));
-}
-
 /// Stars gained as a fight's room is entered — what a divine right pays —
 /// belong to the fight's first turn: a star gained counts for the turn the
 /// player's turn number names, and that number already stands at one as the

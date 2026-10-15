@@ -5381,20 +5381,6 @@ pub struct CombatState {
     /// pass.
     #[serde(default)]
     pub played_card_play_index: i32,
-    /// The two halves of the player's turn handover. Phase one runs the
-    /// end-of-turn listeners and the hand's own turn-end effects; phase two
-    /// puts the hand down and switches sides. Phase two stays set until the
-    /// player's next turn has opened, because that turn is started from inside
-    /// it.
-    pub ending_player_turn_phase_one: bool,
-    pub ending_player_turn_phase_two: bool,
-    /// Phase two was left set by a fight that is gone. The mark belongs to
-    /// whatever runs fights rather than to a fight, and only the end of a
-    /// handover takes it down: a run quit while the enemy's turn was under way
-    /// never reached that end, so the fight the load stands back up opens with
-    /// the mark still up and keeps it until its own first handover is over.
-    #[serde(default)]
-    pub phase_two_left_standing: bool,
     /// Whether something has made the player ready to end their turn without
     /// them choosing to. Ending a turn this way does not block, so the
     /// handover runs once whatever reached it has settled rather than inside

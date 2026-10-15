@@ -1005,8 +1005,6 @@ fn render_combat(combat: &CombatState) -> Value {
             CombatSide::Enemy => "enemy",
         },
         "player_actions_disabled": combat.player_actions_disabled,
-        "ending_player_turn_phase_one": combat.ending_player_turn_phase_one,
-        "ending_player_turn_phase_two": combat.ending_player_turn_phase_two,
         // The engine keeps the creature list in the build's own order, which
         // the enemy side's slots decide; a recording lists them by the
         // identifier each was created with.

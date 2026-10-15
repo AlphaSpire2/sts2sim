@@ -1445,13 +1445,6 @@ impl Simulator {
         if let Some(combat) = self.state.combat.as_mut() {
             combat.round = 1;
             combat.player.turn = 1;
-            // A mark an earlier load left standing over this save went down
-            // with the handover that followed it; this load did not interrupt
-            // one, or it would say so itself.
-            if combat.phase_two_left_standing {
-                combat.phase_two_left_standing = false;
-                combat.ending_player_turn_phase_two = false;
-            }
             // A save taken over a fight already won holds the room, not the
             // fight: the load stands a finished room back up with a combat
             // state built fresh around it, and a fight that is not inside a
@@ -1525,22 +1518,6 @@ impl Simulator {
                 }
             }
         }
-    }
-
-    /// Resume an active combat with a second-phase flag retained by the game
-    /// process. The caller must establish that the flag is still set at load;
-    /// quitting during a handover alone does not establish this, since a fresh
-    /// process resets it. The retained flag survives the first player turn
-    /// until a new handover completes.
-    pub fn resumed_from_save_inside_a_handover(&mut self) -> Result<(), EngineError> {
-        self.resumed_from_save()?;
-        if let Some(combat) = self.state.combat.as_mut()
-            && !combat.has_ended
-        {
-            combat.ending_player_turn_phase_two = true;
-            combat.phase_two_left_standing = true;
-        }
-        Ok(())
     }
 
     pub fn project(&self, scope: ProjectionScope) -> Result<PortableState, EngineError> {
@@ -2149,18 +2126,6 @@ impl Simulator {
         if self.owes_the_shelf() && !self.suspended() {
             self.settle_owed_shelf(events)?;
         }
-        // The turn handover reads as still running right up to the moment the
-        // player acts again, which is where the build finally clears it: the
-        // flag is set inside a call that only returns once the next player turn
-        // is standing. A screen opened inside the handover is the player acting
-        // without the handover having returned, so the flag stays up across the
-        // answer, exactly as the build's does.
-        if !self.turn_handover_pending()
-            && let Some(combat) = self.state.combat.as_mut()
-            && !combat.phase_two_left_standing
-        {
-            combat.ending_player_turn_phase_two = false;
-        }
         match action {
             Action::ChooseMap { destination } => {
                 self.choose_map(*destination, events)?;
@@ -2585,17 +2550,6 @@ impl Simulator {
                 }
             }
         }
-    }
-
-    /// Whether the turn handover is still standing on the queue, which is what
-    /// keeps its phase-two flag up while the player answers a screen it opened.
-    fn turn_handover_pending(&self) -> bool {
-        self.state.combat.as_ref().is_some_and(|combat| {
-            combat.queue.iter().any(|effect| {
-                matches!(effect, Effect::Resume(frame)
-                    if matches!(**frame, crate::ResumeFrame::TurnHandover(_)))
-            })
-        })
     }
 
     /// Marks the frame the code is about to enter as one a selection screen
@@ -5522,9 +5476,6 @@ impl Simulator {
             player_took_an_unstopped_blow_this_turn: false,
             player_took_an_unstopped_blow_last_turn: false,
             player_actions_disabled: false,
-            ending_player_turn_phase_one: false,
-            ending_player_turn_phase_two: false,
-            phase_two_left_standing: false,
             played_card_was_attack: false,
             played_card_was_chosen: false,
             played_card_type: None,
@@ -19497,15 +19448,12 @@ impl Simulator {
     /// This is everything the pinned build reaches once every player is ready to
     /// end the turn: the two halves of the player's turn handover, the enemy
     /// side's whole turn, and the opening of the player's next one. The build
-    /// runs it as one nested call chain, and the flags it sets stay set across
-    /// the whole of it, which is why phase two is still set when the next player
-    /// turn opens.
+    /// runs it as one nested call chain.
     fn end_turn(&mut self, events: &mut Vec<SemanticEvent>) -> Result<CombatOutcome, EngineError> {
         {
             let combat = self.combat_mut()?;
             combat.player.ready_to_end_turn = true;
             combat.player_actions_disabled = true;
-            combat.ending_player_turn_phase_one = true;
         }
         // Every stage of the handover has a step index and a resume entry, so a
         // screen opened inside it is put down rather than refused.
@@ -19539,31 +19487,12 @@ impl Simulator {
                 return Ok(CombatOutcome::Lost);
             }
             let settled = match current {
-                Step::PhaseOne => {
-                    let settled = self.end_player_turn_phase_one(
-                        crate::EndTurnPhaseOneStep::AutoPostPlay,
-                        events,
-                    )?;
-                    // The flag comes down as soon as phase one returns, and
-                    // phase one returns early when its own win check trips. So a
-                    // fight won by an end-of-turn listener is not standing in the
-                    // middle of a turn ending: the enemy turn was never even
-                    // queued, and the flag is down. That is the difference from a
-                    // fight settled later in the chain, where the unwind does not
-                    // reach this line.
-                    if settled != CombatOutcome::Unsettled
-                        && let Ok(combat) = self.combat_mut()
-                    {
-                        combat.ending_player_turn_phase_one = false;
-                    }
-                    settled
-                }
+                // Phase one returns early when its own win check trips, so a
+                // fight won by an end-of-turn listener never queues the enemy
+                // turn.
+                Step::PhaseOne => self
+                    .end_player_turn_phase_one(crate::EndTurnPhaseOneStep::AutoPostPlay, events)?,
                 Step::PhaseTwo => {
-                    self.combat_mut()?.ending_player_turn_phase_one = false;
-                    self.combat_mut()?.ending_player_turn_phase_two = true;
-                    // A handover of this fight's own is running now, and its
-                    // end takes the mark down like any other.
-                    self.combat_mut()?.phase_two_left_standing = false;
                     self.end_player_turn_phase_two(crate::EndTurnPhaseTwoStep::Flush)?;
                     CombatOutcome::Unsettled
                 }
@@ -19628,20 +19557,6 @@ impl Simulator {
                 }
             };
             if settled != CombatOutcome::Unsettled {
-                // A won fight unwinds the whole chain the ordinary way. Every
-                // check along it simply returns where the fight is no longer in
-                // progress, so the handover to the enemy side returns, and the
-                // step behind it still lowers the phase-two flag on its way out.
-                // A lost fight does not: the game-over screen goes up from
-                // inside the very kill that ended it, everything left paused is
-                // cancelled with the combat, and the flags stay exactly as they
-                // stood.
-                if settled == CombatOutcome::Won
-                    && let Ok(combat) = self.combat_mut()
-                {
-                    combat.ending_player_turn_phase_one = false;
-                    combat.ending_player_turn_phase_two = false;
-                }
                 return Ok(settled);
             }
             step = if current == Step::EnemyTurnStart
@@ -22021,10 +21936,7 @@ impl Simulator {
         // How long the fight ran is part of what the map history keeps.
         self.record_turns_taken();
         // Ending the combat puts every player's phase back to none and lets
-        // their actions be taken again. What it does not touch is the turn
-        // handover: whether the flags that say a player's turn is ending are
-        // still up is decided by how the chain that set them unwinds, which the
-        // handover itself settles, and not here.
+        // their actions be taken again.
         {
             let combat = self.combat_mut()?;
             combat.player.phase = crate::PlayerTurnPhase::None;

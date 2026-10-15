@@ -162,26 +162,6 @@ sees the deviation on those three cards and nowhere else.
 **What would change this.** Reading those three faces off a per-card override
 rather than off the body, which nothing that replays needs.
 
-## A defeat's turn-ending flag can be recorded before it settles
-
-**The build.** A lost fight raises the game-over screen from inside the very
-kill that ended it, and the flags of the turn that was ending stay exactly as
-they stood. `ending_player_turn_phase_two` is cleared by the handover that set
-it, and the recorder's snapshot of the defeat races that clear: the same loss
-at the same point can be recorded with the flag down or still up.
-
-**This simulator.** The settled reading, with the flag down: a defeat is
-projected as a player no longer in the middle of a turn ending.
-
-**Whether it can reach a conformance claim.** Yes, on the terminal observation
-of a defeat whose snapshot caught the flag up. Such a recording is a documented
-mid-settle stop: its final observation is a scheduling artefact of the recorder
-rather than a state the build settles on, and it is not replayed past it.
-
-**What would change this.** Nothing in the model. The flag's value in that
-observation is recorder timing, not run state, and a recorder that snapshots
-after the settle records the reading this simulator gives.
-
 ## A potion asked for beside a screen inside a fight is offered after it
 
 **The build.** Inside a fight every selection screen belongs to the card,
