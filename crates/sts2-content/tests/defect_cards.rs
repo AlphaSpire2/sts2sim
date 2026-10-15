@@ -390,6 +390,98 @@ fn a_rocket_punch_swings_and_draws() {
     assert_eq!(pile(&simulator, PileName::Hand).len(), 1);
 }
 
+fn rocket_costs(simulator: &Simulator) -> Vec<i32> {
+    player(simulator)
+        .piles
+        .all_cards()
+        .filter(|card| card.fingerprint.model_id == id("CARD.ROCKET_PUNCH"))
+        .map(|card| card.energy_cost)
+        .collect()
+}
+
+#[test]
+fn rocket_punch_discounts_each_copy_in_every_combat_pile() {
+    for upgrade in [0, 1] {
+        let mut scenario = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+            .played_as(id("CHARACTER.DEFECT"))
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 100, 100, "SHRINKER_MOVE")
+            .card(PileName::Hand, 0, card("CARD.BOOST_AWAY", 0), 0);
+        for (index, pile) in [
+            PileName::Hand,
+            PileName::Draw,
+            PileName::Discard,
+            PileName::Exhaust,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            scenario = scenario.card(
+                pile,
+                index as u64 + 1,
+                card("CARD.ROCKET_PUNCH", upgrade),
+                2,
+            );
+        }
+        let mut simulator = scenario.build(sts2_content::standard_registry()).unwrap();
+        assert_eq!(rocket_costs(&simulator), [2; 4]);
+        play(&mut simulator, "CARD.BOOST_AWAY");
+        assert_eq!(rocket_costs(&simulator), [0; 4]);
+    }
+}
+
+#[test]
+fn rocket_punchs_discount_survives_the_turn_and_clears_when_played() {
+    for upgrade in [0, 1] {
+        let mut simulator = holding(&[("CARD.BOOST_AWAY", 0), ("CARD.ROCKET_PUNCH", upgrade)]);
+        play(&mut simulator, "CARD.BOOST_AWAY");
+        assert_eq!(rocket_costs(&simulator), [0]);
+        let discounted = simulator.snapshot();
+        end_turn(&mut simulator);
+        assert_eq!(rocket_costs(&simulator), [0]);
+        let before_play = player(&simulator).energy;
+        play(&mut simulator, "CARD.ROCKET_PUNCH");
+        assert_eq!(player(&simulator).energy, before_play);
+        assert_eq!(rocket_costs(&simulator), [2]);
+        simulator.restore(&discounted).unwrap();
+        assert_eq!(rocket_costs(&simulator), [0]);
+    }
+}
+
+#[test]
+fn rocket_punch_ignores_generated_non_status_cards_and_existing_statuses() {
+    let mut simulator = scenario(&Fight {
+        hand: &[
+            ("CARD.ROCKET_PUNCH", 0),
+            ("CARD.WHITE_NOISE", 0),
+            ("CARD.COOLHEADED", 0),
+        ],
+        draw: &[("CARD.DAZED", 0)],
+        ..Fight::default()
+    });
+    play(&mut simulator, "CARD.WHITE_NOISE");
+    assert_eq!(rocket_costs(&simulator), [2]);
+    play(&mut simulator, "CARD.COOLHEADED");
+    assert_eq!(rocket_costs(&simulator), [2]);
+}
+
+#[test]
+fn rocket_punch_ignores_enemy_generated_status_cards() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .played_as(id("CHARACTER.DEFECT"))
+        .enemy(1, id("MONSTER.NOISEBOT"), 100, 100, "NOISE_MOVE")
+        .card(PileName::Hand, 0, card("CARD.ROCKET_PUNCH", 0), 2)
+        .build(sts2_content::standard_registry())
+        .unwrap();
+    end_turn(&mut simulator);
+    assert!(
+        player(&simulator)
+            .piles
+            .all_cards()
+            .any(|card| card.fingerprint.model_id == id("CARD.DAZED"))
+    );
+    assert_eq!(rocket_costs(&simulator), [2]);
+}
+
 /// A Scrape draws four and discards whatever still costs something.
 #[test]
 fn a_scrape_keeps_only_what_costs_nothing() {

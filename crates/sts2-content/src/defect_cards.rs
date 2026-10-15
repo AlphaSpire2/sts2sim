@@ -16,8 +16,9 @@
 use sts2_engine::{
     Amount, CardCmd, CardDefinition, CardFilter, CardOrigin, CardPileCmd, CardPoolRef,
     CardSelectCmd, CardSelector, CardType, Command, Condition, Count, CreatureCmd,
-    CreatureSelector, DamageCmd, DrawPilePosition, OrbCmd, OrbSelector, OrbSource, PileName,
-    PlayerCmd, SelectorPrefs, ShuffleStream, TargetType, TemporaryCost, ValueProps,
+    CreatureSelector, DamageCmd, DrawPilePosition, HookCondition, HookEvent, ModifierHook, OrbCmd,
+    OrbSelector, OrbSource, PileName, PlayerCmd, SelectorPrefs, ShuffleStream, TargetType,
+    TemporaryCost, ValueProps,
 };
 use sts2_engine::{
     ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
@@ -474,6 +475,36 @@ fn free_for_the_combat() -> Command {
     })
 }
 
+fn rocket_punch() -> CardDefinition {
+    let mut definition = upgrading(
+        card(
+            "CARD.ROCKET_PUNCH",
+            CardType::Attack,
+            TargetType::AnyEnemy,
+            2,
+            vec![attack(13), draw(1)],
+        ),
+        vec![attack(14), draw(2)],
+    );
+    definition.hooks = vec![
+        ModifierHook::every_turn(
+            HookEvent::AfterCardGeneratedForCombat,
+            vec![Command::Card(CardCmd::SetTemporaryCost {
+                cards: CardSelector::Source,
+                lifetime: TemporaryCost {
+                    clears_when_played: true,
+                    ..TemporaryCost::this_combat(0)
+                },
+            })],
+        )
+        .when(HookCondition::All(vec![
+            HookCondition::OwnerConjuredTheCard,
+            HookCondition::ConjuredCardIsOfType(CardType::Status),
+        ])),
+    ];
+    definition
+}
+
 /// A Hologram's screen: one card of the discard pile, back to the hand. The
 /// screen takes the card without asking where the pile holds a single one, and
 /// an empty pile hands nothing back.
@@ -779,16 +810,7 @@ fn uncommons() -> Vec<CardDefinition> {
                 channel_times(GLASS, 2),
             ],
         )),
-        uncommon(upgrading(
-            card(
-                "CARD.ROCKET_PUNCH",
-                CardType::Attack,
-                TargetType::AnyEnemy,
-                2,
-                vec![attack(13), draw(1)],
-            ),
-            vec![attack(14), draw(2)],
-        )),
+        uncommon(rocket_punch()),
         uncommon(upgrading(
             card(
                 "CARD.SCAVENGE",
