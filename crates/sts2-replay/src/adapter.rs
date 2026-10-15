@@ -91,6 +91,9 @@ pub struct ReplayAdapter {
     actions_since_save: usize,
     resumes: usize,
     rewound_actions: usize,
+    /// The handover flag as the recording last showed it, or `None` once an
+    /// input inside a fight in progress has followed and may have raised it.
+    recorded_phase_two: Option<bool>,
 }
 
 impl ReplayAdapter {
@@ -123,6 +126,7 @@ impl ReplayAdapter {
             actions_since_save: 0,
             resumes: 0,
             rewound_actions: 0,
+            recorded_phase_two: Some(false),
         }
     }
 
@@ -312,6 +316,7 @@ impl ReplayAdapter {
             self.post_victory_records += 1;
             return Ok(AdapterOutcome::Ignored(role));
         }
+        self.track_recorded_phase_two(record, role);
         if self.verify_observations {
             self.settle_observations(record)?;
         }
@@ -515,24 +520,31 @@ impl ReplayAdapter {
             self.verify_pending_observation()?;
         }
         // This flag belongs to the game process, not its save. A previous
-        // checkpoint cannot establish whether the process survived the quit.
-        let runtime = record.payload.pointer("/data/combat_runtime").ok_or_else(|| {
-            Self::error(
-                record,
-                AdapterErrorCode::UnsupportedContent,
-                "resume lacks combat_runtime; legacy traces do not establish the process's handover state",
-            )
-        })?;
-        let phase_two = runtime
-            .get("ending_player_turn_phase_two")
-            .and_then(Value::as_bool)
-            .ok_or_else(|| {
-                Self::error(
+        // checkpoint cannot establish whether the process survived the quit,
+        // so a legacy trace without it is supported only when both outcomes
+        // agree: a restarted process loads with the flag down, and a retained
+        // one keeps the flag the recording last showed, if nothing since could
+        // have raised it.
+        let phase_two = match record.payload.pointer("/data/combat_runtime") {
+            Some(runtime) => runtime
+                .get("ending_player_turn_phase_two")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| {
+                    Self::error(
+                        record,
+                        AdapterErrorCode::MalformedRecord,
+                        "resume combat_runtime requires boolean ending_player_turn_phase_two",
+                    )
+                })?,
+            None if self.recorded_phase_two == Some(false) => false,
+            None => {
+                return Err(Self::error(
                     record,
-                    AdapterErrorCode::MalformedRecord,
-                    "resume combat_runtime requires boolean ending_player_turn_phase_two",
-                )
-            })?;
+                    AdapterErrorCode::UnsupportedContent,
+                    "resume lacks combat_runtime while the recorded handover flag may be set; legacy traces do not establish whether the process survived the quit",
+                ));
+            }
+        };
         let Some(save_point) = self.save_point.as_ref() else {
             return Err(Self::error(
                 record,
@@ -568,6 +580,7 @@ impl ReplayAdapter {
         resumed.map_err(|error| {
             Self::error(record, AdapterErrorCode::IllegalAction, error.to_string())
         })?;
+        self.recorded_phase_two = Some(phase_two);
         // Resuming raises the run's reload count and writes the save back
         // out with it, so a second reload lands on this state, not the first.
         self.save_point = Some(self.simulator.snapshot());
@@ -609,6 +622,34 @@ impl ReplayAdapter {
         let combat_won = before.in_fight && fight_over;
         let ancient_finished = !before.ancient_finished && ancient_finished(state);
         combat_won || ancient_finished
+    }
+
+    /// Follows the handover flag through the recording for legacy resumes. Only
+    /// fight observations show it, and only an input inside a fight still in
+    /// progress can raise it before the next observation does.
+    fn track_recorded_phase_two(&mut self, record: &Record, role: TimelineRole) {
+        if record.kind == "state.observe" {
+            if let Some(combat) = record
+                .payload
+                .pointer("/state/combat")
+                .filter(|combat| !combat.is_null())
+            {
+                self.recorded_phase_two = combat
+                    .get("ending_player_turn_phase_two")
+                    .and_then(Value::as_bool);
+            }
+        } else if matches!(
+            role,
+            TimelineRole::InitiatingAction | TimelineRole::NestedChoice
+        ) && self
+            .simulator
+            .state()
+            .combat
+            .as_ref()
+            .is_some_and(|combat| !combat.has_ended)
+        {
+            self.recorded_phase_two = None;
+        }
     }
 
     /// Drops a pending observation that was taken partway along a step this

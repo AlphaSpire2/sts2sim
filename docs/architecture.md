@@ -2308,8 +2308,11 @@ restored combat remains set through its first player turn until another handover
 finishes; false takes the ordinary reload path and clears any flag retained by a
 previous reload. The last pre-load turn checkpoint does not select this behavior:
 a restarted game process and a retained process can have different flags after
-identical recorded actions. Missing input is unsupported, malformed input is an
-error, and a retained flag without an active restored combat is unsupported.
+identical recorded actions. Missing input is derived as false only when the
+recording last showed the flag down in a fight observation, with no fight input
+since, or showed no fight yet; both process outcomes then agree. Otherwise
+missing input is unsupported. Malformed input is an error, and a retained flag
+without an active restored combat is unsupported.
 Subsequent observations still compare the flag normally.
 
 A replay reports, for the recording it ran, how many observations it compared,
