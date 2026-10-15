@@ -583,6 +583,48 @@ fn melancholy() -> CardDefinition {
     definition
 }
 
+/// Each Ethereal play takes two energy off for the rest of the fight. A fresh
+/// card entering combat also receives the discount from earlier plays; a clone
+/// already carries the original card's cost changes.
+fn banshees_cry() -> CardDefinition {
+    let mut definition = upgrading_cost(
+        card(
+            "CARD.BANSHEES_CRY",
+            CardType::Attack,
+            TargetType::AllEnemies,
+            9,
+            vec![sweep(33, 1)],
+        ),
+        7,
+    );
+    definition.hooks = vec![
+        ModifierHook::every_turn(
+            HookEvent::AfterCardEnteredCombat,
+            vec![Command::When {
+                condition: Condition::Not(Box::new(Condition::SourceCardIsAClone)),
+                then: vec![Command::Card(CardCmd::AddCostThisCombat {
+                    cards: CardSelector::Source,
+                    amount: Amount::per(0, -2, Count::EtherealPlaysThisCombat),
+                })],
+                otherwise: Vec::new(),
+            }],
+        )
+        .when(sts2_engine::HookCondition::ListeningCardEnteredCombat),
+        ModifierHook::every_turn(
+            HookEvent::AfterCardPlayed,
+            vec![Command::Card(CardCmd::AddCostThisCombat {
+                cards: CardSelector::Source,
+                amount: Amount::Fixed(-2),
+            })],
+        )
+        .when(sts2_engine::HookCondition::All(vec![
+            sts2_engine::HookCondition::OwnerPlayedTheCard,
+            sts2_engine::HookCondition::PlayedCardIsEthereal,
+        ])),
+    ];
+    definition
+}
+
 /// Eradicate, played: one swing per point of energy its own X swallowed.
 fn eradicate(damage: i32) -> Command {
     multi_attack(Amount::Fixed(damage), Amount::counting(Count::EnergyX))
@@ -1410,20 +1452,7 @@ fn the_plain_attacks() -> Vec<CardDefinition> {
             ),
             vec![sweep(11, 1)],
         )),
-        // A banshee's cry is the pool's most expensive card, and everything
-        // ethereal played before it has already paid part of the price. That
-        // discount is not written here: it is the card's own listener, and the
-        // count it reads is a fight's history of ethereal plays.
-        upgrading_cost(
-            card(
-                "CARD.BANSHEES_CRY",
-                CardType::Attack,
-                TargetType::AllEnemies,
-                9,
-                vec![sweep(33, 1)],
-            ),
-            7,
-        ),
+        banshees_cry(),
         // A fear is a small blow and the vulnerability behind it.
         ethereal(upgrading(
             card(

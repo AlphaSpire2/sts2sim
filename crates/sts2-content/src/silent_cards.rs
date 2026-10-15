@@ -434,7 +434,7 @@ fn daggers_and_blades() -> Vec<CardDefinition> {
             ),
             vec![discard_from_hand(2), upgraded_shivs(Amount::Fixed(2))],
         ),
-        upgrading(
+        innate_when_upgraded(upgrading(
             card(
                 "CARD.INFINITE_BLADES",
                 CardType::Power,
@@ -443,7 +443,7 @@ fn daggers_and_blades() -> Vec<CardDefinition> {
                 vec![buff("POWER.INFINITE_BLADES_POWER", 1)],
             ),
             vec![buff("POWER.INFINITE_BLADES_POWER", 1)],
-        ),
+        )),
         // A knife trap plays every Shiv that has burned up this fight, at
         // whatever the trap was pointed at. Upgraded, each of them is upgraded
         // first.

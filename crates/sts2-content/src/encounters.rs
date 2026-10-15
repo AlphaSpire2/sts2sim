@@ -203,9 +203,8 @@ pub fn dense_vegetation_event_encounter() -> EncounterDefinition {
                 .take(4)
                 .collect(),
         ),
-        // An encounter an event stands up hands over nothing of its own.
         gives_rewards: true,
-        rewards: None,
+        rewards: Some(monster_room_rewards()),
     }
 }
 

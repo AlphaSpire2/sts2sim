@@ -1291,9 +1291,9 @@ fn rares() -> Vec<CardDefinition> {
                 CardType::Skill,
                 TargetType::SelfTarget,
                 0,
-                vec![reshuffle_the_hand(), draw(4)],
+                reboot(4),
             ),
-            vec![reshuffle_the_hand(), draw(6)],
+            reboot(6),
         ))),
         // Every orb evoked twice, front first, and taken out of the queue on
         // the second of the two. The count is taken before the loop opens.
@@ -1480,16 +1480,20 @@ fn genetic_algorithm() -> CardDefinition {
 }
 
 /// Every card in hand goes to the draw pile one at a time, in hand order, and
-/// then the pile is shuffled.
-fn reshuffle_the_hand() -> Command {
-    Command::CardPile(CardPileCmd::MoveToPile {
-        cards: CardSelector::Pile {
-            pile: PileName::Hand,
-            filter: CardFilter::Any,
-        },
-        pile: PileName::Draw,
-        position: DrawPilePosition::Bottom,
-    })
+/// then shuffled together with the discard pile before the new hand is drawn.
+fn reboot(count: i32) -> Vec<Command> {
+    vec![
+        Command::CardPile(CardPileCmd::MoveToPile {
+            cards: CardSelector::Pile {
+                pile: PileName::Hand,
+                filter: CardFilter::Any,
+            },
+            pile: PileName::Draw,
+            position: DrawPilePosition::Bottom,
+        }),
+        Command::CardPile(CardPileCmd::Shuffle),
+        draw(count),
+    ]
 }
 
 /// Once per orb held, the next orb is evoked twice: once leaving it standing
