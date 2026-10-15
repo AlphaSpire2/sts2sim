@@ -1,4 +1,5 @@
-//! Streaming STS2PGN v1/v2 parsing and Projection v1 canonical digests.
+//! Streaming STS2PGN v1/v2 parsing, Projection v1 canonical digests, and
+//! decision-script writing.
 
 mod adapter;
 mod canonical;
@@ -7,6 +8,7 @@ mod delta;
 mod input;
 mod json;
 mod profile;
+mod script;
 
 pub use profile::{ReplayOutcome, ReplayVerification, TraceProfile, VerificationLevel};
 
@@ -14,6 +16,7 @@ pub use profile::{ReplayOutcome, ReplayVerification, TraceProfile, VerificationL
 mod storage_tests;
 
 pub use input::decode_input;
+pub use script::{ScriptWriter, Unscriptable};
 
 use std::collections::BTreeSet;
 use std::error::Error;

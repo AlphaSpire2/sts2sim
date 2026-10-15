@@ -2231,6 +2231,14 @@ The simulator CLI and AlphaSpire use the same implementation. AlphaSpire retains
 its policy evaluation, search, and generated decisions. Scripts run without
 authoritative observation comparison and report action consistency only.
 
+The replay crate also writes scripts. `ScriptWriter` opens on a simulator
+standing at its first decision, taking the caller's `Producer` identity, and
+encodes each action, read against the decision point it is taken from, as the
+record `ReplayAdapter` decodes back into that action. Positional identities
+such as combat card indexes, reward set ids, and shop inventory indexes come
+from simulator state, which is why scripts are written by walking a
+simulator. An action the profile cannot carry is refused as `Unscriptable`.
+
 The replay crate renders engine state into the recorded Projection v1 shape and
 compares the two, so a replay can be checked against every recorded observation
 rather than only against the actions it accepts. The renderer emits only what

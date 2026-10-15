@@ -40,7 +40,7 @@ sts2sim/
 │   ├── sts2-engine/            # State machine, commands, snapshots, and actions
 │   ├── sts2-content/           # The pinned build's content, model by model
 │   ├── sts2-rng/               # Exact deterministic RNG and named streams
-│   ├── sts2-replay/            # Format v1/v2, gzip, projections, and replay adapter
+│   ├── sts2-replay/            # Format v1/v2, gzip, projections, replay adapter, script writer
 │   └── sts2-cli/               # Playable text/JSON run and replay interface
 ├── AGENTS.md                    # This overview for contributors and agents
 ├── docs/

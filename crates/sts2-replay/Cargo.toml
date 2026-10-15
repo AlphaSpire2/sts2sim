@@ -1,6 +1,6 @@
 [package]
 name = "sts2-replay"
-description = "Streaming STS2PGN v1/v2 reader with gzip and lossless observation deltas"
+description = "Streaming STS2PGN v1/v2 reader with gzip and lossless observation deltas, and decision-script writer"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,9 @@ sha2.workspace = true
 sts2-core = { path = "../sts2-core" }
 sts2-engine = { path = "../sts2-engine" }
 sts2-rng = { path = "../sts2-rng" }
+
+[dev-dependencies]
+sts2-content = { path = "../sts2-content" }
 
 [lints]
 workspace = true
