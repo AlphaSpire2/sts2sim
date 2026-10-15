@@ -12002,23 +12002,23 @@ impl Simulator {
                 }
             }
             // A doom kill: the same kill, and then one announcement over the
-            // whole list. Which of the dead count is worked out here, while they
-            // are all still standing with their powers on them, because the
-            // fight lets go of them as they fall.
+            // whole list. Count fatal deaths after the whole group is down,
+            // but before cleanup removes their powers and identities.
             CreatureCmd::DoomKill { target } => {
                 let doomed = self.resolve_creatures(target.clone(), context)?;
                 if doomed.is_empty() {
                     return Ok(false);
+                }
+                for creature in &doomed {
+                    self.creature_mut(*creature)?.current_hp = 0;
                 }
                 let counted: Vec<CreatureCombatId> = doomed
                     .iter()
                     .copied()
                     .filter(|id| self.death_would_trigger_fatal(*id))
                     .collect();
-                for creature in doomed {
-                    self.creature_mut(creature)?.current_hp = 0;
-                }
-                if self.cleanup_dead(events)? {
+                let ended = self.cleanup_dead(events)?;
+                if self.pending_loss {
                     return Ok(true);
                 }
                 self.dispatch_hooks(
@@ -12028,6 +12028,9 @@ impl Simulator {
                         ..HookContext::none()
                     },
                 )?;
+                if ended {
+                    return Ok(true);
+                }
             }
             CreatureCmd::Stun {
                 target,
@@ -24599,8 +24602,11 @@ impl Simulator {
                     })
                 })
             }
-            // The value the pass is about is a powered attack, with no test of
-            // who is dealing it.
+            // Every combat card belongs to the one player in a single-player
+            // run. The dealer can be a different creature, such as their pet.
+            crate::HookCondition::DamageCardBelongsToOwner => {
+                value.card.is_some() && owner == self.combat()?.player.creature_id
+            }
             crate::HookCondition::All(conditions) => {
                 let mut holds = true;
                 for condition in conditions {

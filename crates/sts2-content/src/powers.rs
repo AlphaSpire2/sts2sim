@@ -1791,16 +1791,21 @@ fn chains_of_binding_power() -> PowerDefinition {
                 }],
             )
             .when(HookCondition::OwnerSideIsActing),
-            // The turn its owner took ends with the latch down, the count back
-            // at nothing, and every binding cleared.
+            // Late turn-end draws still use this turn's quota. Reset it only
+            // when the owner's next turn starts.
+            ModifierHook::every_turn(
+                HookEvent::BeforeSideTurnStart,
+                vec![Command::Power(PowerCmd::SetCounter {
+                    power: PowerRef::listening(),
+                    amount: Amount::Fixed(0),
+                })],
+            )
+            .when(HookCondition::OwnerIsParticipant),
+            // Clear existing bindings and the play latch before turn-end draws.
             ModifierHook::every_turn(
                 HookEvent::BeforeSideTurnEnd,
                 vec![
                     Command::Power(PowerCmd::SetLatch(false)),
-                    Command::Power(PowerCmd::SetCounter {
-                        power: PowerRef::listening(),
-                        amount: Amount::Fixed(0),
-                    }),
                     Command::Card(CardCmd::ClearAffliction {
                         cards: CardSelector::AllCombatCards {
                             filter: sts2_engine::CardFilter::Any,

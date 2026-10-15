@@ -1470,11 +1470,8 @@ pub enum HookEvent {
 impl HookEvent {
     /// Whether the pass stops answering once the fight is over or ending.
     ///
-    /// Three combat passes keep answering instead, because each fires from the
-    /// very thing that ended the fight and has to finish resolving it: the
-    /// card-played pass completes the play that caused the kill, the
-    /// block-broken pass fires from the killing hit, and the damage-given pass
-    /// answers for the blow itself.
+    /// Resolution passes keep answering when they finish the action that
+    /// ended combat, including Doom's announcement after the final kill.
     #[must_use]
     pub const fn guarded_while_ending(self) -> bool {
         !matches!(
@@ -1482,6 +1479,7 @@ impl HookEvent {
             Self::AfterCardPlayed
                 | Self::AfterBlockBroken
                 | Self::AfterDamageGiven
+                | Self::AfterDiedToDoom
                 | Self::AfterCreatureAddedToCombat
                 | Self::ModifyUnblockedDamageTarget
         )
@@ -1910,6 +1908,9 @@ pub enum HookCondition {
     CardJoinedTheDeck,
     /// The card the value came off carries an enchantment, whichever one.
     DamageCardIsEnchanted,
+    /// The damage source card belongs to the listener's owner, even when a
+    /// pet deals its damage.
+    DamageCardBelongsToOwner,
     /// Several tests that all have to hold, and one that has to fail. A
     /// listener usually opens with a run of tests it bails out on; where more
     /// than one of them is not already a condition of its own, they are named

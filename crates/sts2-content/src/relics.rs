@@ -2196,8 +2196,9 @@ fn shop_relics() -> Vec<RelicDefinition> {
                 // dealing it carries an enchantment, and that the card is its
                 // own owner's.
                 .when(HookCondition::All(vec![
-                    HookCondition::OwnerDealsPoweredDamage,
+                    HookCondition::ValueIsAPoweredAttack,
                     HookCondition::DamageCardIsEnchanted,
+                    HookCondition::DamageCardBelongsToOwner,
                 ])),
             ],
             ..obtained_only("RELIC.MYSTIC_LIGHTER", RelicRarity::Shop)
