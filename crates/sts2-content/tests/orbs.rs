@@ -200,6 +200,63 @@ fn channelling_past_a_full_queue_evokes_the_front() {
     assert_eq!(creature(&simulator, 0).block, 5);
 }
 
+#[test]
+fn a_channel_finishes_after_a_lethal_evoke_but_darkness_passives_do_not() {
+    for upgrade in [0, 1] {
+        for hp in [5, 100] {
+            let mut simulator = scenario(&Fight {
+                enemies: &[hp],
+                orbs: &["ORB.DARK_ORB", "ORB.LIGHTNING_ORB", "ORB.LIGHTNING_ORB"],
+                hand: &[("CARD.DARKNESS", upgrade)],
+                ..Fight::default()
+            });
+            play(&mut simulator, "CARD.DARKNESS");
+            assert_eq!(
+                models(&simulator),
+                ["ORB.LIGHTNING_ORB", "ORB.LIGHTNING_ORB", "ORB.DARK_ORB"]
+            );
+            let expected = if hp == 5 {
+                6
+            } else {
+                12 + 6 * i32::from(upgrade)
+            };
+            assert_eq!(queue(&simulator).orbs[2].evoke, expected);
+            assert_eq!(
+                simulator
+                    .state()
+                    .combat
+                    .as_ref()
+                    .unwrap()
+                    .player
+                    .orbs_channeled_this_combat,
+                [id("ORB.DARK_ORB")]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_lethal_channel_finishes_once_without_starting_the_next_channel() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[5],
+        orbs: &["ORB.DARK_ORB", "ORB.LIGHTNING_ORB", "ORB.LIGHTNING_ORB"],
+        hand: &[("CARD.TEMPEST", 0)],
+        ..Fight::default()
+    });
+    play(&mut simulator, "CARD.TEMPEST");
+    assert_eq!(models(&simulator), ["ORB.LIGHTNING_ORB"; 3]);
+    assert_eq!(
+        simulator
+            .state()
+            .combat
+            .as_ref()
+            .unwrap()
+            .player
+            .orbs_channeled_this_combat,
+        [id("ORB.LIGHTNING_ORB")]
+    );
+}
+
 /// A Dualcast evokes the front orb twice, and only the second of the two takes
 /// it out of the queue.
 #[test]

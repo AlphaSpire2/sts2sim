@@ -6114,8 +6114,10 @@ impl Simulator {
         }
         // A full queue evokes its front to make room, before the new orb joins.
         let queue = self.orb_queue()?;
+        let mut ended = false;
         if i32::try_from(queue.orbs.len()).unwrap_or(i32::MAX) >= queue.capacity {
-            if self.evoke_orb_at(OrbEnd::Front, true, context, events)? {
+            ended = self.evoke_orb_at(OrbEnd::Front, true, context, events)?;
+            if self.state.combat.is_none() {
                 return Ok(true);
             }
             if self.queue_is_held() {
@@ -6129,7 +6131,9 @@ impl Simulator {
                 return Ok(false);
             }
         }
-        self.finish_channel(model_id, events)
+        // An evoke can win the fight, but the channel already underway still
+        // owes its new orb and announcement before its caller stops.
+        Ok(self.finish_channel(model_id, events)? || ended)
     }
 
     /// What channelling does after the evoke that made room for the orb: the
