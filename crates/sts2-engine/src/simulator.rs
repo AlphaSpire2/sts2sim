@@ -23615,8 +23615,8 @@ impl Simulator {
     ///
     /// It answers with a list rather than a single result, because a blow a pet
     /// takes for its owner settles twice: once on the pet, and once on the
-    /// owner for whatever was worth more than the pet had left. Both carry the
-    /// same block figures, which are the original target's.
+    /// owner for whatever was worth more than the pet had left. Only the
+    /// original target's result carries the block figures and outcomes.
     fn apply_damage(
         &mut self,
         dealer: Option<CreatureCombatId>,
@@ -23671,7 +23671,6 @@ impl Simulator {
             creature.block -= blocked;
             blocked
         };
-        let block_left = self.creature(target)?.block;
         let before_osty = self.modify_hp_lost(
             HpLossPhase::BeforeOsty,
             dealer,
@@ -23689,10 +23688,12 @@ impl Simulator {
             props,
             card,
         )?;
-        let mut settled = vec![(
-            receiver,
-            self.lose_hp(receiver, hp_loss, blocked, block_left, props, events)?,
-        )];
+        let hp_result = self.lose_hp(receiver, hp_loss, props, events)?;
+        let block_left = self.creature(target)?.block;
+        let was_block_broken = blocked > 0 && block_left <= 0;
+        let was_fully_blocked =
+            !props.unblockable && (blocked > 0 || block_left > 0) && hp_loss == 0;
+        let mut settled = vec![(receiver, hp_result)];
         if receiver != target {
             // The blow was taken by a pet. What it was worth beyond what the
             // pet had left tramples through onto the owner, and the build runs
@@ -23708,19 +23709,23 @@ impl Simulator {
                 card,
             )?;
             let result = if trample > 0 {
-                self.lose_hp(target, trample, blocked, block_left, props, events)?
+                self.lose_hp(target, trample, props, events)?
             } else {
                 DamageResult {
-                    blocked,
-                    unblocked: 0,
-                    overkill: 0,
-                    block_left,
                     unblockable: props.unblockable,
-                    killed: false,
+                    ..DamageResult::default()
                 }
             };
             settled.push((target, result));
         }
+        // The original target is last whether or not the blow was redirected.
+        // Its block outcome belongs to the initial HP-loss amount, not to the
+        // spillover or the HP either recipient happened to have left.
+        let original = &mut settled.last_mut().expect("one result per damage target").1;
+        original.blocked = blocked;
+        original.block_left = block_left;
+        original.was_fully_blocked = was_fully_blocked;
+        original.was_block_broken = was_block_broken;
         Ok(settled)
     }
 
@@ -23734,8 +23739,6 @@ impl Simulator {
         &mut self,
         target: CreatureCombatId,
         hp_loss: i32,
-        blocked: i32,
-        block_left: i32,
         props: ValueProps,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<DamageResult, EngineError> {
@@ -23762,12 +23765,11 @@ impl Simulator {
             events,
         );
         Ok(DamageResult {
-            blocked,
             unblocked,
             overkill,
-            block_left,
             unblockable: props.unblockable,
             killed,
+            ..DamageResult::default()
         })
     }
 

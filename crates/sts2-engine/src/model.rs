@@ -4024,6 +4024,10 @@ pub enum ListenerSource {
 /// and each reads it rather than working anything out again. It is also what
 /// decides which of the four passes over a settled blow happen at all.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "damage properties, block outcomes and death are independent facts"
+)]
 pub struct DamageResult {
     /// How much of the blow block took.
     pub blocked: i32,
@@ -4038,6 +4042,13 @@ pub struct DamageResult {
     pub block_left: i32,
     /// Whether block was allowed to stop it at all.
     pub unblockable: bool,
+    /// Whether the original target fully blocked the blow, measured after
+    /// HP-loss modifiers and before a redirected blow spills back onto it.
+    /// A redirect recipient carries no block outcome of its own.
+    pub was_fully_blocked: bool,
+    /// Whether the original target's block broke. Only its result carries
+    /// this flag, even when another creature absorbed the HP loss.
+    pub was_block_broken: bool,
     /// The blow found the target standing and was worth at least what it had
     /// left. It stays true even if something stood the target back up
     /// afterwards, which is why the pass that skips a killed target asks about
@@ -4051,7 +4062,7 @@ impl DamageResult {
     /// and one worth nothing against a creature that has some is.
     #[must_use]
     pub const fn fully_blocked(self) -> bool {
-        !self.unblockable && (self.blocked > 0 || self.block_left > 0) && self.unblocked == 0
+        self.was_fully_blocked
     }
 
     /// Whether block took some of the blow and had nothing left afterwards. A
@@ -4059,7 +4070,7 @@ impl DamageResult {
     /// block swallows whole without running out does not either.
     #[must_use]
     pub const fn block_broken(self) -> bool {
-        self.blocked > 0 && self.block_left <= 0
+        self.was_block_broken
     }
 }
 
