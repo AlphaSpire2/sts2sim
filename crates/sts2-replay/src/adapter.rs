@@ -697,6 +697,16 @@ impl ReplayAdapter {
         {
             // Input taken during an entrance lands after the turn starts.
             ObservationStage::FightEntrance
+        } else if self.pending_stage == ObservationStage::FightEntrance
+            && self
+                .pending_observation
+                .as_ref()
+                .is_some_and(|(_, entrance)| entrance == state)
+        {
+            // The same entrance observed again, as when the event choice that
+            // opened the fight settles over it. The turn start that follows an
+            // entrance differs from it and is compared.
+            ObservationStage::FightEntrance
         } else {
             ObservationStage::Settled
         }
@@ -722,8 +732,8 @@ impl ReplayAdapter {
         // the one this engine can hold.
         if record.kind == "state.observe" {
             if let Some(state) = record.payload.pointer("/state") {
-                self.pending_observation = Some((record.sequence, state.clone()));
                 self.pending_stage = self.observation_stage(record, state);
+                self.pending_observation = Some((record.sequence, state.clone()));
             }
             return Ok(());
         }

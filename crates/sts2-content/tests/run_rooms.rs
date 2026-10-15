@@ -501,6 +501,9 @@ fn active_room_state_is_portable() {
 /// lands after the hand is drawn; here the room is entered and the fight opened
 /// in one step. The fixture drinks a potion during the Kaiser Crab's entrance,
 /// and its Dexterity shows up only in the observation after the turn start.
+/// A fight an event choice opens is observed a second time at its entrance,
+/// as that choice settles, with nothing recorded between; that is passed over
+/// too.
 #[test]
 fn a_fights_entrance_is_passed_over_when_the_player_acted_during_it() {
     use sts2_replay::{AdapterErrorCode, Record, ReplayAdapter};
@@ -527,6 +530,62 @@ fn a_fights_entrance_is_passed_over_when_the_player_acted_during_it() {
         state
     }
 
+    for observed_again in [false, true] {
+        let mut adapter = ReplayAdapter::new(generated_run()).verifying_observations();
+        adapter
+            .accept(&record(
+                1,
+                "map.choose",
+                serde_json::json!({ "data": { "col": 4, "row": 1 } }),
+            ))
+            .expect("the monster room is walked into");
+        let entrance = before_the_turn(&adapter);
+        adapter
+            .accept(&observe(2, 1, "room.enter", &entrance))
+            .expect("an observation is buffered");
+        let mut input = 3;
+        if observed_again {
+            adapter
+                .accept(&observe(3, 1, "event.choice.settled", &entrance))
+                .expect("an observation is buffered");
+            input = 4;
+        }
+        // The player acted during the entrance: the buffered snapshot is
+        // settled here, and passed over rather than compared.
+        adapter
+            .accept(&record(
+                input,
+                "combat.end_turn",
+                serde_json::json!({ "data": {} }),
+            ))
+            .expect("the entrance is not compared against a turn already standing");
+        assert_eq!(adapter.fight_entrance_observations(), 1);
+
+        // The first turn standing is the state the build rests in, and is
+        // compared: the same doctored snapshot under the turn's own context is
+        // a divergence.
+        let rest = before_the_turn(&adapter);
+        adapter
+            .accept(&observe(
+                input + 1,
+                input,
+                "combat.player_turn.start",
+                &rest,
+            ))
+            .expect("an observation is buffered");
+        let error = adapter
+            .accept(&record(
+                input + 2,
+                "combat.end_turn",
+                serde_json::json!({ "data": {} }),
+            ))
+            .expect_err("a turn already standing is compared, and differs");
+        assert_eq!(error.code, AdapterErrorCode::StateDivergence);
+        assert_eq!(adapter.fight_entrance_observations(), 1);
+    }
+
+    // A turn start written straight after the entrance, with no input
+    // between, is not the entrance again, and is compared.
     let mut adapter = ReplayAdapter::new(generated_run()).verifying_observations();
     adapter
         .accept(&record(
@@ -535,36 +594,23 @@ fn a_fights_entrance_is_passed_over_when_the_player_acted_during_it() {
             serde_json::json!({ "data": { "col": 4, "row": 1 } }),
         ))
         .expect("the monster room is walked into");
-    let entrance = before_the_turn(&adapter);
     adapter
-        .accept(&observe(2, 1, "room.enter", &entrance))
+        .accept(&observe(2, 1, "room.enter", &before_the_turn(&adapter)))
         .expect("an observation is buffered");
-    // The player acted during the entrance: the buffered snapshot is settled
-    // here, and passed over rather than compared.
+    let mut start = sts2_replay::observation::render(adapter.simulator());
+    start["combat"]["players"][0]["energy"] = serde_json::json!(99);
     adapter
-        .accept(&record(
-            3,
-            "combat.end_turn",
-            serde_json::json!({ "data": {} }),
-        ))
-        .expect("the entrance is not compared against a turn already standing");
-    assert_eq!(adapter.fight_entrance_observations(), 1);
-
-    // The first turn standing is the state the build rests in, and is compared:
-    // the same doctored snapshot under the turn's own context is a divergence.
-    let rest = before_the_turn(&adapter);
-    adapter
-        .accept(&observe(4, 3, "combat.player_turn.start", &rest))
+        .accept(&observe(3, 1, "combat.player_turn.start", &start))
         .expect("an observation is buffered");
     let error = adapter
         .accept(&record(
-            5,
+            4,
             "combat.end_turn",
             serde_json::json!({ "data": {} }),
         ))
-        .expect_err("a turn already standing is compared, and differs");
+        .expect_err("the turn start is compared, and differs");
     assert_eq!(error.code, AdapterErrorCode::StateDivergence);
-    assert_eq!(adapter.fight_entrance_observations(), 1);
+    assert_eq!(adapter.fight_entrance_observations(), 0);
 }
 
 #[test]

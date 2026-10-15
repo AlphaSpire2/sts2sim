@@ -2295,9 +2295,12 @@ between them unless the player acted during the entrance itself — a potion
 drunk during a boss's scene — and the game takes such an input and holds it
 until the turn is standing, so its effect lands after the hand is drawn.
 Entering the room and opening the fight are one step here, and the entrance
-snapshot is a state the simulator never holds; a `room.enter` observation of
-any other room is the settled state and is compared. How many of each a
-recording holds is counted, so a change that starts skipping more is visible. On
+snapshot is a state the simulator never holds. A fight an event choice opens is
+observed again at its entrance as that choice settles; an observation identical
+to the entrance snapshot it follows is passed over too, while the differing turn
+start is compared. A `room.enter` observation of any other room is the settled
+state and is compared. How many of each a recording holds is counted, so a
+change that starts skipping more is visible. On
 a difference, replay stops with a state-divergence error carrying the first
 differing field, its expected and simulated values, and the last matching
 checkpoint.
