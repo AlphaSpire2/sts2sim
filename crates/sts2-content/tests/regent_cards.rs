@@ -1349,6 +1349,113 @@ fn a_charge_makes_its_dive_bombs_in_the_order_the_cards_were_named() {
     );
 }
 
+/// A charge's two cards as the build records them: each named by its combat
+/// card id and fingerprint, in the order they were picked.
+fn recorded_charge(
+    choice_id: sts2_core::ChoiceId,
+    cards: &[sts2_engine::CardHandle],
+) -> sts2_replay::Record {
+    sts2_replay::Record {
+        sequence: 1,
+        kind: "choice.cards".into(),
+        payload: serde_json::json!({
+            "actor": "p0",
+            "data": {
+                "cards": cards.iter().map(|card| serde_json::json!({
+                    "combat_card_index": card.card_id.get(),
+                    "fingerprint": sts2_replay::observation::render_card_fingerprint(&card.fingerprint),
+                })).collect::<Vec<_>>(),
+                "choice_id": choice_id.get(),
+                "choice_type": "combat_card",
+                "offered": null,
+            },
+            "extensions": {},
+        }),
+    }
+}
+
+/// Plays a charge over a draw pile of `size` and replays a recorded answer
+/// naming two of its cards out of pile order. Returns the action list the
+/// charge stood with, the recorded action, and the action replay applied.
+fn replay_a_charge_over(size: usize) -> (Vec<Action>, Action, Action, Simulator) {
+    let draw: Vec<(&str, u8)> = (0..size)
+        .map(|index| {
+            if index % 2 == 0 {
+                ("CARD.STRIKE_REGENT", 0)
+            } else {
+                ("CARD.DEFEND_REGENT", 0)
+            }
+        })
+        .collect();
+    let mut simulator = fight_with_draw(&[("CARD.CHARGE", 0)], &draw);
+    play(&mut simulator, "CARD.CHARGE");
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        candidates,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("the charge names its cards: {:?}", simulator.decision());
+    };
+    assert_eq!(
+        candidates.len(),
+        size,
+        "every card of the pile is a candidate"
+    );
+    let named = vec![candidates[9].clone(), candidates[2].clone()];
+    let recorded = Action::ChooseCards {
+        choice_id,
+        cards: named.clone(),
+    };
+    let listed = simulator.legal_actions().to_vec();
+    let mut adapter = sts2_replay::ReplayAdapter::new(simulator);
+    let sts2_replay::AdapterOutcome::Applied(transition) = adapter
+        .accept(&recorded_charge(choice_id, &named))
+        .expect("the recorded charge applies")
+    else {
+        panic!("the recorded charge was not applied");
+    };
+    (
+        listed,
+        recorded,
+        transition.accepted_action,
+        adapter.simulator().clone(),
+    )
+}
+
+/// A recorded charge over a draw pile of more than a dozen is replayed in the
+/// order it was recorded. The action list carries each pair once, in pile
+/// order, so the recorded order is not on it — but the dive bombs are made in
+/// the order the cards were named, so replay keeps that order.
+#[test]
+fn a_recorded_charge_is_replayed_in_the_order_it_was_named() {
+    let (listed, recorded, applied, after) = replay_a_charge_over(14);
+    assert!(
+        !listed.contains(&recorded),
+        "the list does not carry this order"
+    );
+    assert_eq!(applied, recorded, "the record's own order");
+    assert_eq!(count_in(&after, PileName::Draw, "CARD.MINION_DIVE_BOMB"), 2);
+}
+
+/// Over a pile of ninety-two the pairs are past the cap (C(92, 2) = 4186), so
+/// the action list grows the selection a card at a time and carries no pair
+/// at all. A recorded charge names its pair in one record and is replayed
+/// all the same.
+#[test]
+fn a_recorded_charge_past_the_cap_is_replayed_in_one_record() {
+    let (listed, recorded, applied, after) = replay_a_charge_over(92);
+    assert!(
+        listed
+            .iter()
+            .filter(|action| matches!(action, Action::ChooseCards { .. }))
+            .all(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 1)),
+        "past the cap the list carries no whole pair"
+    );
+    assert_eq!(applied, recorded, "the record's own order");
+    assert_eq!(count_in(&after, PileName::Draw, "CARD.MINION_DIVE_BOMB"), 2);
+}
+
 /// A card reads its numbers as each command of its body is reached, so a card
 /// that gets its upgrade back while its own play is under way finishes the play
 /// upgraded. A crush under dampened to the plain card strikes for seven, kills

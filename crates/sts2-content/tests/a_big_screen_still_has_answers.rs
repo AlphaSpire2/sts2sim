@@ -12,15 +12,19 @@
 //! So past the cap the boundary offers the same protocol: each action names
 //! the selection so far plus one more card, an action reaching the minimum
 //! finishes the answer, and a whole set in one action — the shape a recorded
-//! run answers with — is taken directly by the legality gate.
+//! run answers with — is taken directly by the legality gate. Replay builds
+//! that whole set from the screen's candidates rather than looking for it on
+//! the action list.
 
 use std::collections::BTreeSet;
 
+use serde_json::{Value, json};
 use sts2_engine::{
-    ActMap, ActRoomPools, Action, CardFingerprint, DecisionContext, MapCoord, MapPoint,
+    ActMap, ActRoomPools, Action, CardFingerprint, CardHandle, DecisionContext, MapCoord, MapPoint,
     MapPointType, RelicGrabBagState, RoomAt, RoomDefinition, RunConfig, RunPhase, RunState,
     Simulator,
 };
+use sts2_replay::{AdapterErrorCode, AdapterOutcome, Record, ReplayAdapter};
 
 fn id(value: &str) -> sts2_core::ModelId {
     value.parse().expect("static model ID")
@@ -369,5 +373,171 @@ fn a_paels_tooth_over_a_big_deck_is_answered_in_clicks() {
         simulator.state().run_player.deck.len(),
         deck_before - 5,
         "the tooth took its five"
+    );
+}
+
+/// The standing screen's id and candidates.
+fn the_candidates(simulator: &Simulator) -> (sts2_core::ChoiceId, Vec<CardHandle>) {
+    let DecisionContext::ChooseCards {
+        choice_id,
+        candidates,
+        ..
+    } = simulator.decision()
+    else {
+        panic!("no screen is standing: {:?}", simulator.decision());
+    };
+    (*choice_id, candidates.clone())
+}
+
+/// A deck screen's answer as the build records it: every card picked, in the
+/// order the player picked them, each named by its deck index and fingerprint.
+fn recorded_answer(choice_id: sts2_core::ChoiceId, cards: &[CardHandle]) -> Record {
+    let cards: Vec<Value> = cards
+        .iter()
+        .map(|card| {
+            json!({
+                "deck_index": card.index,
+                "fingerprint": sts2_replay::observation::render_card_fingerprint(&card.fingerprint),
+            })
+        })
+        .collect();
+    Record {
+        sequence: 1,
+        kind: "choice.cards".into(),
+        payload: json!({
+            "actor": "p0",
+            "data": {
+                "cards": cards,
+                "choice_id": choice_id.get(),
+                "choice_type": "deck_card",
+                "offered": null,
+            },
+            "extensions": {},
+        }),
+    }
+}
+
+/// The action a replayed record applied.
+fn replayed(simulator: Simulator, record: &Record) -> (Simulator, Action) {
+    let mut adapter = ReplayAdapter::new(simulator);
+    let AdapterOutcome::Applied(transition) =
+        adapter.accept(record).expect("the recorded answer applies")
+    else {
+        panic!("the recorded answer was not applied");
+    };
+    (adapter.simulator().clone(), transition.accepted_action)
+}
+
+/// A recorded hug names its four cards in one record, in the order they were
+/// picked. The action list past the cap never lays that set out, and replay
+/// answers the screen with it all the same.
+#[test]
+fn a_recorded_hug_answers_its_screen_in_one_record() {
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+    take_the_relic(&mut simulator);
+    let deck_before = simulator.state().run_player.deck.len();
+    let (choice_id, candidates) = the_candidates(&simulator);
+    let picked = vec![
+        candidates[19].clone(),
+        candidates[2].clone(),
+        candidates[11].clone(),
+        candidates[7].clone(),
+    ];
+    assert!(
+        offered_answers(&simulator)
+            .iter()
+            .all(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 1)),
+        "past the cap the list carries no whole set"
+    );
+
+    let (after, applied) = replayed(simulator, &recorded_answer(choice_id, &picked));
+    assert_eq!(
+        applied,
+        Action::ChooseCards {
+            choice_id,
+            cards: picked
+        },
+        "the record's own cards, in its own order"
+    );
+    assert!(
+        !matches!(after.decision(), DecisionContext::ChooseCards { .. }),
+        "the record finished the answer"
+    );
+    assert_eq!(after.state().run_player.deck.len(), deck_before - 4);
+}
+
+/// Building the answer from the screen does not make every record an answer:
+/// a card the screen does not offer, or more cards than it takes, is still
+/// refused.
+#[test]
+fn a_recorded_answer_the_screen_would_not_take_is_refused() {
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+    take_the_relic(&mut simulator);
+    let (choice_id, candidates) = the_candidates(&simulator);
+
+    let mut stranger = candidates[..4].to_vec();
+    stranger[0].fingerprint = CardFingerprint::base(id("CARD.FOLLY"));
+    let five = candidates[..5].to_vec();
+    for (cards, name) in [(stranger, "a card not on the screen"), (five, "five cards")] {
+        let mut adapter = ReplayAdapter::new(simulator.clone());
+        let before = adapter.simulator().snapshot();
+        let error = adapter
+            .accept(&recorded_answer(choice_id, &cards))
+            .expect_err(name);
+        assert_eq!(error.code, AdapterErrorCode::IllegalAction, "{name}");
+        assert_eq!(
+            adapter.simulator().snapshot(),
+            before,
+            "{name} changes nothing"
+        );
+    }
+}
+
+/// A beautiful bracelet asks for three of twenty-three: few enough sets for
+/// the list to carry each once, in candidate order, but not every order of
+/// them. A record that picked them in another order is replayed in that
+/// order, which is the order the build hands them back in.
+#[test]
+fn a_recorded_bracelet_keeps_the_order_it_was_picked_in() {
+    let mut simulator = run_at_a_chest("RELIC.BEAUTIFUL_BRACELET");
+    take_the_relic(&mut simulator);
+    let (_, minimum, maximum, count, _) = the_screen(&simulator);
+    assert_eq!(
+        (minimum, maximum),
+        (3, 3),
+        "the bracelet asks for exactly three"
+    );
+    assert!(count > 12, "a screen this big lists sets, not orders");
+    let (choice_id, candidates) = the_candidates(&simulator);
+    let picked = vec![
+        candidates[9].clone(),
+        candidates[0].clone(),
+        candidates[4].clone(),
+    ];
+    let recorded = Action::ChooseCards {
+        choice_id,
+        cards: picked.clone(),
+    };
+    assert!(
+        !simulator.legal_actions().contains(&recorded),
+        "the list does not carry this order"
+    );
+    assert!(
+        simulator.legal_actions().contains(&Action::ChooseCards {
+            choice_id,
+            cards: vec![
+                candidates[0].clone(),
+                candidates[4].clone(),
+                candidates[9].clone(),
+            ],
+        }),
+        "the list carries the set in candidate order"
+    );
+
+    let (after, applied) = replayed(simulator, &recorded_answer(choice_id, &picked));
+    assert_eq!(applied, recorded, "the record's own order");
+    assert!(
+        !matches!(after.decision(), DecisionContext::ChooseCards { .. }),
+        "the record finished the answer"
     );
 }

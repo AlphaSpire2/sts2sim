@@ -2350,6 +2350,10 @@ claim.
 The replay adapter owns record-role interpretation above the simulator:
 
 - initiating and `choice.*` records call `step`;
+- a `choice.cards` answer is built from the pending decision's candidates, in
+  the order the record names them, rather than looked up on the action list,
+  so a set the list does not carry in that order, or at all, still replays and
+  `step` judges it;
 - resolve and lifecycle records validate transitions already produced;
 - `state.observe` projects and compares without mutation; and
 - `run.finish` validates output and never forces termination.

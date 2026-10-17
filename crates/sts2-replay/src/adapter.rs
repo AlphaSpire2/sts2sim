@@ -5,8 +5,8 @@ use std::fmt::{self, Display, Formatter};
 use serde_json::Value;
 use sts2_core::ModelId;
 use sts2_engine::{
-    Action, CardFingerprint, ErrorCode, MapPointType, RewardFingerprint, Simulator, Snapshot,
-    Transition,
+    Action, CardFingerprint, CardHandle, ErrorCode, MapPointType, RewardFingerprint, Simulator,
+    Snapshot, Transition,
 };
 
 use crate::{Record, TimelineRole, TimelineValidator, TraceProfile, VerificationLevel};
@@ -991,54 +991,11 @@ impl ReplayAdapter {
         match choice_type {
             "deck_card" => {
                 let indexes = key("deck_index")?;
-                let ordered = self.find_action(record, |action| {
-                    matches!(action, Action::ChooseCards { cards, .. }
-                    if cards.len() == indexes.len()
-                        && cards.iter().zip(&indexes).all(|(card, index)| {
-                            card.index as u64 == *index
-                        })
-                        && cards.iter().zip(&fingerprints).all(|(card, fingerprint)| {
-                            card_fingerprint_matches(&card.fingerprint, fingerprint)
-                        }))
-                });
-                if ordered.is_ok() {
-                    return ordered;
-                }
-                // A screen with more candidates than the engine can lay out in
-                // every order offers each set once, in candidate order. So a
-                // recorded answer that named those same cards in another order
-                // is that set: the cap the engine draws on its action list is
-                // showing through, and nothing past the screen reads the order
-                // a deck screen this size was answered in.
-                let mut wanted = indexes.clone();
-                wanted.sort_unstable();
-                self.find_action(record, |action| {
-                    matches!(action, Action::ChooseCards { cards, .. }
-                    if cards.len() == wanted.len()
-                        && {
-                            let mut named: Vec<u64> =
-                                cards.iter().map(|card| card.index as u64).collect();
-                            named.sort_unstable();
-                            named == wanted
-                        })
-                })
+                self.standing_selection(record, &indexes, &fingerprints, |card| card.index as u64)
             }
             "combat_card" => {
                 let card_ids = key("combat_card_index")?;
-                let ordered = self.find_action(record, |action| {
-                    matches!(action, Action::ChooseCards { cards, .. }
-                    if cards.len() == card_ids.len()
-                        && cards.iter().zip(&card_ids).all(|(card, card_id)| {
-                            card.card_id.get() == *card_id
-                        })
-                        && cards.iter().zip(&fingerprints).all(|(card, fingerprint)| {
-                            card_fingerprint_matches(&card.fingerprint, fingerprint)
-                        }))
-                });
-                if ordered.is_ok() {
-                    return ordered;
-                }
-                self.combat_cards_in_recorded_order(record, &card_ids, &fingerprints)
+                self.standing_selection(record, &card_ids, &fingerprints, |card| card.card_id.get())
             }
             _ => Err(Self::error(
                 record,
@@ -1048,49 +1005,55 @@ impl ReplayAdapter {
         }
     }
 
-    /// A screen with more orders than the engine lays out offers each set once,
-    /// in candidate order, and takes any order of a set it offers. The order a
-    /// combat screen was answered in is read by what follows it, so the answer
-    /// is that set put back in the order the record names.
-    fn combat_cards_in_recorded_order(
+    /// A card choice's answer, built from the standing decision's candidates
+    /// in the order the record names them, for the engine to judge.
+    ///
+    /// How much of a decision the action list lays out is a cap this engine
+    /// draws — every order of a small one, each set once of a bigger one, and
+    /// past that only the selection grown a card at a time — while its gate
+    /// takes any answer the decision's counts allow. The build hands the cards
+    /// back in the order they were picked whichever of those the list
+    /// carries, and what follows reads that order. `identity` is the name a
+    /// record gives a candidate: its deck index, or its combat card id.
+    fn standing_selection(
         &self,
         record: &Record,
-        card_ids: &[u64],
+        names: &[u64],
         fingerprints: &[&Value],
+        identity: impl Fn(&CardHandle) -> u64,
     ) -> Result<Action, AdapterError> {
-        let mut wanted = card_ids.to_vec();
-        wanted.sort_unstable();
-        let set = self.find_action(record, |action| {
-            matches!(action, Action::ChooseCards { cards, .. }
-            if cards.len() == wanted.len()
-                && {
-                    let mut named: Vec<u64> =
-                        cards.iter().map(|card| card.card_id.get()).collect();
-                    named.sort_unstable();
-                    named == wanted
-                })
-        })?;
-        let Action::ChooseCards { choice_id, cards } = set else {
-            return Ok(set);
+        let illegal = || {
+            Self::error(
+                record,
+                AdapterErrorCode::IllegalAction,
+                "record does not match the standing card selection",
+            )
         };
-        let mut in_order = Vec::with_capacity(cards.len());
-        for (card_id, fingerprint) in card_ids.iter().zip(fingerprints) {
-            let card = cards
-                .iter()
-                .find(|card| card.card_id.get() == *card_id)
-                .filter(|card| card_fingerprint_matches(&card.fingerprint, fingerprint))
-                .ok_or_else(|| {
-                    Self::error(
-                        record,
-                        AdapterErrorCode::IllegalAction,
-                        "record does not match any legal action",
-                    )
-                })?;
-            in_order.push(card.clone());
-        }
-        Ok(Action::ChooseCards {
+        let sts2_engine::DecisionContext::ChooseCards {
             choice_id,
-            cards: in_order,
+            candidates,
+            ..
+        } = self.simulator.decision()
+        else {
+            return Err(illegal());
+        };
+        let cards = names
+            .iter()
+            .zip(fingerprints)
+            .map(|(name, expected)| {
+                candidates
+                    .iter()
+                    .find(|card| {
+                        identity(card) == *name
+                            && card_fingerprint_matches(&card.fingerprint, expected)
+                    })
+                    .cloned()
+                    .ok_or_else(illegal)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Action::ChooseCards {
+            choice_id: *choice_id,
+            cards,
         })
     }
 
