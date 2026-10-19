@@ -4742,11 +4742,24 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
                             then: vec![
                                 Command::Player(PlayerCmd::GainEnergy(Amount::Product {
                                     left: Box::new(stacks()),
-                                    right: Box::new(Amount::Fixed(1)),
+                                    right: Box::new(Amount::Quotient {
+                                        of: Box::new(Amount::counting(
+                                            Count::ListeningPowerCounter,
+                                        )),
+                                        by: 4,
+                                    }),
                                 })),
                                 Command::Power(PowerCmd::ModifyCounter {
                                     power: PowerRef::listening(),
-                                    amount: Amount::Fixed(-4),
+                                    amount: Amount::Product {
+                                        left: Box::new(Amount::Fixed(-4)),
+                                        right: Box::new(Amount::Quotient {
+                                            of: Box::new(Amount::counting(
+                                                Count::ListeningPowerCounter,
+                                            )),
+                                            by: 4,
+                                        }),
+                                    },
                                 }),
                             ],
                         },

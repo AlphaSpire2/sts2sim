@@ -501,6 +501,33 @@ fn an_orbit_pays_an_energy_for_every_four_spent() {
     );
 }
 
+#[test]
+fn an_orbit_pays_every_threshold_crossed_by_one_x_cost() {
+    for (spent_before, energy_before, stacks, refund, remainder) in
+        [(0, 8, 1, 2, 0), (3, 5, 1, 2, 0), (2, 11, 2, 6, 1)]
+    {
+        let simulator = scenario(&Fight {
+            enemies: &[500],
+            powers: &[(0, "POWER.ORBIT_POWER", stacks, PowerType::Buff)],
+            hand: &[("CARD.ERADICATE", 1), ("CARD.FALLING_STAR", 0)],
+            stars: 2,
+            ..Fight::default()
+        });
+        let mut state = simulator.state().clone();
+        let combat = state.combat.as_mut().unwrap();
+        combat.player.energy = energy_before;
+        combat.creatures[0].powers[0].counter = spent_before;
+        let mut simulator = Simulator::from_scenario(state, sts2_content::standard_registry())
+            .expect("the spending scenario builds");
+        play(&mut simulator, "CARD.ERADICATE");
+        assert_eq!(energy(&simulator), refund);
+        assert_eq!(creature(&simulator, 0).powers[0].counter, remainder);
+        play(&mut simulator, "CARD.FALLING_STAR");
+        assert_eq!(energy(&simulator), refund, "a free play earns no refund");
+        assert_eq!(creature(&simulator, 0).powers[0].counter, remainder);
+    }
+}
+
 /// A monarch's gaze takes strength off whatever its owner's powered blows land
 /// on, for the turn.
 #[test]

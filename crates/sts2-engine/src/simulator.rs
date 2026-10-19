@@ -1455,6 +1455,12 @@ impl Simulator {
             if combat.has_ended {
                 combat.player.energy = 0;
                 combat.player.stars = 0;
+                // The finished room is recreated without the old combat's
+                // monsters or pets. In particular, a summoned Osty is not
+                // part of the run save and must not survive this reload.
+                combat
+                    .creatures
+                    .retain(|creature| creature.id == combat.player.creature_id);
             }
             combat.next_reward_set_id = 0;
             combat.next_choice_id = 0;
@@ -5818,6 +5824,10 @@ impl Simulator {
         let context = CommandContext::by(id).at(player_id);
         let mut joining_events = Vec::new();
         self.run_commands(&monster.on_added, &context, &mut joining_events)?;
+        // Record the arrival before later effects can remove the creature.
+        // One multi-hit attack can spawn and kill an entire second phase
+        // before the next decision boundary.
+        self.record_monsters_seen(true);
         // The creature-added pass, which the build runs once the creature is
         // standing and its own arrival has been settled.
         self.dispatch_hooks(
@@ -5949,6 +5959,7 @@ impl Simulator {
             .position(|creature| creature.side == CombatSide::Enemy)
             .unwrap_or(combat.creatures.len());
         combat.creatures.insert(first_enemy, creature);
+        self.record_monsters_seen(true);
         // The creature-added pass, which the build runs once the creature is
         // standing.
         self.dispatch_hooks(

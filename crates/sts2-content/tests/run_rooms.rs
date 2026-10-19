@@ -950,6 +950,45 @@ fn a_reload_over_a_won_fight_comes_back_outside_any_turn() {
     assert_eq!(fight_standing(&simulator), (1, 1, 0, 0));
 }
 
+#[test]
+fn a_reload_over_a_won_fight_does_not_restore_its_pet() {
+    let mut simulator = generated_run_holding(&["RELIC.PHYLACTERY_UNBOUND"]);
+    choose_map(&mut simulator, 4);
+    let mut state = simulator.state().clone();
+    let combat = state.combat.as_mut().unwrap();
+    assert!(combat.creatures.iter().any(sts2_engine::Creature::is_pet));
+    combat
+        .creatures
+        .iter_mut()
+        .find(|c| c.side == sts2_engine::CombatSide::Enemy)
+        .unwrap()
+        .current_hp = 1;
+    let mut simulator = Simulator::from_generated_state(state, sts2_content::standard_registry())
+        .expect("the fight rebuilds");
+    strike(&mut simulator);
+    assert!(simulator.state().combat.as_ref().unwrap().has_ended);
+    let before = simulator.state().clone();
+    for _ in 0..2 {
+        simulator
+            .resumed_from_save()
+            .expect("the completed room reloads");
+        let combat = simulator.state().combat.as_ref().unwrap();
+        assert_eq!(combat.creatures.len(), 1);
+        assert_eq!(combat.creatures[0].id, combat.player.creature_id);
+        assert_eq!(
+            simulator.state().rng,
+            before.rng,
+            "a reload does not replay summons"
+        );
+        assert_eq!(
+            simulator.state().run.as_ref().unwrap().map_history,
+            before.run.as_ref().unwrap().map_history,
+            "the encounter history is preserved"
+        );
+        assert_eq!(simulator.state().run_player, before.run_player);
+    }
+}
+
 /// A save taken on the way into a fight is a different thing: the fight is
 /// played out from its first turn again, and that turn holds what it was
 /// handed. Only the round and the turn are put back, and they were already

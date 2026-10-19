@@ -18,6 +18,53 @@ fn id(value: &str) -> sts2_core::ModelId {
     value.parse().unwrap()
 }
 
+#[test]
+fn a_second_phase_killed_by_the_same_card_stays_in_room_history() {
+    let simulator = walk_in_point("ENCOUNTER.PHROG_PARASITE_ELITE", 12, MapPointType::Elite);
+    let mut state = simulator.state().clone();
+    let combat = state.combat.as_mut().unwrap();
+    combat
+        .creatures
+        .iter_mut()
+        .find(|c| c.side == CombatSide::Enemy)
+        .unwrap()
+        .current_hp = 26;
+    combat.player.energy = 2;
+    combat.player.stars = 7;
+    let card = &mut combat.player.piles.hand[0];
+    card.fingerprint = sts2_engine::CardFingerprint::base(id("CARD.SEVEN_STARS"));
+    card.deck_version = None;
+    let card_id = card.id;
+    let mut simulator = Simulator::from_generated_state(state, sts2_content::standard_registry())
+        .expect("the two-phase fight builds");
+    let action = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::PlayCard { card, .. } if card.card_id == card_id))
+        .cloned()
+        .expect("Seven Stars is playable");
+    simulator.step(action).expect("both phases are hit");
+    let combat = simulator.state().combat.as_ref().unwrap();
+    assert!(combat.has_ended, "the same play killed both phases");
+    let run = simulator.state().run.as_ref().unwrap();
+    let room = run
+        .map_history
+        .last()
+        .unwrap()
+        .points
+        .last()
+        .unwrap()
+        .rooms
+        .last()
+        .unwrap();
+    let monsters: Vec<_> = room
+        .monsters
+        .iter()
+        .map(|seen| seen.model_id.to_string())
+        .collect();
+    assert_eq!(monsters, ["MONSTER.PHROG_PARASITE", "MONSTER.WRIGGLER"]);
+}
+
 fn point(col: u8, row: u8, point_type: MapPointType, children: Vec<MapCoord>) -> MapPoint {
     MapPoint {
         coord: MapCoord { col, row },
