@@ -1542,12 +1542,12 @@ impl HookEvent {
     }
 
     /// Whether a listener on this pass may open a selection screen, and under
-    /// which of the two disciplines.
+    /// which of the three disciplines.
     ///
     /// Some passes can be interrupted by a player choice and some cannot: a
     /// pass that cannot gives its listeners nothing to pause with, so a
     /// listener that asked a question there would have nowhere to stop. Which
-    /// of the two disciplines applies is settled by the moment that runs the
+    /// of the three disciplines applies is settled by the moment that runs the
     /// pass rather than by the pass itself, because what pauses is not the
     /// same thing in each.
     #[must_use]
@@ -1590,6 +1590,14 @@ impl HookEvent {
             | Self::BeforeFlushLate
             | Self::AfterSideTurnEnd
             | Self::AfterSideTurnEndLate => HookSuspension::Deferred,
+            // Each listener gets a pause point of its own, and nothing ever
+            // waits for it: a body that asks a question is put on the player's
+            // action queue as an action of its own and the pass runs on, and so
+            // does the kill and the action the kill happened inside. The
+            // question is put to the player when the queue reaches that action,
+            // which is once the action ahead of it has finished. The engine
+            // carries this as the combat's queue of hook screens.
+            Self::AfterDeath | Self::AfterDiedToDoom => HookSuspension::Queued,
             _ => HookSuspension::None,
         }
     }
@@ -1630,6 +1638,13 @@ impl HookEvent {
         matches!(self.suspension(), HookSuspension::Deferred)
             && !matches!(self, Self::BeforeSideTurnStart)
     }
+
+    /// Whether a screen a listener opens on this pass is queued behind the
+    /// running action rather than shown where it was asked for.
+    #[must_use]
+    pub const fn queues_screens(self) -> bool {
+        matches!(self.suspension(), HookSuspension::Queued)
+    }
 }
 
 /// How a listener pass is paused for a player choice, which is not the same at
@@ -1642,6 +1657,10 @@ pub enum HookSuspension {
     /// One pause point per listener, honoured only until it pauses, and waited
     /// for at the end of the moment. A screen does not stop the pass.
     Deferred,
+    /// One pause point per listener, honoured only until it pauses, and never
+    /// waited for. A screen does not stop the pass or anything around it; it
+    /// is shown once the action the pass ran inside has finished.
+    Queued,
     /// The pass offers nothing to pause with, so a listener that asked a
     /// question would have nowhere to stop.
     None,
@@ -5451,6 +5470,16 @@ pub struct CombatState {
     pub creatures: Vec<Creature>,
     pub queue: VecDeque<Effect>,
     pub suspended_choice: Option<SuspendedChoice>,
+    /// The screens death listeners asked for, in the order they asked, each
+    /// with everything its paused listener still owes behind the answer.
+    ///
+    /// The build puts each one on the player's action queue as an action of
+    /// its own, behind the action that was running when it was asked for, so
+    /// it is shown only once that action has finished and the fight has been
+    /// checked for a win. A fight that ends first cancels them, and what they
+    /// owed never runs.
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub queued_hook_screens: VecDeque<SuspendedHookScreen>,
     pub victory_rewards: Vec<RewardFingerprint>,
     pub generated_victory_rewards: Option<crate::GeneratedCombatRewardSpec>,
     pub reward_set: Option<RewardSet>,

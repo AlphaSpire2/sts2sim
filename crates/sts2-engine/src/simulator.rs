@@ -1494,6 +1494,7 @@ impl Simulator {
         if let Some(combat) = self.state.combat.as_ref() {
             waiting.extend(combat.suspended_choice.as_ref().map(|choice| choice.id));
             waiting.extend(combat.queue.iter().filter_map(banked_screen_id));
+            waiting.extend(combat.queued_hook_screens.iter().map(|screen| screen.id));
         }
         waiting.sort_unstable();
         waiting.dedup();
@@ -1522,6 +1523,9 @@ impl Simulator {
                 if let Effect::HookScreen(screen) = effect {
                     screen.id = fresh(screen.id);
                 }
+            }
+            for screen in &mut combat.queued_hook_screens {
+                screen.id = fresh(screen.id);
             }
         }
     }
@@ -5560,6 +5564,7 @@ impl Simulator {
             creatures,
             queue: std::collections::VecDeque::new(),
             suspended_choice: None,
+            queued_hook_screens: std::collections::VecDeque::new(),
             victory_rewards: definition.rewards,
             generated_victory_rewards: definition.generated_rewards,
             reward_set: None,
@@ -9586,7 +9591,9 @@ impl Simulator {
                 }
                 combat.queue.pop_front()
             };
-            let Some(effect) = effect else {
+            let ended = if let Some(effect) = effect {
+                self.apply_effect(effect, events)?
+            } else {
                 // The win check is asked once the action that was running has
                 // finished, whoever landed the blow and wherever it landed. A
                 // fight won by a listener rather than by the death settlement
@@ -9599,27 +9606,60 @@ impl Simulator {
                     && self.combat().is_ok_and(|combat| combat.in_progress)
                     && self.combat_is_won()?
                 {
+                    // The fight's end cancels the hook actions still waiting
+                    // behind the one that won it.
+                    self.combat_mut()?.queued_hook_screens.clear();
                     return Ok(true);
                 }
-                return Ok(false);
+                // With the action finished and the fight still on, the next
+                // action on the player's queue is the hook action a death
+                // listener left there, and it is checked for a win in turn
+                // once it has run.
+                let next = if self.suspended() {
+                    None
+                } else {
+                    self.next_queued_hook_screen()?
+                };
+                let Some(screen) = next else {
+                    return Ok(false);
+                };
+                self.open_hook_screen(screen, true, events)?
             };
-            if self.apply_effect(effect, events)? {
+            if ended {
                 // A player who went down takes the queue with them: the run is
                 // over and nothing that was still owed is run out.
                 if self.pending_loss || self.state.combat.is_none() {
-                    if self.state.combat.is_some() {
-                        self.combat_mut()?.queue.clear();
+                    if let Some(combat) = self.state.combat.as_mut() {
+                        combat.queue.clear();
+                        combat.queued_hook_screens.clear();
                     }
                     return Ok(false);
                 }
                 // The fight is over, but the listeners a card already set off
                 // still run and it still finishes reading its own dice: what
-                // the runtime blocks is the commands, not those.
+                // the runtime blocks is the commands, not those. The hook
+                // actions still queued are cancelled with the combat.
                 self.finish_pending_reactions()?;
-                self.combat_mut()?.queue.clear();
+                let combat = self.combat_mut()?;
+                combat.queue.clear();
+                combat.queued_hook_screens.clear();
                 return Ok(true);
             }
         }
+    }
+
+    /// The hook action a death listener queued that the player's queue reaches
+    /// next, taken off the combat's queue of hook screens. A fight that is no
+    /// longer in progress — one won and left standing for its proceed, say —
+    /// has cancelled every one of them, so none is handed back and none is
+    /// kept.
+    fn next_queued_hook_screen(&mut self) -> Result<Option<SuspendedHookScreen>, EngineError> {
+        let combat = self.combat_mut()?;
+        if !combat.in_progress || combat.has_ended {
+            combat.queued_hook_screens.clear();
+            return Ok(None);
+        }
+        Ok(combat.queued_hook_screens.pop_front())
     }
 
     /// Runs what the rest of the queue would still have set off once the fight
@@ -9974,7 +10014,7 @@ impl Simulator {
             // A deferred body's screen the queue has reached: it is shown, or
             // settled where nothing has to be asked, and reports a won fight
             // the way any other entry does.
-            Effect::HookScreen(screen) => return self.open_hook_screen(*screen, events),
+            Effect::HookScreen(screen) => return self.open_hook_screen(*screen, false, events),
             Effect::FinishRelicReward { .. } => {
                 return Err(EngineError::new(ErrorCode::InternalInvariant)
                     .with_detail("combat_effect", "a run relic reward on the combat queue"));
@@ -21925,6 +21965,9 @@ impl Simulator {
         reason = "one block per stage of the build's combat ending"
     )]
     fn finish_combat(&mut self, events: &mut Vec<SemanticEvent>) -> Result<(), EngineError> {
+        // However the fight was settled, the hook actions still queued behind
+        // it are cancelled with it, and what they owed is never run.
+        self.combat_mut()?.queued_hook_screens.clear();
         // A fight that pays no rewards and was won by a kill is not ended at
         // the blow. The game shows a proceed over the fight as it stands and
         // ends it only when the room is proceeded from, so everything below —
@@ -24208,7 +24251,7 @@ impl Simulator {
             if self.queue_is_held() {
                 self.push_resume(Effect::HookScreen(Box::new(screen)))?;
             } else {
-                self.open_hook_screen(screen, &mut events)?;
+                self.open_hook_screen(screen, false, &mut events)?;
             }
         }
         Ok(())
@@ -24219,6 +24262,31 @@ impl Simulator {
     /// continuations its unwinding put at the front of the queue, in resume
     /// order — everything the paused body still owes.
     fn bank_hook_screen(&mut self) -> Result<(), EngineError> {
+        let screen = self.take_hook_screen()?;
+        self.hook_screens_owed
+            .as_mut()
+            .ok_or_else(|| {
+                EngineError::new(ErrorCode::InternalInvariant)
+                    .with_detail("hook_screen", "a banked screen with no bank standing")
+            })?
+            .push(screen);
+        Ok(())
+    }
+
+    /// Takes the suspension a queued body just put up back down and puts it
+    /// on the combat's queue of hook screens, behind every one asked for
+    /// before it, where the build's hook action waits on the action queue.
+    fn queue_hook_screen(&mut self) -> Result<(), EngineError> {
+        let screen = self.take_hook_screen()?;
+        self.combat_mut()?.queued_hook_screens.push_back(screen);
+        Ok(())
+    }
+
+    /// The suspension a paused body just put up, taken back down whole: the
+    /// request the body made, and the continuations its unwinding put at the
+    /// front of the queue, in resume order — everything the paused body still
+    /// owes, and nothing that was queued before the screen went up.
+    fn take_hook_screen(&mut self) -> Result<SuspendedHookScreen, EngineError> {
         let mut screen = self.last_screen_request.take().ok_or_else(|| {
             EngineError::new(ErrorCode::InternalInvariant)
                 .with_detail("hook_screen", "a suspension with no request written down")
@@ -24238,14 +24306,27 @@ impl Simulator {
                 .with_detail("hook_screen", "a continuation past the end of the queue"));
         }
         screen.owed = combat.queue.drain(..cursor).collect();
-        self.hook_screens_owed
-            .as_mut()
-            .ok_or_else(|| {
-                EngineError::new(ErrorCode::InternalInvariant)
-                    .with_detail("hook_screen", "a banked screen with no bank standing")
-            })?
-            .push(screen);
-        Ok(())
+        // What the cursor counted is gone with the screen it was counted for.
+        self.resume_cursor = 0;
+        Ok(screen)
+    }
+
+    /// Whether a screen a queued listener asks for now is shown where this
+    /// engine shows one: once the action the player took in their own turn has
+    /// finished. That is a card played, a potion drunk, or a screen answered
+    /// while the player is acting — the build's executor runs the queued action
+    /// straight behind it. Anywhere else, the turn handover, the enemy's turn,
+    /// a turn opening, the build's own turn flow runs beside its executor, and
+    /// where the queued action lands among it is a timing this engine does not
+    /// carry.
+    fn queued_hook_screens_drain_here(&self) -> bool {
+        self.state.combat.as_ref().is_some_and(|combat| {
+            combat.in_progress
+                && !combat.has_ended
+                && combat.side == CombatSide::Player
+                && combat.player.phase == crate::PlayerTurnPhase::Play
+                && !combat.player_actions_disabled
+        })
     }
 
     /// Stands a banked screen back up, or settles it where the build's own
@@ -24256,20 +24337,36 @@ impl Simulator {
     /// is what stands when the screen is finally shown, not what stood when the
     /// body asked. Returns whether the fight ended settling it, the way any
     /// queue entry answers.
+    ///
+    /// A queued combat-pile screen keeps the build's split exactly. Whether
+    /// to ask at all was settled when the body asked, so the take-all shortcut
+    /// is not asked again: the pile screen re-reads the pile as it opens and
+    /// completes on its own only when nothing in it qualifies, and otherwise
+    /// stands — however few cards it holds — asking for no more than it shows.
     fn open_hook_screen(
         &mut self,
         screen: SuspendedHookScreen,
+        queued: bool,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
         // A fight that is over cancels its paused hook actions with it.
         if self.state.combat.is_none() {
             return Ok(false);
         }
+        let over_the_live_pile = queued
+            && matches!(screen.source, SelectionSource::CombatPile(_))
+            && screen.only.is_none();
         let candidates =
             self.selection_candidates(&screen.source, &screen.filters, screen.only.as_deref())?;
+        let minimum = if over_the_live_pile {
+            screen.prefs.minimum.min(candidates.len())
+        } else {
+            screen.prefs.minimum
+        };
         let settled: Option<Vec<ChosenCard>> = if candidates.is_empty() {
             Some(Vec::new())
-        } else if !screen.prefs.require_manual_confirmation
+        } else if !over_the_live_pile
+            && !screen.prefs.require_manual_confirmation
             && candidates.len() <= screen.prefs.minimum
         {
             Some(candidates.iter().map(|(_, card)| card.clone()).collect())
@@ -24291,7 +24388,7 @@ impl Simulator {
                 identity: screen.source.identity(),
                 screen: screen.screen_kind,
                 candidates: candidates.into_iter().map(|(handle, _)| handle).collect(),
-                minimum: screen.prefs.minimum,
+                minimum,
                 maximum: screen.prefs.maximum,
                 cancelable: screen.prefs.cancelable,
                 alternatives: Vec::new(),
@@ -24391,6 +24488,26 @@ impl Simulator {
                     )
                 }
             }
+            // A queued site gives each listener its own context too, so an outer
+            // block does not reach the bodies here either: what a body that
+            // asks leaves behind is queued, and nothing around the pass waits
+            // on it. Where the queue it lands on drains is only carried for an
+            // action the player took in their own turn; anywhere else the build
+            // runs the queued action against a turn still being played out, a
+            // timing this engine does not carry, so a body that asks there
+            // stops with the discipline named.
+            crate::HookSuspension::Queued => {
+                if self.hook_screens_owed.is_none() {
+                    self.block_suspension("a queued listener pass outside a dispatch", true)
+                } else if self.queued_hook_screens_drain_here() {
+                    self.suspension_block.take()
+                } else {
+                    self.block_suspension(
+                        "a listener the build queues outside the player's own action",
+                        false,
+                    )
+                }
+            }
             crate::HookSuspension::None => {
                 self.block_suspension("a listener the build runs without stopping", true)
             }
@@ -24447,6 +24564,16 @@ impl Simulator {
                         if pass.event.defers_screens_to_a_join() && self.hook_screens_owed.is_some()
                         {
                             self.bank_hook_screen()?;
+                            continue;
+                        }
+                        // A queued pass does not stop either, and nothing it
+                        // runs inside waits: the screen joins the combat's
+                        // queue of hook screens the moment it is asked for,
+                        // which is when the build enqueues its action, so a
+                        // screen a nested death asked for meanwhile stays
+                        // behind one asked for earlier.
+                        if pass.event.queues_screens() {
+                            self.queue_hook_screen()?;
                             continue;
                         }
                         self.push_resume(Effect::ResumeHookPass(Box::new(pass.clone())))?;

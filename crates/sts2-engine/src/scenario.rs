@@ -485,6 +485,7 @@ impl ScenarioBuilder {
                 creatures,
                 queue: std::collections::VecDeque::new(),
                 suspended_choice: None,
+                queued_hook_screens: std::collections::VecDeque::new(),
                 victory_rewards: self.rewards,
                 generated_victory_rewards: None,
                 reward_set: None,

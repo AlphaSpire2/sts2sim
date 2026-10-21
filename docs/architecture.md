@@ -529,6 +529,28 @@ reaches the turn-boundary discipline — the power that asks which cards to keep
 back before the hand is flushed — so the mechanism buys that one body and
 nothing else.
 
+The death passes, `AfterDeath` and `AfterDiedToDoom`, are a third discipline:
+each listener gets its own pause point and nothing ever waits for it. A body
+that asks is put on the player's action queue as an action of its own, so the
+pass runs on to the next listener, the kill finishes, and so does the action
+the kill happened inside. The engine carries this as the combat's
+`queued_hook_screens`: the screen the body asked for, with everything the body
+still owes behind the answer, appended the moment it is asked for, which is
+when the game enqueues its action. Once the running action has finished and
+its win check has passed, the queue's next screen is opened, and the win check
+is asked again once its answer has settled, the way the game's executor checks
+after every action. A fight that ends first cancels every screen still queued
+and what it owed is never run. Whether to ask at all is settled when the body
+asks, as the game's screen call settles it, so a queued pile screen is not
+answered on its own when it opens: it re-reads the pile, settles empty only if
+nothing in the pile qualifies, and otherwise stands, asking for no more cards
+than it shows. The queue drains where this engine runs it only for an action
+the player took in their own turn — a card, a potion, or an answer while the
+player is acting. A death listener that asks anywhere else fails as unsupported
+content naming the discipline, which is a listed divergence. A Gremlin Horn's
+draw shuffling into a Stratagem is the registered content that reaches the
+discipline.
+
 Outside a combat there is no queue to defer into, so what is left of an
 out-of-combat body waits on the run in the same shape a combat's queue holds,
 and is settled by the answer. Obtaining a relic is the path that reaches it: a

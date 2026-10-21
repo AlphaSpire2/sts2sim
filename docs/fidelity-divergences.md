@@ -142,6 +142,36 @@ silent; nothing the pass runs for any other body differs.
 parked-and-unwaited discipline modelled: a screen banked by the pass and
 answered while the turn start has already run on.
 
+## A death listener's screen outside the player's own action is refused
+
+**The build.** A death listener that asks the player something is put on the
+player's action queue as an action of its own and nothing waits for it. The
+build's executor runs it once the action ahead of it has finished. Inside the
+player's own turn that is the card, potion, or answer that caused the death.
+During the turn handover, the enemy's turn, or a turn opening, the turn flow is
+not itself an action on that queue, and the executor picks the queued action up
+beside it, wherever the turn flow next stops to wait.
+
+**This simulator.** A death listener's screen asked for while the player is
+acting is queued and shown behind the action, as the build shows it. One asked
+for anywhere else fails as unsupported content naming the discipline rather
+than as an invariant, and a full step puts the state back. A Gremlin Horn whose
+draw shuffles into a Stratagem as an enemy dies on its own turn, or during the
+end of the player's turn, is the registered content that reaches it.
+
+**Whether it can reach a conformance claim.** Only through a death listener that
+asks outside the player's own action. A recording of one stops at the ask with
+an unsupported-content error and is never replayed past it. A second, narrower
+shape is ordering alone. A player who queues a card or a potion while the
+killing action is still animating has that input run ahead of the death
+listener's queued action, while this simulator, which takes one action at a
+time, shows the screen first. A recording of that would replay the input after
+the answer rather than before it.
+
+**What would change this.** A recording of a death listener asking during the
+enemy's turn or the handover, which would pin where the build's executor runs
+the queued action against the turn flow.
+
 ## Three card faces are drawn from the wrong variable
 
 **The build.** A card's face is drawn from the variables its body declares.
