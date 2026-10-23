@@ -1913,6 +1913,16 @@ A minion does not keep a combat alive, and one still standing when its side
 loses goes down with it. Winning strips the player of everything the fight gave
 them; what died holding a power keeps it.
 
+A kill is a loss of HP like any other. Whatever the creature had left goes
+unblockably and is announced on `AfterCurrentHpChanged` before the death is
+settled, so a necro mastery answers for a pet its own card puts down. A kill
+over a list puts the creatures down one at a time, each death settled before
+the next creature is touched: a Decimillipede segment that dies while another
+of its chain still stands is held on its dead move to reattach, and only the
+last of a chain doomed at once finds the rest already down. A doom kill counts
+its fatal deaths once the whole list is down, reading a creature its death
+took out of the fight as it stood just before it went.
+
 A creature can also leave a fight without dying. An escape takes it off the
 field with the HP it had, detaches its powers without running anything a removal
 would run, and settles no death: nothing counts a kill and no death listener
@@ -2225,6 +2235,14 @@ outside a fight — paying HP to an event, or to a card played at a merchant —
 and the same owed-loss path answers for both. The run's terminal is the
 simulator's answer to `run.finish`, never something a replay forces.
 
+Abandoning a run is the one end a player chooses. The build answers it with a
+forced kill of the player before the recorder takes its final observation, so
+`Simulator::abandon` takes the player's HP to nothing. Every listener the build
+gives that kill answers only inside a combat, and the run's `ABANDONED` result
+is the recording's to report rather than a terminal this engine settles. A run
+abandoned inside a fight would also be lost there, every death listener of the
+fight run; that is refused as unsupported rather than approximated.
+
 Victory is reached when combat against the last required boss finishes. The
 combat's end and victory hooks, health changes, reward bookkeeping, and owed
 turn completion settle before the terminal result is exposed. On Double Boss,
@@ -2378,7 +2396,9 @@ The replay adapter owns record-role interpretation above the simulator:
   `step` judges it;
 - resolve and lifecycle records validate transitions already produced;
 - `state.observe` projects and compares without mutation; and
-- `run.finish` validates output and never forces termination.
+- `run.finish` validates output and never forces termination; a
+  `run.finish ABANDONED` applies the abandonment with `Simulator::abandon`
+  before the final observation is compared.
 
 Multiple observations can refer to one settled input. The adapter remembers
 that settlement and never applies the input twice. Portable import is allowed

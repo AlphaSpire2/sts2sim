@@ -468,6 +468,55 @@ fn a_bodyguard_stands_the_pet_up_on_what_it_summons_for() {
     }
 }
 
+/// Bone shards throw the pet at the whole enemy side, block, and put the pet
+/// down. With no pet standing the card does nothing at all, block included,
+/// which is what a second play — or a replay of the first — meets once the
+/// first has spent the pet. Seed `KCFCP0TAE9`, record 1749, where a hidden
+/// gem's three replays each blocked for nine over a pet already gone.
+#[test]
+fn bone_shards_do_nothing_at_all_without_a_pet() {
+    let mut simulator = crowd(&[
+        ("CARD.BODYGUARD", 0),
+        ("CARD.BONE_SHARDS", 0),
+        ("CARD.BONE_SHARDS", 0),
+    ]);
+    play(&mut simulator, "CARD.BODYGUARD");
+    play(&mut simulator, "CARD.BONE_SHARDS");
+    assert_eq!(hp_of(&simulator, 1), Some(30));
+    assert_eq!(hp_of(&simulator, 2), Some(30));
+    assert_eq!(player(&simulator).block, 9);
+    assert_eq!(pet(&simulator).expect("the corpse stays").current_hp, 0);
+
+    play(&mut simulator, "CARD.BONE_SHARDS");
+    assert_eq!(hp_of(&simulator, 1), Some(30), "no pet to throw");
+    assert_eq!(hp_of(&simulator, 2), Some(30), "no pet to throw");
+    assert_eq!(player(&simulator).block, 9, "and no block either");
+}
+
+/// A sweep that wins the fight still puts the pet down, while the block the
+/// card would have given after it is not given over a won fight. Seed
+/// `KCFCP0TAE9`, record 541.
+#[test]
+fn bone_shards_that_win_the_fight_still_put_the_pet_down() {
+    let mut simulator = built(scenario(
+        &[9],
+        &[("CARD.BODYGUARD", 0), ("CARD.BONE_SHARDS", 0)],
+        &[],
+    ));
+    play(&mut simulator, "CARD.BODYGUARD");
+    play(&mut simulator, "CARD.BONE_SHARDS");
+    assert!(
+        simulator
+            .state()
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.has_ended),
+        "the sweep won the fight"
+    );
+    assert_eq!(pet(&simulator).expect("the corpse stays").current_hp, 0);
+    assert_eq!(player(&simulator).block, 0);
+}
+
 /// A pen nib doubles its owner's tenth attack whoever lands it: a blow the pet
 /// swings for a card of its owner's is doubled like any other. Seed
 /// `XGTTW8TTEQ`, record 1752, where a rattle played on a nib standing at nine

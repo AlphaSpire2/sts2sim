@@ -433,6 +433,28 @@ impl ReplayAdapter {
                 self.resume(record)?;
                 None
             }
+            // The run's end. Nobody chose a victory or a defeat, which the
+            // engine settles for itself, but abandoning the run is the
+            // player's own act, and the build kills the player for it before
+            // the final observation is taken.
+            "run.finish" => {
+                if record
+                    .payload
+                    .pointer("/data/result")
+                    .and_then(Value::as_str)
+                    == Some("ABANDONED")
+                {
+                    self.simulator.abandon().map_err(|error| {
+                        let code = if error.code == ErrorCode::UnsupportedContent {
+                            AdapterErrorCode::UnsupportedContent
+                        } else {
+                            AdapterErrorCode::IllegalAction
+                        };
+                        Self::error(record, code, error.to_string())
+                    })?;
+                }
+                None
+            }
             _ if matches!(
                 role,
                 TimelineRole::Observation

@@ -1323,16 +1323,17 @@ fn the_pet_and_the_pool() -> Vec<CardDefinition> {
             ],
         ))),
         // Bone shards are the pet thrown at everything and then put down for
-        // it: the block lands whether or not the pet was there to throw.
+        // it. Without a pet standing the card does nothing at all, block
+        // included.
         osty_tagged(upgrading(
             card(
                 "CARD.BONE_SHARDS",
                 CardType::Attack,
                 TargetType::AllEnemies,
                 1,
-                vec![osty_sweep_all(9), block(9), kill_the_pet()],
+                bone_shards(9),
             ),
-            vec![osty_sweep_all(12), block(12), kill_the_pet()],
+            bone_shards(12),
         )),
         // A legion of bone summons for every living player, which in a
         // single-player run is one summon.
@@ -1862,6 +1863,25 @@ fn heal_the_pet(amount: i32) -> Command {
         target: CreatureSelector::Pet,
         amount: Amount::Fixed(amount),
     })
+}
+
+/// Bone Shards, played: the pet's sweep, the block and the pet's death. The
+/// build asks once, as the play begins, whether the pet is standing, and runs
+/// all three behind that one answer. Each is asked here on its own instead,
+/// so that a sweep that wins the fight still leaves the block and the kill to
+/// the guards they carry over a won fight, as the build does; a body nested
+/// under one test would stop at the winning blow. A sweep that fells the pet
+/// itself loses the block this way, where the build would still give it.
+fn bone_shards(amount: i32) -> Vec<Command> {
+    vec![
+        osty_sweep_all(amount),
+        Command::When {
+            condition: Condition::PetIsStanding,
+            then: vec![block(amount)],
+            otherwise: Vec::new(),
+        },
+        kill_the_pet(),
+    ]
 }
 
 /// The owner's own pet is put down, where it is still standing.

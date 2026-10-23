@@ -219,6 +219,45 @@ in-combat answer and a listener screen that answer queued. Reproducing it would
 need a potion request that waits on the queue beside the screen rather than an
 action offered at a decision.
 
+## A run abandoned inside a fight is refused
+
+**The build.** Abandoning a run kills every player with a forced kill that no
+death prevention answers. Inside a fight that kill also loses the combat, and
+every listener the fight has for a death or a lost fight runs.
+
+**This simulator.** A `run.finish ABANDONED` outside a fight takes the player's
+HP to nothing, which is the whole of what the build's kill changes there. One
+inside a fight, the fight's end screen included, fails as unsupported content.
+
+**Whether it can reach a conformance claim.** Only through a recording
+abandoned inside a fight, which stops at its `run.finish` with an
+unsupported-content error. Everything it recorded before the abandonment is
+still compared.
+
+**What would change this.** A recording abandoned inside a fight, which would
+pin which of the fight's death and loss listeners the forced kill runs and what
+its final observation shows.
+
+## Bone Shards whose sweep fells the pet give no block
+
+**The build.** Bone Shards asks once, as the play begins, whether the pet is
+standing. With no pet it does nothing at all. With one it runs the sweep, the
+block, and the pet's death behind that one answer, so the block lands even
+where the sweep itself cost the pet its life.
+
+**This simulator.** The sweep, the block, and the kill each ask whether the pet
+is standing as they run, so that a sweep that wins the fight leaves the block
+and the kill to the guards they carry over a won fight. A sweep that fells the
+pet, a retaliation for the pet's own blow say, takes the block with it.
+
+**Whether it can reach a conformance claim.** Only through a Bone Shards sweep
+that leaves its own pet dead, which would diverge on the player's block at the
+play's settled observation.
+
+**What would change this.** A recording of that play, or a body nested under a
+test that runs the rest of itself over a won fight with each command's own
+guard, as a top-level card body does.
+
 ## Not on this list
 
 **A potion offer the belt has no room for is not a divergence.** The build

@@ -474,6 +474,32 @@ fn a_necro_mastery_throws_what_the_pet_loses_at_the_whole_enemy_side() {
     }
 }
 
+/// A kill is a loss of HP like any other: whatever the creature had left is
+/// announced on the health-changed pass before it dies. So a pet put down by
+/// its own card sets its owner's necro mastery off for every point it had.
+/// Seed `Q8C003YSS3`, record 169, where bone shards put down a pet on one HP
+/// and the mastery's point went missing.
+#[test]
+fn a_pet_put_down_by_a_kill_sets_the_necro_mastery_off_for_what_it_had() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[39, 39],
+        powers: &[(0, "POWER.NECRO_MASTERY_POWER", 1, PowerType::Buff)],
+        hand: &[("CARD.BODYGUARD", 0), ("CARD.BONE_SHARDS", 0)],
+        ..Fight::default()
+    });
+    play(&mut simulator, "CARD.BODYGUARD");
+    assert_eq!(pet(&simulator).expect("a pet is standing").current_hp, 5);
+    play(&mut simulator, "CARD.BONE_SHARDS");
+    assert_eq!(pet(&simulator).expect("the corpse stays").current_hp, 0);
+    for slot in [1, 2] {
+        assert_eq!(
+            hp_of(&simulator, slot),
+            Some(39 - 9 - 5),
+            "the sweep, and then the five the pet had left"
+        );
+    }
+}
+
 /// A necro mastery says nothing at all for its owner's own health, which is
 /// the half of the guard asking whether the creature that lost it is a pet.
 #[test]

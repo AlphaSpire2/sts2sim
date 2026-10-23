@@ -8196,6 +8196,22 @@ impl Simulator {
             .is_some_and(|run| !run.owed_purchases.is_empty() || run.owed_removal)
     }
 
+    /// The run abandoned. The build sentences every player to death with a
+    /// forced kill that no death prevention answers. Outside a fight that is
+    /// the player's HP taken to nothing: every listener the build gives that
+    /// kill answers only inside a combat, and the run's end is the recording's
+    /// to say rather than a result this engine settles. A fight abandoned
+    /// where it stands would also be lost, with every death listener of the
+    /// fight run, and is refused rather than approximated.
+    pub fn abandon(&mut self) -> Result<(), EngineError> {
+        if self.state.combat.is_some() {
+            return Err(EngineError::new(ErrorCode::UnsupportedContent)
+                .with_detail("abandon", "a run abandoned inside a combat"));
+        }
+        self.state.run_player.current_hp = 0;
+        Ok(())
+    }
+
     /// The purchase a lord's parasol makes next, where it is the one at this
     /// offer index: the game records each as a purchase of its own, and a
     /// replay steps it as one.
@@ -12042,36 +12058,47 @@ impl Simulator {
                     }
                 }
             }
-            // A kill: whatever the creature had left, it has none, and the death
-            // is settled where the call stands.
+            // A kill: the list goes down one creature at a time, each death
+            // settled before the next creature is touched.
             CreatureCmd::Kill { target } => {
                 for creature in self.resolve_creatures(target.clone(), context)? {
-                    self.creature_mut(creature)?.current_hp = 0;
-                }
-                if self.cleanup_dead(events)? {
-                    return Ok(true);
+                    if self.kill_creature(creature, events)? {
+                        return Ok(true);
+                    }
                 }
             }
             // A doom kill: the same kill, and then one announcement over the
-            // whole list. Count fatal deaths after the whole group is down,
-            // but before cleanup removes their powers and identities.
+            // whole list. Count fatal deaths after the whole group is down. A
+            // creature its death took out of the fight is counted as it stood
+            // just before it went, with its powers and identity still on it.
             CreatureCmd::DoomKill { target } => {
                 let doomed = self.resolve_creatures(target.clone(), context)?;
                 if doomed.is_empty() {
                     return Ok(false);
                 }
+                let mut fatal_as_it_went = BTreeMap::new();
+                let mut ended = false;
                 for creature in &doomed {
-                    self.creature_mut(*creature)?.current_hp = 0;
+                    fatal_as_it_went.insert(*creature, self.death_would_trigger_fatal(*creature));
+                    if self.kill_creature(*creature, events)? {
+                        ended = true;
+                        break;
+                    }
+                }
+                if self.pending_loss {
+                    return Ok(true);
                 }
                 let counted: Vec<CreatureCombatId> = doomed
                     .iter()
                     .copied()
-                    .filter(|id| self.death_would_trigger_fatal(*id))
+                    .filter(|id| {
+                        if self.creature(*id).is_ok() {
+                            self.death_would_trigger_fatal(*id)
+                        } else {
+                            fatal_as_it_went.get(id).copied().unwrap_or(false)
+                        }
+                    })
                     .collect();
-                let ended = self.cleanup_dead(events)?;
-                if self.pending_loss {
-                    return Ok(true);
-                }
                 self.dispatch_hooks(
                     &[crate::HookEvent::AfterDiedToDoom],
                     &HookContext {
@@ -12099,6 +12126,34 @@ impl Simulator {
             }
         }
         Ok(false)
+    }
+
+    /// One creature put down by a kill. Whatever HP it had left is lost
+    /// unblockably and announced on the health-changed pass, as any other loss
+    /// is, and its death is settled before the caller moves on to the next
+    /// creature of its list. A creature a listener has already taken out of
+    /// the fight has nothing left to lose. Says whether the fight is over.
+    fn kill_creature(
+        &mut self,
+        id: CreatureCombatId,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        let Ok(creature) = self.creature_mut(id) else {
+            return Ok(false);
+        };
+        let lost = creature.current_hp;
+        creature.current_hp = 0;
+        if lost > 0 {
+            self.dispatch_hooks(
+                &[crate::HookEvent::AfterCurrentHpChanged],
+                &HookContext {
+                    announced_creature: Some(id),
+                    hp_delta: -lost,
+                    ..HookContext::none()
+                },
+            )?;
+        }
+        self.cleanup_dead(events)
     }
 
     /// Escaping: the creature is taken out of the fight without dying. Its

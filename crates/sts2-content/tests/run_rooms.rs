@@ -613,6 +613,65 @@ fn a_fights_entrance_is_passed_over_when_the_player_acted_during_it() {
     assert_eq!(adapter.fight_entrance_observations(), 0);
 }
 
+/// Abandoning a run is the player's own act, and the build answers it with a
+/// forced kill before the recorder takes its final observation: the run ends
+/// with the player at nothing. Outside a fight that is all there is to it.
+/// A fight abandoned where it stands would be lost as well, every death
+/// listener of it run, and is refused rather than approximated.
+#[test]
+fn an_abandoned_run_ends_with_the_player_at_nothing() {
+    use sts2_replay::{AdapterErrorCode, Record, ReplayAdapter};
+
+    fn record(sequence: u64, kind: &str, payload: serde_json::Value) -> Record {
+        Record {
+            sequence,
+            kind: kind.to_owned(),
+            payload,
+        }
+    }
+    fn walked_to(col: u8) -> ReplayAdapter {
+        let mut adapter = ReplayAdapter::new(generated_run()).verifying_observations();
+        adapter
+            .accept(&record(
+                1,
+                "map.choose",
+                serde_json::json!({ "data": { "col": col, "row": 1 } }),
+            ))
+            .expect("the room is walked into");
+        adapter
+    }
+    let abandoned = record(
+        2,
+        "run.finish",
+        serde_json::json!({ "data": { "result": "ABANDONED" } }),
+    );
+
+    let mut adapter = walked_to(2);
+    let before = sts2_replay::observation::render(adapter.simulator());
+    assert_ne!(before["players"][0]["current_hp"], serde_json::json!(0));
+    adapter.accept(&abandoned).expect("the run is abandoned");
+    let mut expected = before;
+    expected["players"][0]["current_hp"] = serde_json::json!(0);
+    adapter
+        .accept(&record(
+            3,
+            "state.observe",
+            serde_json::json!({ "after": 2, "context": "run.end", "state": expected }),
+        ))
+        .expect("an observation is buffered");
+    adapter
+        .verify_pending_observation()
+        .expect("the run ends with the player at nothing and nothing else changed");
+    assert_eq!(adapter.simulator().state().terminal, None);
+
+    let mut adapter = walked_to(4);
+    assert!(adapter.simulator().state().combat.is_some());
+    let error = adapter
+        .accept(&abandoned)
+        .expect_err("a fight abandoned where it stands is refused");
+    assert_eq!(error.code, AdapterErrorCode::UnsupportedContent);
+}
+
 #[test]
 fn a_held_red_mask_weakens_every_enemy_as_the_first_turn_opens() {
     let mut simulator = generated_run_holding(&["RELIC.RED_MASK"]);
