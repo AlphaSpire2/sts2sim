@@ -75,6 +75,10 @@ pub struct ReplayAdapter {
     dropped_room_entries: usize,
     mid_handover_observations: usize,
     pending_stage: ObservationStage,
+    /// The recorder is between an end turn and the player turn it hands over
+    /// to: the build plays that whole stretch out with no input from the
+    /// player, while this engine settles it as one decision.
+    in_turn_handover: bool,
     fight_entrance_observations: usize,
     /// The proceed that popped a combat room and resumed its parent event.
     parent_resume_action: Option<u64>,
@@ -112,6 +116,7 @@ impl ReplayAdapter {
             dropped_room_entries: 0,
             mid_handover_observations: 0,
             pending_stage: ObservationStage::Settled,
+            in_turn_handover: false,
             fight_entrance_observations: 0,
             parent_resume_action: None,
             parent_exit_record: None,
@@ -617,6 +622,17 @@ impl ReplayAdapter {
         }
     }
 
+    /// Whether the screen this engine has standing is a death listener's
+    /// queued one.
+    fn standing_choice_is_queued(&self) -> bool {
+        self.simulator
+            .state()
+            .combat
+            .as_ref()
+            .and_then(|combat| combat.suspended_choice.as_ref())
+            .is_some_and(|choice| choice.queued)
+    }
+
     fn observation_stage(&self, record: &Record, state: &Value) -> ObservationStage {
         let context = record.payload.pointer("/context").and_then(Value::as_str);
         // A pushed combat exits before Resume pays its parent's rewards and
@@ -636,6 +652,18 @@ impl ReplayAdapter {
         } else if matches!(context, Some("combat.turn.end" | "combat.enemy_turn.start")) {
             // EndTurn settles the whole handover here, while the recorder
             // can still be writing one of its stages when the player acts.
+            ObservationStage::Handover
+        } else if self.in_turn_handover
+            && context == Some("choice.offered")
+            && self.standing_choice_is_queued()
+        {
+            // A death listener's screen asked for during the handover is shown
+            // by the build at once and answered whenever the player clicks,
+            // while this engine puts it to the player at the latest moment the
+            // build allows. The state the build wrote as it asked is a stage
+            // of the handover rather than one this engine settles on. A screen
+            // the build waits for is asked where this engine stands too, and
+            // its snapshot is compared.
             ObservationStage::Handover
         } else if context == Some("room.enter")
             && state.get("combat").is_some_and(|combat| !combat.is_null())
@@ -680,7 +708,24 @@ impl ReplayAdapter {
                 self.pending_stage = self.observation_stage(record, state);
                 self.pending_observation = Some((record.sequence, state.clone()));
             }
+            match record.payload.pointer("/context").and_then(Value::as_str) {
+                Some("combat.turn.end" | "combat.enemy_turn.start") => {
+                    self.in_turn_handover = true;
+                }
+                Some("combat.player_turn.start") => self.in_turn_handover = false,
+                _ => {}
+            }
             return Ok(());
+        }
+        match crate::record_role(&record.kind) {
+            TimelineRole::InitiatingAction => {
+                self.in_turn_handover = record.kind == "combat.end_turn";
+            }
+            TimelineRole::NestedChoice
+            | TimelineRole::Resolve
+            | TimelineRole::Lifecycle
+            | TimelineRole::Observation
+            | TimelineRole::Finish => {}
         }
         if !matches!(
             crate::record_role(&record.kind),

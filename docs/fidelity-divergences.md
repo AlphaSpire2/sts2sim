@@ -142,35 +142,63 @@ silent; nothing the pass runs for any other body differs.
 parked-and-unwaited discipline modelled: a screen banked by the pass and
 answered while the turn start has already run on.
 
-## A death listener's screen outside the player's own action is refused
+## A death listener's screen outside the player's own action is answered as the next play phase opens
 
 **The build.** A death listener that asks the player something is put on the
-player's action queue as an action of its own and nothing waits for it. The
-build's executor runs it once the action ahead of it has finished. Inside the
-player's own turn that is the card, potion, or answer that caused the death.
-During the turn handover, the enemy's turn, or a turn opening, the turn flow is
-not itself an action on that queue, and the executor picks the queued action up
-beside it, wherever the turn flow next stops to wait.
+player's action queue as an action of its own and nothing waits for it.
 
-**This simulator.** A death listener's screen asked for while the player is
-acting is queued and shown behind the action, as the build shows it. One asked
-for anywhere else fails as unsupported content naming the discipline rather
-than as an invariant, and a full step puts the state back. A Gremlin Horn whose
-draw shuffles into a Stratagem as an enemy dies on its own turn, or during the
-end of the player's turn, is the registered content that reaches it.
+- Inside the player's own action, the executor runs it once that action has
+  finished.
+- Anywhere else — the end of the player's turn, the enemy's turn, a turn
+  opening — the turn flow is not an action on that queue. The screen opens at
+  once and the turn is played out behind it: enemies take their moves, and the
+  player's next hand is drawn. The listener's paused work, such as a Gremlin
+  Horn's remaining draw, runs whenever the player answers.
+- The player may answer at any moment until they next act, since cards cannot
+  be played or the turn ended while the screen is up.
+- The game waits for the answer only where the turn flow needs the player's
+  queue: the enemy turn's start waits behind a screen the end of the player's
+  turn queued, and a later listener screen of the player's own turn flow opens
+  behind it.
 
-**Whether it can reach a conformance claim.** Only through a death listener that
-asks outside the player's own action. A recording of one stops at the ask with
-an unsupported-content error and is never replayed past it. A second, narrower
-shape is ordering alone. A player who queues a card or a potion while the
-killing action is still animating has that input run ahead of the death
-listener's queued action, while this simulator, which takes one action at a
-time, shows the screen first. A recording of that would replay the input after
-the answer rather than before it.
+**This simulator.** The answer's timing is not part of the decision sequence,
+so the simulator takes the latest moment the build allows:
 
-**What would change this.** A recording of a death listener asking during the
-enemy's turn or the handover, which would pin where the build's executor runs
-the queued action against the turn flow.
+- A screen asked for outside the player's own action is put to the player as
+  their next play phase opens, after the turn start and its hand draw.
+- It is put earlier where the build waits on it: before the second half of
+  ending the turn, and before a later screen of the player's own turn flow.
+
+The pile screen reads the pile as it is at that moment.
+
+**Whether it can reach a conformance claim.** Only where the moment of the
+answer changes what happens. Usually nothing touches the draw pile or hand
+between the ask and the play phase, and every moment gives the same state. A
+recording diverges, at the next compared state or as a pick the simulator
+does not offer, when the player answered earlier and one of these came between
+the ask and the play phase:
+
+- The next hand draw, which in the build takes cards after the pick and the
+  listener's draw rather than before them.
+- The hand draw emptying the draw pile, which completes the build's open pile
+  screen with nothing picked at that moment.
+- A monster adding cards to the draw pile while the screen is up.
+- For a screen asked for while the player's turn is ending, the end-of-turn
+  step that exhausts ethereal cards and triggers end-of-turn effects in hand,
+  which a fast answer can put the picked card in front of.
+
+A recording made by playback, which holds the answer to the same moment,
+replays without these.
+
+A second, narrower shape is ordering alone. A player who queues a card or a
+potion while the killing action is still animating has that input run ahead of
+the death listener's queued action, while this simulator, which takes one
+action at a time, shows the screen first. A recording of that would replay the
+input after the answer rather than before it.
+
+**What would change this.** Modelling the screen as open from the ask, which
+would need the moment of the player's answer as an input, and an open pile
+screen that completes the moment its pile empties.
 
 ## Three card faces are drawn from the wrong variable
 

@@ -301,6 +301,7 @@ fn a_parked_pass_on_the_pending_list_still_runs() {
         },
         picked: Vec::new(),
         hand_filters: None,
+        queued: false,
     });
     run.next_choice_id = 1;
     // The parked pass: the maw bank answering the sale, snapshotted the way a

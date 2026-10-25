@@ -160,6 +160,7 @@ fn a_brew_beside(standing: Standing) -> Simulator {
             purpose: ChoicePurpose::AddChosenCardsToDeck,
             picked: Vec::new(),
             hand_filters: None,
+            queued: false,
         }),
         pending: std::collections::VecDeque::new(),
         next_choice_id: 1,

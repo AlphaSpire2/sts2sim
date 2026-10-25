@@ -1520,8 +1520,10 @@ impl Simulator {
                 choice.id = fresh(choice.id);
             }
             for effect in &mut combat.queue {
-                if let Effect::HookScreen(screen) = effect {
-                    screen.id = fresh(screen.id);
+                match effect {
+                    Effect::HookScreen(screen) => screen.id = fresh(screen.id),
+                    Effect::StandChoice(choice) => choice.id = fresh(choice.id),
+                    _ => {}
                 }
             }
             for screen in &mut combat.queued_hook_screens {
@@ -2186,7 +2188,8 @@ impl Simulator {
                     if let Some(combat) = self.state.combat.as_mut() {
                         combat.turn_end_is_owed = false;
                     }
-                    victory = self.end_turn(events)? == CombatOutcome::Won;
+                    victory = self.end_turn(events)? == CombatOutcome::Won
+                        || self.settle_what_the_turn_flow_left(events)?;
                 }
                 self.push_checkpoint("action.settled")?;
                 if victory {
@@ -2229,7 +2232,9 @@ impl Simulator {
             // actions finish one: the win check has already stopped the chain,
             // and what is left is the end of the combat.
             Action::EndTurn { .. } => {
-                if self.end_turn(events)? == CombatOutcome::Won {
+                if self.end_turn(events)? == CombatOutcome::Won
+                    || self.settle_what_the_turn_flow_left(events)?
+                {
                     self.finish_combat(events)?;
                 }
             }
@@ -5615,7 +5620,19 @@ impl Simulator {
         // player something here is answered the way one on any later turn is.
         let mut opening = Vec::new();
         let outer = self.suspension_block.take();
-        let result = self.start_turn(&mut opening);
+        let mut result = self.start_turn(&mut opening);
+        // A death listener that asked during the opening is answered as the
+        // first play phase opens. A fight that opening won is left to the next
+        // action's win check, as any other won opening is.
+        if result.is_ok()
+            && self
+                .state
+                .combat
+                .as_ref()
+                .is_some_and(|combat| !combat.queued_hook_screens.is_empty())
+        {
+            result = self.settle_queue(&mut opening).map(|_| ());
+        }
         self.suspension_block = outer;
         result
     }
@@ -7042,6 +7059,7 @@ impl Simulator {
                     purpose: ChoicePurpose::AddChosenCardsToDeck,
                     picked: Vec::new(),
                     hand_filters: None,
+                    queued: false,
                 });
                 finish_room = false;
             }
@@ -7075,6 +7093,7 @@ impl Simulator {
                     purpose: ChoicePurpose::AddChosenCardsToDeck,
                     picked: Vec::new(),
                     hand_filters: None,
+                    queued: false,
                 });
                 finish_room = false;
             }
@@ -9600,13 +9619,18 @@ impl Simulator {
             if self.state.combat.is_none() {
                 return Ok(false);
             }
-            let effect = {
-                let combat = self.combat_mut()?;
-                if combat.suspended_choice.is_some() {
-                    return Ok(false);
+            if self
+                .state
+                .combat
+                .as_ref()
+                .is_some_and(|combat| combat.suspended_choice.is_some())
+            {
+                if self.put_queued_hook_screens_ahead()? {
+                    continue;
                 }
-                combat.queue.pop_front()
-            };
+                return Ok(false);
+            }
+            let effect = self.combat_mut()?.queue.pop_front();
             let ended = if let Some(effect) = effect {
                 self.apply_effect(effect, events)?
             } else {
@@ -9639,7 +9663,7 @@ impl Simulator {
                 let Some(screen) = next else {
                     return Ok(false);
                 };
-                self.open_hook_screen(screen, true, events)?
+                self.open_hook_screen(screen, events)?
             };
             if ended {
                 // A player who went down takes the queue with them: the run is
@@ -9735,6 +9759,7 @@ impl Simulator {
                 // all.
                 Effect::Resume(_)
                 | Effect::HookScreen(_)
+                | Effect::StandChoice(_)
                 | Effect::FinishRelicReward { .. }
                 | Effect::SettlePurchase { .. }
                 | Effect::SettleConveyorGrab { .. }
@@ -10030,7 +10055,17 @@ impl Simulator {
             // A deferred body's screen the queue has reached: it is shown, or
             // settled where nothing has to be asked, and reports a won fight
             // the way any other entry does.
-            Effect::HookScreen(screen) => return self.open_hook_screen(*screen, false, events),
+            Effect::HookScreen(screen) => return self.open_hook_screen(*screen, events),
+            // A screen put back up behind the death listeners' screens shown
+            // ahead of it. Its candidates were read when it was asked for, and
+            // a hand screen reads the hand again as it stands back up, since
+            // the answers ahead of it can have put cards there.
+            Effect::StandChoice(choice) => {
+                self.resume_cursor = 0;
+                self.combat_mut()?.suspended_choice = Some(*choice);
+                self.reread_a_standing_hand_screen()?;
+                return Ok(false);
+            }
             Effect::FinishRelicReward { .. } => {
                 return Err(EngineError::new(ErrorCode::InternalInvariant)
                     .with_detail("combat_effect", "a run relic reward on the combat queue"));
@@ -14396,6 +14431,7 @@ impl Simulator {
                 screen_kind,
                 screen: screen.to_owned(),
                 owed: Vec::new(),
+                queued: false,
             });
         }
         let choice = SuspendedChoice {
@@ -14414,6 +14450,7 @@ impl Simulator {
             hand_filters: (matches!(source, SelectionSource::CombatPile(PileName::Hand))
                 && only.is_none())
             .then(|| filters.to_vec()),
+            queued: false,
         };
         // A screen that comes up outside a combat has no combat queue to suspend
         // onto, so the run's own list carries what is left of the body instead.
@@ -19605,7 +19642,13 @@ impl Simulator {
                 // turn.
                 Step::PhaseOne => self
                     .end_player_turn_phase_one(crate::EndTurnPhaseOneStep::AutoPostPlay, events)?,
+                // The second half waits for every death listener's screen the
+                // first half queued: the build's readiness for the enemy turn
+                // stands behind their actions on the player's queue.
                 Step::PhaseTwo => {
+                    if self.owe_queued_hook_screens_before(Step::PhaseTwo)? {
+                        return Ok(CombatOutcome::Unsettled);
+                    }
                     self.end_player_turn_phase_two(crate::EndTurnPhaseTwoStep::Flush)?;
                     CombatOutcome::Unsettled
                 }
@@ -21957,6 +22000,7 @@ impl Simulator {
                 },
                 picked: Vec::new(),
                 hand_filters: None,
+                queued: false,
             });
         }
         self.emit("reward.claim", BTreeMap::new(), events);
@@ -24306,7 +24350,7 @@ impl Simulator {
             if self.queue_is_held() {
                 self.push_resume(Effect::HookScreen(Box::new(screen)))?;
             } else {
-                self.open_hook_screen(screen, false, &mut events)?;
+                self.open_hook_screen(screen, &mut events)?;
             }
         }
         Ok(())
@@ -24332,7 +24376,8 @@ impl Simulator {
     /// on the combat's queue of hook screens, behind every one asked for
     /// before it, where the build's hook action waits on the action queue.
     fn queue_hook_screen(&mut self) -> Result<(), EngineError> {
-        let screen = self.take_hook_screen()?;
+        let mut screen = self.take_hook_screen()?;
+        screen.queued = true;
         self.combat_mut()?.queued_hook_screens.push_back(screen);
         Ok(())
     }
@@ -24366,22 +24411,114 @@ impl Simulator {
         Ok(screen)
     }
 
-    /// Whether a screen a queued listener asks for now is shown where this
-    /// engine shows one: once the action the player took in their own turn has
-    /// finished. That is a card played, a potion drunk, or a screen answered
-    /// while the player is acting — the build's executor runs the queued action
-    /// straight behind it. Anywhere else, the turn handover, the enemy's turn,
-    /// a turn opening, the build's own turn flow runs beside its executor, and
-    /// where the queued action lands among it is a timing this engine does not
-    /// carry.
-    fn queued_hook_screens_drain_here(&self) -> bool {
+    /// Whether a screen a queued listener asks for now can be carried to the
+    /// point where the build's player answers it: anywhere in a fight in
+    /// progress.
+    ///
+    /// Inside the player's own action the queued action runs as soon as that
+    /// action has finished. Anywhere else — the end of the turn, the enemy's
+    /// turn, a turn opening — the build shows the screen at once and plays the
+    /// turn out behind it, and the player may answer at any moment until they
+    /// next act. This engine takes the latest of those moments, which is the
+    /// one nothing races: the screen is answered as the player's next play
+    /// phase opens, or earlier only where the build itself waits on it.
+    fn queued_hook_screens_carried(&self) -> bool {
+        self.state
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.in_progress && !combat.has_ended)
+    }
+
+    /// Whether the code running now is the player's own turn flow rather than
+    /// an action the player took or the enemy side's turn: the end of the
+    /// player's turn, or a player turn opening.
+    ///
+    /// A listener that asks the player something there is put on the player's
+    /// action queue by the build, behind any death listener's action already
+    /// waiting there, so its screen opens only once theirs are answered. The
+    /// enemy side's attacks ask inline instead, over whatever is standing.
+    fn in_the_players_turn_flow(&self) -> bool {
         self.state.combat.as_ref().is_some_and(|combat| {
-            combat.in_progress
-                && !combat.has_ended
-                && combat.side == CombatSide::Player
-                && combat.player.phase == crate::PlayerTurnPhase::Play
-                && !combat.player_actions_disabled
+            combat.side == CombatSide::Player
+                && (combat.player_actions_disabled
+                    || combat.player.phase != crate::PlayerTurnPhase::Play)
         })
+    }
+
+    /// Puts the death listeners' queued screens ahead of a screen the player's
+    /// own turn flow just put up, when they were asked for before it. The
+    /// standing screen is taken down and put back up once they have been
+    /// answered, where the build's queue reaches the listener that asked for
+    /// it. Returns whether anything was moved.
+    fn put_queued_hook_screens_ahead(&mut self) -> Result<bool, EngineError> {
+        if !self.in_the_players_turn_flow() {
+            return Ok(false);
+        }
+        let combat = self.combat_mut()?;
+        let asked_later = match (
+            combat.suspended_choice.as_ref(),
+            combat.queued_hook_screens.front(),
+        ) {
+            (Some(standing), Some(first)) => standing.id > first.id,
+            _ => false,
+        };
+        if !asked_later {
+            return Ok(false);
+        }
+        let standing = combat
+            .suspended_choice
+            .take()
+            .expect("the standing screen was read just above");
+        combat
+            .queue
+            .push_front(Effect::StandChoice(Box::new(standing)));
+        while let Some(screen) = combat.queued_hook_screens.pop_back() {
+            combat
+                .queue
+                .push_front(Effect::HookScreen(Box::new(screen)));
+        }
+        Ok(true)
+    }
+
+    /// Puts the death listeners' queued screens on the queue in front of the
+    /// handover stage `next`, which waits for them: the build's readiness for
+    /// the enemy turn is an action behind theirs on the player's queue.
+    /// Returns whether anything was queued, in which case the stage is left to
+    /// the queue.
+    fn owe_queued_hook_screens_before(
+        &mut self,
+        next: crate::TurnHandoverStep,
+    ) -> Result<bool, EngineError> {
+        let screens: Vec<SuspendedHookScreen> =
+            self.combat_mut()?.queued_hook_screens.drain(..).collect();
+        if screens.is_empty() {
+            return Ok(false);
+        }
+        self.resume_cursor = 0;
+        for screen in screens {
+            self.push_resume(Effect::HookScreen(Box::new(screen)))?;
+        }
+        self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::TurnHandover(
+            next,
+        ))))?;
+        Ok(true)
+    }
+
+    /// Settles what the player's turn flow left for the queue: the death
+    /// listeners' screens it queued, answered as the play phase opens, and
+    /// anything it put back in front of a standing screen. Returns whether
+    /// the fight was won settling it. A flow that left neither is untouched.
+    fn settle_what_the_turn_flow_left(
+        &mut self,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        let owes = self.state.combat.as_ref().is_some_and(|combat| {
+            !combat.queue.is_empty() || !combat.queued_hook_screens.is_empty()
+        });
+        if !owes || self.pending_loss {
+            return Ok(false);
+        }
+        self.settle_queue(events)
     }
 
     /// Stands a banked screen back up, or settles it where the build's own
@@ -24401,14 +24538,19 @@ impl Simulator {
     fn open_hook_screen(
         &mut self,
         screen: SuspendedHookScreen,
-        queued: bool,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
         // A fight that is over cancels its paused hook actions with it.
         if self.state.combat.is_none() {
             return Ok(false);
         }
-        let over_the_live_pile = queued
+        // The build checks for a win after every action, and a queued screen
+        // is an action of its own: one reached over a fight the action ahead
+        // of it won is cancelled with the combat.
+        if screen.queued && self.combat_is_won()? {
+            return Ok(true);
+        }
+        let over_the_live_pile = screen.queued
             && matches!(screen.source, SelectionSource::CombatPile(_))
             && screen.only.is_none();
         let candidates =
@@ -24452,6 +24594,7 @@ impl Simulator {
                 semantics: screen.semantics,
                 picked: Vec::new(),
                 hand_filters: None,
+                queued: screen.queued,
             };
             self.resume_cursor = 0;
             self.combat_mut()?.suspended_choice = Some(choice);
@@ -24546,19 +24689,17 @@ impl Simulator {
             // A queued site gives each listener its own context too, so an outer
             // block does not reach the bodies here either: what a body that
             // asks leaves behind is queued, and nothing around the pass waits
-            // on it. Where the queue it lands on drains is only carried for an
-            // action the player took in their own turn; anywhere else the build
-            // runs the queued action against a turn still being played out, a
-            // timing this engine does not carry, so a body that asks there
-            // stops with the discipline named.
+            // on it. A fight that is not in progress has no action queue for
+            // it to wait on, so a body that asks there stops with the
+            // discipline named.
             crate::HookSuspension::Queued => {
                 if self.hook_screens_owed.is_none() {
                     self.block_suspension("a queued listener pass outside a dispatch", true)
-                } else if self.queued_hook_screens_drain_here() {
+                } else if self.queued_hook_screens_carried() {
                     self.suspension_block.take()
                 } else {
                     self.block_suspension(
-                        "a listener the build queues outside the player's own action",
+                        "a listener the build queues outside a fight in progress",
                         false,
                     )
                 }
@@ -29942,6 +30083,7 @@ fn stepped_off_the_graph(run: &crate::RunState, destination: crate::MapCoord) ->
 fn banked_screen_id(effect: &Effect) -> Option<ChoiceId> {
     match effect {
         Effect::HookScreen(screen) => Some(screen.id),
+        Effect::StandChoice(choice) => Some(choice.id),
         _ => None,
     }
 }
@@ -30030,6 +30172,7 @@ const fn effect_target(effect: &Effect) -> Option<CreatureCombatId> {
         | Effect::RunRemaining(_)
         | Effect::ResumeHookPass(_)
         | Effect::HookScreen(_)
+        | Effect::StandChoice(_)
         | Effect::FinishRelicReward { .. }
         | Effect::SettlePurchase { .. }
         | Effect::SettleConveyorGrab { .. }

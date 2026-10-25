@@ -273,3 +273,228 @@ fn a_queued_pick_over_a_pile_drawn_down_to_its_minimum_is_still_shown() {
         DecisionContext::CombatPriority { .. }
     ));
 }
+
+/// Poison enough to take the first of two beetles down as the enemy turn
+/// opens, a horn and a stratagem, six defends in hand and four strikes in the
+/// discard, so the hand flushed at the end of the turn is shuffled back in.
+fn poison_death_on_the_enemy_turn() -> Simulator {
+    let mut builder = ScenarioBuilder::new("DEATHQUEUE", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatCardSelection, 0)
+        .relics(&[id("RELIC.GREMLIN_HORN")])
+        .power(0, id("POWER.STRATAGEM_POWER"), 1, PowerType::Buff)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 4, 39, "SHRINKER_MOVE")
+        .power(1, id("POWER.POISON_POWER"), 5, PowerType::Debuff)
+        .enemy(2, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE");
+    for card_id in 0..6 {
+        builder = builder.card(PileName::Hand, card_id, card("CARD.DEFEND_IRONCLAD"), 0);
+    }
+    for card_id in 6..10 {
+        builder = builder.card(PileName::Discard, card_id, card("CARD.STRIKE_IRONCLAD"), 0);
+    }
+    builder
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds")
+}
+
+fn end_turn(simulator: &mut Simulator, turn: u32) {
+    simulator
+        .step(Action::EndTurn { turn })
+        .expect("ending the turn applies");
+}
+
+fn player_turn(simulator: &Simulator) -> u32 {
+    simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight stands")
+        .player
+        .turn
+}
+
+#[test]
+fn a_poison_death_on_the_enemy_turn_is_picked_for_once_the_next_hand_is_drawn() {
+    // Poison takes the first beetle down as the enemy turn opens. The horn
+    // shuffles the discarded hand back in and the stratagem asks; the build
+    // shows that screen at once and plays the enemy turn and the next turn
+    // start out behind it. The answer is taken as the play phase opens: the
+    // hand has been drawn, and the horn's energy was spent by the reset.
+    let mut simulator = poison_death_on_the_enemy_turn();
+    end_turn(&mut simulator, 1);
+
+    let DecisionContext::ChooseCards { candidates, .. } = simulator.decision().clone() else {
+        panic!("the stratagem asks: {:?}", simulator.decision());
+    };
+    assert_eq!(player_turn(&simulator), 2);
+    assert_eq!(
+        pile(&simulator, PileName::Hand).len(),
+        5,
+        "the hand was drawn first"
+    );
+    assert_eq!(candidates.len(), 5, "over the ten shuffled, less the hand");
+    assert_eq!(
+        energy(&simulator),
+        3,
+        "the horn's energy went with the reset"
+    );
+
+    pick_first(&mut simulator);
+    assert_eq!(
+        pile(&simulator, PileName::Hand).len(),
+        7,
+        "the pick, then the horn's draw"
+    );
+    assert_eq!(pile(&simulator, PileName::Draw).len(), 3);
+    assert!(matches!(
+        simulator.decision(),
+        DecisionContext::CombatPriority { .. }
+    ));
+}
+
+#[test]
+fn an_orb_kill_at_the_end_of_the_turn_is_picked_for_before_the_hand_is_flushed() {
+    // A lightning orb's passive takes a beetle down while the player's turn is
+    // ending. The build's enemy turn waits behind the stratagem's queued pick,
+    // so it is answered with the turn still the player's; the picked card and
+    // the horn's draw then go out with the hand at the flush.
+    let mut builder = ScenarioBuilder::new("DEATHQUEUE", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .played_as(id("CHARACTER.DEFECT"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatCardSelection, 0)
+        .relics(&[id("RELIC.GREMLIN_HORN")])
+        .power(0, id("POWER.STRATAGEM_POWER"), 1, PowerType::Buff)
+        .orb_slots(1)
+        .orb(id("ORB.LIGHTNING_ORB"))
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 3, 39, "SHRINKER_MOVE")
+        .enemy(2, id("MONSTER.SHRINKER_BEETLE"), 3, 39, "SHRINKER_MOVE")
+        .card(PileName::Hand, 0, card("CARD.DEFEND_IRONCLAD"), 0)
+        .card(PileName::Hand, 1, card("CARD.DEFEND_IRONCLAD"), 0);
+    for card_id in 2..10 {
+        builder = builder.card(PileName::Discard, card_id, card("CARD.STRIKE_IRONCLAD"), 0);
+    }
+    let mut simulator = builder
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator, 1);
+
+    let DecisionContext::ChooseCards { candidates, .. } = simulator.decision().clone() else {
+        panic!("the stratagem asks: {:?}", simulator.decision());
+    };
+    assert_eq!(player_turn(&simulator), 1, "the enemy turn has not started");
+    assert_eq!(candidates.len(), 8, "over the shuffled discard");
+    assert_eq!(pile(&simulator, PileName::Hand).len(), 2);
+
+    pick_first(&mut simulator);
+    // The pick and the horn's card joined the two defends and were flushed
+    // with them; the next hand comes off the six left in the pile.
+    assert_eq!(player_turn(&simulator), 2);
+    assert_eq!(pile(&simulator, PileName::Hand).len(), 5);
+    assert_eq!(pile(&simulator, PileName::Draw).len(), 1);
+    assert_eq!(pile(&simulator, PileName::Discard).len(), 4);
+    assert!(matches!(
+        simulator.decision(),
+        DecisionContext::CombatPriority { .. }
+    ));
+}
+
+fn observe(
+    sequence: u64,
+    after: u64,
+    context: &str,
+    state: &serde_json::Value,
+) -> sts2_replay::Record {
+    sts2_replay::Record {
+        sequence,
+        kind: "state.observe".into(),
+        payload: serde_json::json!({
+            "after": after,
+            "context": context,
+            "state": state,
+            "projection_version": 1,
+            "digest": sts2_replay::projection_digest(state).unwrap(),
+        }),
+    }
+}
+
+/// A recording of the poison death answered during the enemy turn, the way a
+/// player usually answers it: the end turn, the snapshot the recorder writes
+/// as the stratagem asks, and the answer. `context` names that snapshot.
+fn replay_an_answer_given_during_the_enemy_turn(
+    context: &str,
+) -> (
+    sts2_replay::ReplayAdapter,
+    Result<(), sts2_replay::AdapterError>,
+) {
+    let mut adapter =
+        sts2_replay::ReplayAdapter::new(poison_death_on_the_enemy_turn()).verifying_observations();
+    // The snapshot is taken before the hand is drawn, so it is not the state
+    // this engine settles the end turn on.
+    let mut asked = sts2_replay::observation::render(adapter.simulator());
+    asked["players"][0]["gold"] = serde_json::json!(4_321);
+    adapter
+        .accept(&sts2_replay::Record {
+            sequence: 1,
+            kind: "combat.end_turn".into(),
+            payload: serde_json::json!({"data": {"turn": 1}}),
+        })
+        .unwrap();
+    adapter
+        .accept(&observe(2, 1, "combat.turn.end", &asked))
+        .unwrap();
+    adapter
+        .accept(&observe(3, 1, "combat.enemy_turn.start", &asked))
+        .unwrap();
+    adapter.accept(&observe(4, 1, context, &asked)).unwrap();
+    let DecisionContext::ChooseCards { candidates, .. } = adapter.simulator().decision().clone()
+    else {
+        panic!("the stratagem asks: {:?}", adapter.simulator().decision());
+    };
+    let picked = &candidates[0];
+    let answer = sts2_replay::Record {
+        sequence: 5,
+        kind: "choice.cards".into(),
+        payload: serde_json::json!({"data": {
+            "choice_type": "combat_card",
+            "cards": [{
+                "combat_card_index": picked.card_id.get(),
+                "fingerprint": serde_json::to_value(&picked.fingerprint).unwrap(),
+            }],
+        }}),
+    };
+    let result = adapter.accept(&answer).map(|_| ());
+    (adapter, result)
+}
+
+#[test]
+fn a_recorded_answer_during_the_enemy_turn_replays_past_the_snapshot_taken_as_it_asked() {
+    let (adapter, result) = replay_an_answer_given_during_the_enemy_turn("choice.offered");
+    result.expect("the snapshot taken as the stratagem asked is a stage of the handover");
+    assert_eq!(adapter.compared_observations(), 0);
+    assert_eq!(adapter.mid_handover_observations(), 1);
+    assert_eq!(
+        adapter
+            .simulator()
+            .state()
+            .combat
+            .as_ref()
+            .unwrap()
+            .player
+            .piles
+            .hand
+            .len(),
+        7,
+        "the answer was applied: the pick, then the horn's draw"
+    );
+
+    // The same snapshot written as a settled state is compared, and differs.
+    let (_, settled) = replay_an_answer_given_during_the_enemy_turn("action.settled");
+    let error = settled.expect_err("a settled snapshot is compared");
+    assert_eq!(error.code, sts2_replay::AdapterErrorCode::StateDivergence);
+}

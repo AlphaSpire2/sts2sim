@@ -4267,6 +4267,12 @@ pub struct SuspendedHookScreen {
     /// What the paused listener still owes once the answer lands, in resume
     /// order.
     pub owed: Vec<Effect>,
+    /// Whether the screen was asked for by a death listener, which the build
+    /// queues as an action of its own rather than joining. Such a screen is
+    /// cancelled if the fight has been won by the time it is reached, and a
+    /// pile screen among them stands over whatever is left of its pile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
 }
 
 /// One entry of the combat's effect queue.
@@ -4319,6 +4325,12 @@ pub enum Effect {
     /// action queue. The pass that deferred it has already run on past it;
     /// opening it is what waiting for the pass waits for.
     HookScreen(Box<SuspendedHookScreen>),
+    /// A screen the player's own turn flow put up while death listeners'
+    /// screens asked for before it were still queued. The build shows the
+    /// queued ones first, because the listener that asked for this one waits
+    /// behind them on the action queue, so this one is put back up once they
+    /// have been answered.
+    StandChoice(Box<SuspendedChoice>),
     /// The rest of a purchase behind a screen the purchase itself opened: the
     /// purchase is finished — a relic's obtain effect and any screen it puts
     /// up included — before the shelf is cleared or restocked and the sale
@@ -4891,6 +4903,11 @@ pub struct SuspendedChoice {
     /// keeps one.
     #[serde(default)]
     pub hand_filters: Option<Vec<crate::CardFilter>>,
+    /// Whether the screen is a death listener's, queued by the build as an
+    /// action of its own and put to the player at the latest moment the build
+    /// allows rather than where it was asked for.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub queued: bool,
 }
 
 /// One extra line on a card reward screen: a button that is not a card, and

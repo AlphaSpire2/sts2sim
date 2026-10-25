@@ -544,12 +544,35 @@ and what it owed is never run. Whether to ask at all is settled when the body
 asks, as the game's screen call settles it, so a queued pile screen is not
 answered on its own when it opens: it re-reads the pile, settles empty only if
 nothing in the pile qualifies, and otherwise stands, asking for no more cards
-than it shows. The queue drains where this engine runs it only for an action
-the player took in their own turn — a card, a potion, or an answer while the
-player is acting. A death listener that asks anywhere else fails as unsupported
-content naming the discipline, which is a listed divergence. A Gremlin Horn's
-draw shuffling into a Stratagem is the registered content that reaches the
-discipline.
+than it shows.
+
+Where the queue drains depends on what was running when the body asked:
+
+- **Inside the player's own action** — a card, a potion, or an answer while the
+  player is acting — the game's executor is busy with that action, and the
+  queued screen is shown as soon as it finishes.
+- **Anywhere else in a fight** — the end of the player's turn, the enemy's
+  turn, a turn opening — the game shows the screen at once and plays the turn
+  out behind it. The player may answer at any moment until they next act, and
+  the answer's timing is not part of the decision sequence. This engine takes
+  the latest of those moments: the screen is put to the player as their next
+  play phase opens, after the turn start and its hand draw.
+
+The game waits on a queued screen earlier in two places, and the engine drains
+it there:
+
+- The second half of ending the turn waits for every screen the first half
+  queued, because the game's readiness for the enemy turn is an action behind
+  them on the player's queue.
+- A screen the player's own turn flow opens later, such as a turn setup
+  listener's, waits behind them for the same reason. That screen is taken down
+  and put back up once they are answered.
+
+The enemy side's attacks ask inline instead, over whatever is standing, so a
+screen an attack opens is answered where it stands. A body that asks before a
+fight is in progress fails as unsupported content naming the discipline. A
+Gremlin Horn's draw shuffling into a Stratagem is the registered content that
+reaches the discipline.
 
 Outside a combat there is no queue to defer into, so what is left of an
 out-of-combat body waits on the run in the same shape a combat's queue holds,

@@ -14,10 +14,10 @@ use sts2_core::ModelId;
 use sts2_engine::{
     Action, Amount, CardCmd, CardDefinition, CardFilter, CardFingerprint, CardRarity,
     CardSelectCmd, CardSelector, CardType, Command, ContentRegistry, CreatureCmd, CreatureSelector,
-    DamageCmd, DecisionContext, ErrorCode, HookCondition, HookEvent, Intent, ModifierHook,
-    MonsterDefinition, MonsterMove, MonsterState, MoveIntent, PileName, PowerDefinition,
-    PowerInstanceType, PowerStackType, PowerType, ProjectionScope, RelicCmd, RelicDefinition,
-    RelicRarity, ScenarioBuilder, SelectorPrefs, Simulator, TargetType, ValueProps,
+    DamageCmd, DecisionContext, HookCondition, HookEvent, Intent, ModifierHook, MonsterDefinition,
+    MonsterMove, MonsterState, MoveIntent, PileName, PowerDefinition, PowerInstanceType,
+    PowerStackType, PowerType, ProjectionScope, RelicCmd, RelicDefinition, RelicRarity,
+    ScenarioBuilder, SelectorPrefs, Simulator, TargetType, ValueProps,
 };
 
 const SEED: &str = "QUEUEDHOOKS";
@@ -241,6 +241,33 @@ fn registry() -> Arc<ContentRegistry> {
             RelicCmd::ModifyListeningCounter(Amount::Fixed(1)),
         )])]),
     ));
+    // A listener that sweeps every opponent as its owner's turn ends, which
+    // is inside the first half of ending the player's turn.
+    registry.add_power(power(
+        "POWER.TURN_END_SWEEPER",
+        vec![
+            ModifierHook::every_turn(
+                HookEvent::BeforeSideTurnEnd,
+                vec![hit(10, CreatureSelector::AllOpponents)],
+            )
+            .when(HookCondition::OwnerIsParticipant),
+        ],
+    ));
+    // A listener that asks over the hand as the player's turn is set up.
+    registry.add_power(power(
+        "POWER.TURN_START_ASKER",
+        vec![ModifierHook::every_turn(
+            HookEvent::AfterPlayerTurnStart,
+            vec![Command::CardSelect(CardSelectCmd::FromHand {
+                semantics: sts2_engine::ChoiceSemantics::default(),
+                maximum: None,
+                exact_count: None,
+                prefs: SelectorPrefs::exactly(1),
+                filter: CardFilter::Any,
+                then: Vec::new(),
+            })],
+        )],
+    ));
     let wait = |model: &str, commands: Vec<Command>| MonsterDefinition {
         model_id: id(model),
         min_initial_hp: 40,
@@ -264,6 +291,11 @@ fn registry() -> Arc<ContentRegistry> {
             amount: Amount::Fixed(100),
             props: ValueProps::UNPOWERED,
         })],
+    ));
+    // A monster that hits hard enough to put the player down.
+    registry.add_monster(wait(
+        "MONSTER.CRUSHER",
+        vec![hit(100, CreatureSelector::AllOpponents)],
     ));
     Arc::new(registry)
 }
@@ -529,32 +561,269 @@ fn a_fight_won_behind_a_queued_screen_cancels_the_screens_still_waiting() {
     assert_eq!(counter, 1, "only the second death's body ran");
 }
 
-#[test]
-fn a_death_listeners_screen_outside_the_players_own_action_is_refused() {
-    // A monster that goes down on its own turn: the build queues the asker's
-    // action against an enemy turn that is still being played out, a timing
-    // this engine does not carry. The stop names the discipline rather than
-    // failing as an invariant, and the full step puts everything back.
-    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.TEST"))
+/// A monster that goes down on its own turn beside a dummy, eight fillers in
+/// the draw pile, and nothing in hand.
+fn enemy_turn_death() -> ScenarioBuilder {
+    let mut builder = ScenarioBuilder::new(SEED, id("ENCOUNTER.TEST"))
         .player_hp(60, 80)
         .enemy(1, id("MONSTER.SELF_DESTRUCT"), 5, 40, "WAIT")
-        .enemy(2, id("MONSTER.DUMMY"), 40, 40, "WAIT")
+        .enemy(2, id("MONSTER.DUMMY"), 40, 40, "WAIT");
+    for card_id in 2..10 {
+        builder = builder.card(PileName::Draw, card_id, fingerprint("CARD.FILLER"), 0);
+    }
+    builder
+}
+
+fn standing_is_queued(simulator: &Simulator) -> bool {
+    simulator
+        .state()
+        .combat
+        .as_ref()
+        .and_then(|combat| combat.suspended_choice.as_ref())
+        .is_some_and(|choice| choice.queued)
+}
+
+fn phase(simulator: &Simulator) -> sts2_engine::PlayerTurnPhase {
+    simulator.state().combat.as_ref().unwrap().player.phase
+}
+
+fn turn(simulator: &Simulator) -> u32 {
+    simulator.state().combat.as_ref().unwrap().player.turn
+}
+
+#[test]
+fn a_death_listeners_screen_on_the_enemy_turn_is_answered_as_the_play_phase_opens() {
+    // The build shows the screen at once and plays the enemy turn and the
+    // player's turn start out behind it; the player may answer until they next
+    // act. The answer is taken at the latest of those moments: the hand has
+    // been drawn, and the screen offers what the draw left in the pile.
+    let mut simulator = enemy_turn_death()
         .power(0, id("POWER.DEATH_ASKER_A"), 1, PowerType::Buff)
-        .card(PileName::Draw, 2, fingerprint("CARD.FILLER"), 0)
-        .card(PileName::Draw, 3, fingerprint("CARD.FILLER"), 0)
-        .card(PileName::Draw, 4, fingerprint("CARD.FILLER"), 0)
-        .card(PileName::Draw, 5, fingerprint("CARD.FILLER"), 0)
-        .card(PileName::Draw, 6, fingerprint("CARD.FILLER"), 0)
-        .card(PileName::Draw, 7, fingerprint("CARD.FILLER"), 0)
-        .card(PileName::Draw, 8, fingerprint("CARD.FILLER"), 0)
         .build(registry())
         .unwrap();
-    let before = simulator.state_key().unwrap();
-    let error = simulator.step(Action::EndTurn { turn: 1 }).unwrap_err();
-    assert_eq!(error.code, ErrorCode::UnsupportedContent);
+    simulator.step(Action::EndTurn { turn: 1 }).unwrap();
+    let DecisionContext::ChooseCards { candidates, .. } = simulator.decision().clone() else {
+        panic!("the queued screen is up: {:?}", simulator.decision());
+    };
+    assert_eq!(turn(&simulator), 2);
+    assert_eq!(phase(&simulator), sts2_engine::PlayerTurnPhase::Play);
     assert_eq!(
-        error.details.get("suspension_blocked_by").unwrap(),
-        "a listener the build queues outside the player's own action"
+        pile(&simulator, PileName::Hand).len(),
+        5,
+        "the hand was drawn first"
     );
-    assert_eq!(simulator.state_key().unwrap(), before);
+    assert_eq!(candidates.len(), 3, "over what the hand draw left");
+    assert_eq!(queued(&simulator), 0);
+    assert!(standing_is_queued(&simulator), "a death listener's screen");
+
+    simulator.step(pick_first(&simulator)).unwrap();
+    assert_eq!(
+        block_of(&simulator),
+        3,
+        "the asker's body ran once, after the answer"
+    );
+    assert_eq!(pile(&simulator, PileName::Draw).len(), 2);
+    assert!(matches!(
+        simulator.decision(),
+        DecisionContext::CombatPriority { .. }
+    ));
+}
+
+#[test]
+fn a_death_in_the_first_half_of_ending_the_turn_is_answered_before_the_enemy_turn() {
+    // The build's readiness for the enemy turn waits behind the death
+    // listener's action on the player's queue, so the screen is answered with
+    // the player's turn still ending.
+    let mut builder = ScenarioBuilder::new(SEED, id("ENCOUNTER.TEST"))
+        .player_hp(60, 80)
+        .enemy(1, id("MONSTER.DUMMY"), 5, 40, "WAIT")
+        .enemy(2, id("MONSTER.DUMMY"), 40, 40, "WAIT")
+        .power(0, id("POWER.TURN_END_SWEEPER"), 1, PowerType::Buff)
+        .power(0, id("POWER.DEATH_ASKER_A"), 1, PowerType::Buff);
+    for card_id in 2..10 {
+        builder = builder.card(PileName::Draw, card_id, fingerprint("CARD.FILLER"), 0);
+    }
+    let mut simulator = builder.build(registry()).unwrap();
+    simulator.step(Action::EndTurn { turn: 1 }).unwrap();
+    let DecisionContext::ChooseCards { candidates, .. } = simulator.decision().clone() else {
+        panic!("the queued screen is up: {:?}", simulator.decision());
+    };
+    assert_eq!(turn(&simulator), 1, "the enemy turn has not started");
+    assert_eq!(
+        simulator.state().combat.as_ref().unwrap().side,
+        sts2_engine::CombatSide::Player
+    );
+    assert_eq!(candidates.len(), 8);
+
+    simulator.step(pick_first(&simulator)).unwrap();
+    assert_eq!(turn(&simulator), 2, "the answer let the turn end run out");
+    assert_eq!(pile(&simulator, PileName::Exhaust), vec!["CARD.FILLER"]);
+    assert!(matches!(
+        simulator.decision(),
+        DecisionContext::CombatPriority { .. }
+    ));
+}
+
+#[test]
+fn a_turn_start_screen_waits_behind_a_death_listeners_screen() {
+    // The turn setup's listener is put on the player's action queue behind the
+    // death listener's action, so the death listener's screen is answered
+    // first, with the setup still waiting.
+    let mut simulator = enemy_turn_death()
+        .power(0, id("POWER.DEATH_ASKER_A"), 1, PowerType::Buff)
+        .power(0, id("POWER.TURN_START_ASKER"), 1, PowerType::Buff)
+        .build(registry())
+        .unwrap();
+    simulator.step(Action::EndTurn { turn: 1 }).unwrap();
+    let DecisionContext::ChooseCards {
+        choice_id, screen, ..
+    } = simulator.decision().clone()
+    else {
+        panic!("a screen is up: {:?}", simulator.decision());
+    };
+    assert_eq!(
+        screen,
+        sts2_engine::ChoiceScreen::CombatPile,
+        "the death listener's"
+    );
+    assert_eq!(phase(&simulator), sts2_engine::PlayerTurnPhase::Start);
+    let first = choice_id.get();
+
+    simulator.step(pick_first(&simulator)).unwrap();
+    let DecisionContext::ChooseCards {
+        choice_id, screen, ..
+    } = simulator.decision().clone()
+    else {
+        panic!("the setup's screen follows: {:?}", simulator.decision());
+    };
+    assert_eq!(screen, sts2_engine::ChoiceScreen::Hand);
+    assert!(
+        choice_id.get() > first,
+        "asked for after the death listener's"
+    );
+    assert!(!standing_is_queued(&simulator), "the setup's own screen");
+
+    simulator.step(pick_first(&simulator)).unwrap();
+    assert_eq!(phase(&simulator), sts2_engine::PlayerTurnPhase::Play);
+    assert!(matches!(
+        simulator.decision(),
+        DecisionContext::CombatPriority { .. }
+    ));
+}
+
+#[test]
+fn a_fight_won_on_the_enemy_turn_cancels_a_queued_death_listeners_screen() {
+    // Both monsters go down on their own turn. The first death's screen is
+    // queued; at the second the fight is already ending, so its screen hands
+    // nothing over and its body runs on. The win then cancels the queued one.
+    let mut builder = ScenarioBuilder::new(SEED, id("ENCOUNTER.TEST"))
+        .player_hp(60, 80)
+        .enemy(1, id("MONSTER.SELF_DESTRUCT"), 5, 40, "WAIT")
+        .enemy(2, id("MONSTER.SELF_DESTRUCT"), 5, 40, "WAIT")
+        .relics(&[id("RELIC.DEATH_COUNTER")]);
+    for card_id in 2..10 {
+        builder = builder.card(PileName::Draw, card_id, fingerprint("CARD.FILLER"), 0);
+    }
+    let mut simulator = builder.build(registry()).unwrap();
+    simulator.step(Action::EndTurn { turn: 1 }).unwrap();
+    assert!(
+        !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
+        "nothing is asked over a won fight: {:?}",
+        simulator.decision()
+    );
+    assert_eq!(queued(&simulator), 0);
+    let counter = simulator
+        .state()
+        .run_player
+        .relics
+        .iter()
+        .find(|relic| relic.model_id == id("RELIC.DEATH_COUNTER"))
+        .unwrap()
+        .counter;
+    assert_eq!(counter, 1, "only the second death's body ran");
+}
+
+#[test]
+fn the_player_going_down_with_a_death_listeners_screen_queued_loses_the_run() {
+    let mut builder = ScenarioBuilder::new(SEED, id("ENCOUNTER.TEST"))
+        .player_hp(60, 80)
+        .enemy(1, id("MONSTER.SELF_DESTRUCT"), 5, 40, "WAIT")
+        .enemy(2, id("MONSTER.CRUSHER"), 40, 40, "WAIT")
+        .power(0, id("POWER.DEATH_ASKER_A"), 1, PowerType::Buff);
+    for card_id in 2..10 {
+        builder = builder.card(PileName::Draw, card_id, fingerprint("CARD.FILLER"), 0);
+    }
+    let mut simulator = builder.build(registry()).unwrap();
+    simulator.step(Action::EndTurn { turn: 1 }).unwrap();
+    assert_eq!(
+        simulator.state().terminal,
+        Some(sts2_engine::RunResult::Defeat)
+    );
+    assert_eq!(queued(&simulator), 0);
+}
+
+fn two_askers_on_the_enemy_turn() -> Simulator {
+    let mut simulator = enemy_turn_death()
+        .power(0, id("POWER.DEATH_ASKER_A"), 1, PowerType::Buff)
+        .power(0, id("POWER.DEATH_ASKER_B"), 1, PowerType::Buff)
+        .build(registry())
+        .unwrap();
+    simulator.step(Action::EndTurn { turn: 1 }).unwrap();
+    assert_eq!(queued(&simulator), 1, "the second waits behind the first");
+    simulator
+}
+
+#[test]
+fn screens_queued_on_the_enemy_turn_survive_a_snapshot_and_the_portable_boundary() {
+    let simulator = two_askers_on_the_enemy_turn();
+    let snapshot = simulator.snapshot();
+    let mut restored = simulator.clone();
+    restored.step(pick_first(&restored)).unwrap();
+    restored.restore(&snapshot).unwrap();
+    assert_eq!(
+        restored.state_key().unwrap(),
+        simulator.state_key().unwrap()
+    );
+
+    let portable = simulator.project(ProjectionScope::CombatCore).unwrap();
+    let mut imported = Simulator::from_portable_state(portable, registry()).unwrap();
+    assert_eq!(imported.state().combat, simulator.state().combat);
+    assert_eq!(imported.legal_actions(), simulator.legal_actions());
+
+    let mut original = simulator;
+    for _ in 0..2 {
+        let action = pick_first(&original);
+        let first = original.step(action.clone()).unwrap();
+        let second = restored.step(action.clone()).unwrap();
+        let third = imported.step(action).unwrap();
+        assert_eq!(first.state_key, second.state_key);
+        assert_eq!(first.next_decision, third.next_decision);
+        assert_eq!(original.state().combat, imported.state().combat);
+    }
+    assert_eq!(block_of(&original), 3 + 5);
+}
+
+#[test]
+fn quiet_and_full_stepping_agree_over_screens_queued_on_the_enemy_turn() {
+    let mut full = enemy_turn_death()
+        .power(0, id("POWER.DEATH_ASKER_A"), 1, PowerType::Buff)
+        .power(0, id("POWER.DEATH_ASKER_B"), 1, PowerType::Buff)
+        .build(registry())
+        .unwrap();
+    let mut quiet = full.clone();
+    for _ in 0..3 {
+        let action = if matches!(full.decision(), DecisionContext::ChooseCards { .. }) {
+            pick_first(&full)
+        } else {
+            Action::EndTurn { turn: 1 }
+        };
+        full.step(action.clone()).unwrap();
+        quiet.step_quietly(&action).unwrap();
+        assert_eq!(full.state_key().unwrap(), quiet.state_key().unwrap());
+        assert_eq!(full.legal_actions(), quiet.legal_actions());
+    }
+    assert!(matches!(
+        full.decision(),
+        DecisionContext::CombatPriority { .. }
+    ));
 }
