@@ -7,6 +7,7 @@ mod ascension;
 mod belief;
 mod choice_semantics;
 mod command;
+mod key_hash;
 mod model;
 mod netsort;
 mod run;

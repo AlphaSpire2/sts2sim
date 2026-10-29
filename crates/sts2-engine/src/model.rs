@@ -6386,7 +6386,7 @@ impl EngineError {
         self
     }
 
-    pub(crate) fn serialization(error: serde_json::Error) -> Self {
+    pub(crate) fn serialization(error: impl Error + Send + Sync + 'static) -> Self {
         Self {
             code: ErrorCode::InternalInvariant,
             decision: None,

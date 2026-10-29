@@ -761,3 +761,76 @@ fn the_visible_history_stays_bounded_and_the_digest_tells_pasts_apart() {
         "a past that differed only in folded entries still reads different"
     );
 }
+
+/// The key writes its view as compact bytes rather than JSON; it must still
+/// tell apart exactly the views JSON told apart. Seeded walks of every
+/// character, with a few hidden-state samples at each fight decision for
+/// views that repeat, are keyed both ways, and the two keys must stand in
+/// one-to-one correspondence.
+#[test]
+fn the_compact_key_separates_exactly_what_the_json_view_does() {
+    use std::collections::HashMap;
+    use sts2_engine::{BeliefState, ObservationKey};
+
+    let preset = sts2_core::UnlockPresetManifest::pinned().unwrap();
+    let mut by_key: HashMap<ObservationKey, [u8; 32]> = HashMap::new();
+    let mut by_json: HashMap<[u8; 32], ObservationKey> = HashMap::new();
+    let mut keyed = 0_usize;
+    let mut check = |simulator: &Simulator| {
+        let key = simulator.observation_key().unwrap();
+        let json = simulator.observation_key_json_digest().unwrap();
+        assert_eq!(
+            *by_key.entry(key).or_insert(json),
+            json,
+            "one key, two views"
+        );
+        assert_eq!(
+            *by_json.entry(json).or_insert(key),
+            key,
+            "one view, two keys"
+        );
+        keyed += 1;
+    };
+    for (character, seed) in [
+        ("CHARACTER.IRONCLAD", "NLD6VZXP94"),
+        ("CHARACTER.SILENT", "KEYS3AB5CD"),
+        ("CHARACTER.DEFECT", "Q7M2XK4PLA"),
+        ("CHARACTER.REGENT", "B8TZ5R1HNW"),
+        ("CHARACTER.NECROBINDER", "W3C9D6FJ2E"),
+    ] {
+        let character = character.parse().unwrap();
+        let mut simulator =
+            sts2_content::standard_run_on_preset_at(seed, &character, &preset, 0).unwrap();
+        // A fixed walk that does not always take the first action, so the
+        // views cover more than one line of play.
+        let mut pick = 0x9E37_79B9_u64;
+        for step in 0..150 {
+            check(&simulator);
+            if simulator.state().combat.is_some()
+                && step % 3 == 0
+                && let Ok(belief) = BeliefState::from_simulator(&simulator)
+            {
+                for rollout in 0..3 {
+                    check(&belief.sample(11, rollout).unwrap());
+                }
+            }
+            if simulator.state().terminal.is_some() {
+                break;
+            }
+            let legal = simulator.legal_actions();
+            pick = pick.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let action = legal
+                .iter()
+                .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+                .filter(|_| pick % 2 == 0)
+                .unwrap_or(&legal[(pick >> 33) as usize % legal.len()])
+                .clone();
+            simulator.step_quietly(&action).unwrap();
+        }
+    }
+    assert!(by_key.len() > 200, "the walks reach {} views", by_key.len());
+    assert!(
+        keyed > by_key.len(),
+        "some views repeat, so equality is checked too"
+    );
+}

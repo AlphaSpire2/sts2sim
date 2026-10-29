@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The move an illusion holds while it is dead and waiting to come back.
 const REVIVE_MOVE: &str = "REVIVE_MOVE";
@@ -31,6 +31,7 @@ enum HpLossPhase {
 const UNSET_MOVE: &str = "UNSET_MOVE";
 use std::sync::{Arc, LazyLock};
 
+use rustc_hash::FxHashMap;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use sts2_core::{CardInstanceId, ChoiceId, CreatureCombatId, ModelId, RewardSetId};
@@ -79,18 +80,21 @@ struct RegisteredPower {
 
 /// Every definition the engine reaches for while a fight runs is read by
 /// model id, many times per step: the listener walk asks for every card in
-/// every pile at every event. Those tables are hashed. Nothing reads them in
-/// order — what wants a sorted view sorts what it collects — and the tables
-/// that name the run's content in a declared order stay B-trees.
+/// every pile at every event. Those tables are hashed, with `FxHashMap`
+/// rather than the standard library's default hasher: the keys are the
+/// build's own model ids, so there is no adversary to defend against, and
+/// these lookups sit on every listener walk. Nothing reads them in order —
+/// what wants a sorted view sorts what it collects — and the tables that
+/// name the run's content in a declared order stay B-trees.
 #[derive(Clone, Debug, Default)]
 pub struct ContentRegistry {
-    cards: HashMap<ModelId, CardDefinition>,
-    monsters: HashMap<ModelId, MonsterDefinition>,
-    powers: HashMap<ModelId, RegisteredPower>,
-    relics: HashMap<ModelId, crate::RelicDefinition>,
-    potions: HashMap<ModelId, crate::PotionDefinition>,
-    enchantments: HashMap<ModelId, crate::EnchantmentDefinition>,
-    orbs: HashMap<ModelId, crate::OrbDefinition>,
+    cards: FxHashMap<ModelId, CardDefinition>,
+    monsters: FxHashMap<ModelId, MonsterDefinition>,
+    powers: FxHashMap<ModelId, RegisteredPower>,
+    relics: FxHashMap<ModelId, crate::RelicDefinition>,
+    potions: FxHashMap<ModelId, crate::PotionDefinition>,
+    enchantments: FxHashMap<ModelId, crate::EnchantmentDefinition>,
+    orbs: FxHashMap<ModelId, crate::OrbDefinition>,
     encounters: BTreeMap<ModelId, crate::EncounterDefinition>,
     events: BTreeMap<ModelId, crate::EventDefinition>,
     /// A merchant stocks the playing character's card pool and the player's own
@@ -1571,12 +1575,26 @@ impl Simulator {
     /// [`AgentObservationView`] — a field-for-field borrowed mirror of
     /// [`AgentObservation`] — without cloning the deck, the map, the piles,
     /// or the history: this key sits on a search's innermost loop, once per
-    /// node per iteration. `keys.rs` pins the mirror and the fold.
+    /// node per iteration. For the same reason the view is written as compact
+    /// self-delimiting bytes and hashed with XXH3 rather than as JSON under
+    /// SHA-256: the encoding separates every pair of views that JSON would,
+    /// and the key is the same in every process. `keys.rs` pins the mirror,
+    /// the fold, and that separation.
     pub fn observation_key(&self) -> Result<ObservationKey, EngineError> {
+        crate::key_hash::digest(&self.observation_key_view())
+            .map(ObservationKey)
+            .map_err(EngineError::serialization)
+    }
+
+    /// SHA-256 over the key's view as JSON, the readable form of what the key
+    /// encodes: `keys.rs` checks that the compact key separates exactly the
+    /// views this digest separates. Not a key.
+    #[doc(hidden)]
+    pub fn observation_key_json_digest(&self) -> Result<[u8; 32], EngineError> {
         let mut sink = HashWriter(Sha256::new());
         serde_json::to_writer(&mut sink, &self.observation_key_view())
             .map_err(EngineError::serialization)?;
-        Ok(ObservationKey(sink.0.finalize().into()))
+        Ok(sink.0.finalize().into())
     }
 
     /// The digest of the borrowed observation mirror as it stands, before

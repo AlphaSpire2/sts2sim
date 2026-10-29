@@ -11,6 +11,8 @@ repository.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+rustc-hash.workspace = true
+twox-hash.workspace = true
 sts2-core = { path = "../sts2-core" }
 sts2-rng = { path = "../sts2-rng" }
 
