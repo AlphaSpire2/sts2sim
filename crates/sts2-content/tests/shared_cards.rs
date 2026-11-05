@@ -1188,13 +1188,17 @@ fn neows_fury_takes_back_what_the_hand_has_room_for() {
     play(&mut simulator, "CARD.DEFEND_IRONCLAD");
     play(&mut simulator, "CARD.NEOWS_FURY");
     assert_eq!(creature(&simulator, 1).current_hp, 39 - 10);
-    let action = simulator
-        .legal_actions()
-        .iter()
-        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 2))
-        .cloned()
-        .expect("the discard pile is on the screen, asking for up to two");
-    simulator.step(action).expect("the choice applies");
+    // The discard pile is on the screen, asking for up to two: both defends
+    // are picked one at a time, and the second pick fills the screen.
+    for _ in 0..2 {
+        let pick = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, Action::PickCard { .. }))
+            .cloned()
+            .expect("the discard pile is on the screen, asking for up to two");
+        simulator.step(pick).expect("the pick applies");
+    }
     assert_eq!(pile(&simulator, PileName::Hand).len(), 2);
 }
 
@@ -2265,13 +2269,17 @@ fn purity_burns_what_the_screen_picked() {
         ("CARD.STRIKE_IRONCLAD", 0),
     ]);
     play(&mut simulator, "CARD.PURITY");
-    let action = simulator
-        .legal_actions()
-        .iter()
-        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 2))
-        .cloned()
-        .expect("the hand is on the screen, asking for up to three");
-    simulator.step(action).expect("the choice applies");
+    // The hand is on the screen, asking for up to three of its two: both are
+    // picked one at a time, and the second pick fills the screen.
+    for _ in 0..2 {
+        let pick = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, Action::PickCard { .. }))
+            .cloned()
+            .expect("the hand is on the screen, asking for up to three");
+        simulator.step(pick).expect("the pick applies");
+    }
     let mut exhausted = pile(&simulator, PileName::Exhaust);
     exhausted.sort();
     assert_eq!(

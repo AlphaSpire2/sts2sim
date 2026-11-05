@@ -167,15 +167,28 @@ fn walk_in(simulator: &mut Simulator) {
     simulator.step(walk).expect("the walk applies");
 }
 
-/// Answers the standing pick with its first card.
+/// Answers the standing pick with its first card: the whole answer where the
+/// screen takes one card, and where it takes several — the hammer's — one pick
+/// confirmed.
 fn answer_with_a_card(simulator: &mut Simulator) {
     let answer = simulator
         .legal_actions()
         .iter()
-        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+        .find(|action| {
+            matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty())
+                || matches!(action, Action::PickCard { .. })
+        })
         .cloned()
         .expect("the screen offers a card");
     simulator.step(answer).expect("the answer applies");
+    if let Some(confirm) = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ConfirmCards { .. }))
+        .cloned()
+    {
+        simulator.step(confirm).expect("the confirm applies");
+    }
 }
 
 fn holds_relic(simulator: &Simulator, relic: &str) -> bool {

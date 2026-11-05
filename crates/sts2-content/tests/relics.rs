@@ -3175,18 +3175,27 @@ fn a_sea_glass_deals_fifteen_of_another_characters_cards() {
         [12, 14, 5].map(|index| &candidates[index].fingerprint.model_id)
     );
 
+    // The grid takes any number of its cards, a pick at a time: one card is
+    // picked and the selection confirmed.
     let taken = candidates[0].clone();
     let deck_before = deck_models(&simulator).len();
-    let choose = simulator
+    let pick = simulator
         .legal_actions()
         .iter()
         .find(|action| {
-            matches!(action, Action::ChooseCards { cards, .. }
-            if cards.len() == 1 && cards[0].fingerprint == taken.fingerprint)
+            matches!(action, Action::PickCard { card, .. }
+            if card.fingerprint == taken.fingerprint)
         })
         .cloned()
-        .expect("one card can be taken off the grid");
-    simulator.step(choose).expect("taking it applies");
+        .expect("one card can be picked off the grid");
+    simulator.step(pick).expect("picking it applies");
+    let confirm = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ConfirmCards { .. }))
+        .cloned()
+        .expect("one card picked can be confirmed");
+    simulator.step(confirm).expect("the confirm applies");
     let deck = deck_models(&simulator);
     assert_eq!(deck.len(), deck_before + 1);
     assert_eq!(
@@ -5190,6 +5199,81 @@ fn a_disabled_rest_option_is_listed_and_not_offered() {
     );
 }
 
+/// The cook asks for exactly two cards of the deck, and the screen is worked
+/// a pick at a time rather than laid out as every pair: a pick per removable
+/// card and the cancel, nothing else, and the second pick closes it.
+#[test]
+fn the_cook_is_worked_a_pick_at_a_time() {
+    let mut state = run_holding(&["RELIC.MEAT_CLEAVER"]).state().clone();
+    while state.run_player.deck.len() < 20 {
+        state.run_player.deck.push(card("CARD.STRIKE_IRONCLAD", 0));
+    }
+    let mut simulator = Simulator::from_generated_state(state, sts2_content::standard_registry())
+        .expect("the run builds");
+    walk_to(&mut simulator, 1);
+    let deck = simulator.state().run_player.deck.len();
+    let max_hp = simulator.state().run_player.max_hp;
+    simulator
+        .step(rest_option(&simulator, "COOK"))
+        .expect("the cook opens its screen");
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        minimum,
+        maximum,
+        candidates,
+        cancelable,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("the cook put up no screen: {:?}", simulator.decision());
+    };
+    assert_eq!((minimum, maximum, cancelable), (2, 2, true));
+    assert_eq!(
+        candidates.len(),
+        deck,
+        "every card of the deck can be cooked"
+    );
+    let picks = simulator
+        .legal_actions()
+        .iter()
+        .filter(|action| matches!(action, Action::PickCard { .. }))
+        .count();
+    assert_eq!(picks, deck, "a pick per card");
+    assert!(
+        !simulator
+            .legal_actions()
+            .iter()
+            .any(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty())),
+        "no pair is laid out"
+    );
+    assert!(
+        simulator.legal_actions().contains(&Action::ChooseCards {
+            choice_id,
+            cards: Vec::new()
+        }),
+        "the cancel stands"
+    );
+    for _ in 0..2 {
+        let pick = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, Action::PickCard { .. }))
+            .cloned()
+            .expect("a pick is offered");
+        simulator.step(pick).expect("the pick applies");
+    }
+    assert!(
+        matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::RestSite { .. }
+        ),
+        "the second pick closed the screen: {:?}",
+        simulator.decision()
+    );
+    assert_eq!(simulator.state().run_player.deck.len(), deck - 2);
+    assert_eq!(simulator.state().run_player.max_hp, max_hp + 9);
+}
+
 /// Taking an option never leaves the room. What it does is spend the option:
 /// the whole list is cleared, unless something keeps the rest of it standing.
 #[test]
@@ -5334,11 +5418,11 @@ fn a_meat_cleaver_cooks_two_cards_for_nine_maximum_hp() {
     );
 }
 
-/// The cook's screen asks for exactly two cards, and the answers it takes are
-/// a pair or nothing at all: a screen that asks for an exact count refuses to
-/// confirm until it holds that many, so being cancelable buys the empty answer
-/// and nothing shorter. The smith's
-/// screen asks for one, and every card on it is still an answer of its own.
+/// The cook's screen asks for exactly two cards, worked a pick at a time: a
+/// pick per removable card, the empty answer being cancelable buys, and no
+/// confirm, because a screen that asks for an exact count closes on the pick
+/// that reaches it and refuses anything shorter. The smith's screen asks for
+/// one, and every card on it is still an answer of its own.
 #[test]
 fn the_cook_takes_a_pair_or_nothing() {
     let mut simulator = run_holding(&["RELIC.MEAT_CLEAVER"]);
@@ -5360,25 +5444,27 @@ fn the_cook_takes_a_pair_or_nothing() {
     assert_eq!((minimum, maximum, cancelable), (2, 2, true));
     assert!(candidates.len() > 2, "there is more than one pair to pick");
 
-    let mut pairs: BTreeSet<BTreeSet<usize>> = BTreeSet::new();
+    let mut picks: BTreeSet<usize> = BTreeSet::new();
     let mut empties = 0;
     for action in simulator.legal_actions() {
-        let Action::ChooseCards { cards, .. } = action else {
-            continue;
-        };
-        assert_ne!(cards.len(), 1, "one card is not an answer to the cook");
-        match cards.len() {
-            0 => empties += 1,
-            2 => {
-                pairs.insert(cards.iter().map(|handle| handle.index).collect());
+        match action {
+            Action::ChooseCards { cards, .. } => {
+                assert!(cards.is_empty(), "no whole answer naming cards is laid out");
+                empties += 1;
             }
-            other => panic!("a two-card screen offered {other} cards"),
+            Action::PickCard { card, .. } => {
+                picks.insert(card.index);
+            }
+            Action::ConfirmCards { .. } => {
+                panic!("an exact screen with nothing picked has nothing to confirm");
+            }
+            _ => {}
         }
     }
     assert_eq!(
-        pairs.len(),
-        candidates.len() * (candidates.len() - 1) / 2,
-        "every pair of removable cards is an answer"
+        picks,
+        candidates.iter().map(|card| card.index).collect(),
+        "every removable card is a pick"
     );
     assert_eq!(empties, 1, "and backing out with nothing is one more");
 

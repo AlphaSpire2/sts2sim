@@ -134,13 +134,23 @@ fn a_catastrophe_still_owes_its_second_play_after_the_screen() {
         "the strike waits in the draw pile while the question stands"
     );
 
+    // The fury's screen takes several cards, a pick at a time: one card is
+    // picked back and the selection confirmed.
     let answer = simulator
         .legal_actions()
         .iter()
-        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 1))
+        .find(|action| matches!(action, Action::PickCard { .. }))
         .cloned()
         .expect("the screen offers a card back");
     simulator.step(answer).expect("the answer applies");
+    if let Some(confirm) = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ConfirmCards { .. }))
+        .cloned()
+    {
+        simulator.step(confirm).expect("the confirm applies");
+    }
 
     let combat = simulator.state().combat.as_ref().expect("the fight stands");
     assert!(

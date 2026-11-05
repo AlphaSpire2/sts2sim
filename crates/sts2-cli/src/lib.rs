@@ -191,6 +191,16 @@ fn parse_action(command: &str, legal: &[Action]) -> Result<Action, CliError> {
                     if cards.len() == 1 && cards[0].card_id.get() == id)
             })
         }),
+        // A screen that takes several cards is worked a card at a time: pick
+        // each card into the selection, then confirm it once enough are in.
+        ["pick", id] => id.parse::<u64>().ok().and_then(|id| {
+            legal.iter().find(|action| {
+                matches!(action, Action::PickCard { card, .. } if card.card_id.get() == id)
+            })
+        }),
+        ["confirm"] => legal
+            .iter()
+            .find(|action| matches!(action, Action::ConfirmCards { .. })),
         ["claim", index] => index.parse::<usize>().ok().and_then(|index| {
             legal.iter().find(|action| {
                 matches!(action, Action::ClaimReward { reward_index, .. }
@@ -304,6 +314,8 @@ fn action_label(action: &Action) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        Action::PickCard { card, .. } => format!("pick {}", card.card_id.get()),
+        Action::ConfirmCards { .. } => "confirm".to_owned(),
         Action::ClaimReward {
             reward_index,
             fingerprint,

@@ -147,24 +147,35 @@ fn drink_at(simulator: &mut Simulator, model_id: &str, target: Option<u64>) {
     simulator.step(action).expect("the potion applies");
 }
 
+/// Answers the standing card screen with the cards the test names, in that
+/// order: the whole answer where the screen takes one card, and a pick per
+/// card — then the confirm, where the screen still has room — where it takes
+/// several.
 fn choose(simulator: &mut Simulator, models: &[&str]) {
-    let wanted: Vec<sts2_core::ModelId> = models.iter().map(|model| id(model)).collect();
-    let action = simulator
+    for model in models {
+        let wanted = id(model);
+        let action = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| match action {
+                Action::ChooseCards { cards, .. } => {
+                    cards.len() == 1 && cards[0].fingerprint.model_id == wanted
+                }
+                Action::PickCard { card, .. } => card.fingerprint.model_id == wanted,
+                _ => false,
+            })
+            .cloned()
+            .unwrap_or_else(|| panic!("{models:?} was not on the screen"));
+        simulator.step(action).expect("the choice applies");
+    }
+    if let Some(confirm) = simulator
         .legal_actions()
         .iter()
-        .find(|action| match action {
-            Action::ChooseCards { cards, .. } => {
-                cards.len() == wanted.len()
-                    && cards
-                        .iter()
-                        .zip(&wanted)
-                        .all(|(card, want)| card.fingerprint.model_id == *want)
-            }
-            _ => false,
-        })
+        .find(|action| matches!(action, Action::ConfirmCards { .. }))
         .cloned()
-        .unwrap_or_else(|| panic!("{models:?} was not on the screen"));
-    simulator.step(action).expect("the choice applies");
+    {
+        simulator.step(confirm).expect("the confirm applies");
+    }
 }
 
 fn choose_nothing(simulator: &mut Simulator) {

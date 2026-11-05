@@ -1,20 +1,21 @@
-//! A screen with too many answers to lay out is still a screen with answers.
-//!
-//! `compute_decision_actions` stops enumerating a multi-pick screen's whole
-//! answers past `ORDERED_SELECTION_LIMIT`. `RELIC.BIIIG_HUG`'s
-//! remove-exactly-4 over a twenty-three card deck (C(23, 4) = 8855 sets) is
-//! past that line, on a screen a real player answers without noticing
-//! anything unusual.
+//! A screen that takes several cards is worked a pick at a time, whatever its
+//! size.
 //!
 //! The build's own screen never enumerates: the player clicks cards into the
-//! selection one at a time, each click putting a card in or taking it back
-//! out, and the selection completes once it holds enough.
-//! So past the cap the boundary offers the same protocol: each action names
-//! the selection so far plus one more card, an action reaching the minimum
-//! finishes the answer, and a whole set in one action — the shape a recorded
-//! run answers with — is taken directly by the legality gate. Replay builds
-//! that whole set from the screen's candidates rather than looking for it on
-//! the action list.
+//! selection one at a time, and the selection completes once it holds enough —
+//! or is confirmed, on a screen that takes a range. `compute_decision_actions`
+//! offers the same protocol on every such screen: a `PickCard` per card not yet
+//! in the selection, a `ConfirmCards` once the selection has reached the
+//! minimum with room left, and the pick that fills the screen finishing the
+//! answer on its own. Laying out whole answers instead would put one action
+//! per set on the list — `RELIC.BIIIG_HUG`'s remove-exactly-4 over a
+//! twenty-three card deck is C(23, 4) = 8855 of them.
+//!
+//! The build's recorder writes only the completed choice, so a recorded run
+//! answers such a screen with its whole set in one action the list never lays
+//! out. The legality gate takes that directly, in the order it was picked, and
+//! replay builds the set from the screen's candidates rather than looking for
+//! it on the action list.
 
 use std::collections::BTreeSet;
 
@@ -31,12 +32,12 @@ fn id(value: &str) -> sts2_core::ModelId {
 }
 
 /// A run standing one step below a chest holding `relic`, with the deck padded
-/// out to twenty-three cards — enough to put a four-card pick past the cap.
+/// out to `deck` cards.
 #[allow(
     clippy::too_many_lines,
     reason = "one function stands a whole run's state up"
 )]
-fn run_at_a_chest(relic: &str) -> Simulator {
+fn run_at_a_chest(relic: &str, deck: usize) -> Simulator {
     let mut state = sts2_content::shrinker_beetle_fixture()
         .expect("the fixture builds")
         .state()
@@ -44,7 +45,7 @@ fn run_at_a_chest(relic: &str) -> Simulator {
     state.combat = None;
     state.terminal = None;
     let strike = state.run_player.deck[0].clone();
-    while state.run_player.deck.len() < 23 {
+    while state.run_player.deck.len() < deck {
         state.run_player.deck.push(strike.clone());
     }
     let start = MapCoord { col: 0, row: 0 };
@@ -183,75 +184,169 @@ fn the_screen(simulator: &Simulator) -> (sts2_core::ChoiceId, usize, usize, usiz
     )
 }
 
-/// The `ChooseCards` answers on offer, apart from anything else the boundary
-/// carries beside the screen.
-fn offered_answers(simulator: &Simulator) -> Vec<Action> {
+/// The picks on offer: one per card not yet in the selection.
+fn offered_picks(simulator: &Simulator) -> Vec<Action> {
     simulator
         .legal_actions()
         .iter()
-        .filter(|action| matches!(action, Action::ChooseCards { .. }))
+        .filter(|action| matches!(action, Action::PickCard { .. }))
         .cloned()
         .collect()
 }
 
-/// The hug's remove-exactly-4 over twenty-three cards is past the cap, and
-/// the boundary offers a click per card.
+/// Whether the list lays out any whole answer naming cards.
+fn lays_out_a_whole_answer(simulator: &Simulator) -> bool {
+    simulator
+        .legal_actions()
+        .iter()
+        .any(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+}
+
+/// Whether the confirm button is on offer.
+fn offers_a_confirm(simulator: &Simulator) -> bool {
+    simulator
+        .legal_actions()
+        .iter()
+        .any(|action| matches!(action, Action::ConfirmCards { .. }))
+}
+
+/// Takes the first pick on offer.
+fn pick_one(simulator: &mut Simulator) {
+    let pick = offered_picks(simulator)
+        .first()
+        .cloned()
+        .expect("a pick is offered");
+    simulator.step(pick).expect("the pick applies");
+}
+
+/// How many deck cards carry an enchantment.
+fn enchanted(simulator: &Simulator) -> usize {
+    simulator
+        .state()
+        .run_player
+        .deck
+        .iter()
+        .filter(|card| card.enchantment.is_some())
+        .count()
+}
+
+/// The hug's remove-exactly-4 over twenty-three cards is offered as a pick
+/// per card, and nothing else: no whole set, and no confirm while the
+/// selection is short of the four.
 #[test]
-fn a_biiig_hug_over_a_big_deck_offers_a_click_per_card() {
-    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+fn a_biiig_hug_over_a_big_deck_offers_a_pick_per_card() {
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
     take_the_relic(&mut simulator);
 
     let (_, minimum, maximum, candidates, picked) = the_screen(&simulator);
     assert_eq!((minimum, maximum), (4, 4), "the hug asks for exactly four");
     assert_eq!(candidates, 23, "over the whole padded deck");
-    assert_eq!(picked, 0, "nothing is clicked in yet");
-    let answers = offered_answers(&simulator);
+    assert_eq!(picked, 0, "nothing is picked yet");
     assert_eq!(
-        answers.len(),
+        offered_picks(&simulator).len(),
         23,
-        "one click per candidate: the screen the player sees has answers"
+        "one pick per candidate: the screen the player sees has answers"
     );
+    assert!(!lays_out_a_whole_answer(&simulator), "and no whole set");
     assert!(
-        answers.iter().all(|action| matches!(
-            action,
-            Action::ChooseCards { cards, .. } if cards.len() == 1
-        )),
-        "each action clicks one card into the selection"
+        !offers_a_confirm(&simulator),
+        "confirm stays off the list until the selection reaches the minimum"
     );
 }
 
-/// Clicking cards in one at a time builds the selection, and the click that
+/// A deck small enough that the sets could be laid out — C(12, 4) = 495 — is
+/// worked the same way: the protocol is the screen's, not a cap's.
+#[test]
+fn a_biiig_hug_over_a_small_deck_is_worked_the_same_way() {
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 12);
+    take_the_relic(&mut simulator);
+    let deck_before = simulator.state().run_player.deck.len();
+
+    let (_, _, _, candidates, _) = the_screen(&simulator);
+    assert_eq!(candidates, 12);
+    assert_eq!(offered_picks(&simulator).len(), 12, "one pick per card");
+    assert!(!lays_out_a_whole_answer(&simulator), "no set is laid out");
+    for _ in 0..4 {
+        pick_one(&mut simulator);
+    }
+    assert!(
+        !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
+        "the fourth pick finished the answer"
+    );
+    assert_eq!(simulator.state().run_player.deck.len(), deck_before - 4);
+}
+
+/// Picking cards in one at a time builds the selection, and the pick that
 /// reaches the count finishes the answer: four cards leave the deck.
 #[test]
-fn four_clicks_build_and_finish_the_removal() {
-    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+fn four_picks_build_and_finish_the_removal() {
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
     take_the_relic(&mut simulator);
     let deck_before = simulator.state().run_player.deck.len();
 
     for click in 1..=4_usize {
-        let answer = offered_answers(&simulator)
-            .first()
-            .cloned()
-            .expect("a click is offered");
-        simulator.step(answer).expect("the click applies");
+        pick_one(&mut simulator);
         if click < 4 {
             let (_, _, _, _, picked) = the_screen(&simulator);
             assert_eq!(picked, click, "the selection holds every card so far");
             assert_eq!(
-                offered_answers(&simulator).len(),
+                offered_picks(&simulator).len(),
                 23 - click,
                 "what is already picked is not offered again"
+            );
+            assert!(
+                !offers_a_confirm(&simulator),
+                "an exact screen has no confirm to press: the last pick closes it"
             );
         }
     }
     assert!(
         !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
-        "the fourth click finished the answer"
+        "the fourth pick finished the answer"
     );
     assert_eq!(
         simulator.state().run_player.deck.len(),
         deck_before - 4,
         "exactly four cards left the deck"
+    );
+}
+
+/// A pick names a card the screen offers and the selection does not already
+/// hold; anything else is refused, and so is a confirm the screen is not
+/// showing.
+#[test]
+fn a_pick_the_screen_would_not_take_is_refused() {
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
+    take_the_relic(&mut simulator);
+    let (choice_id, candidates) = the_candidates(&simulator);
+    let before = simulator.snapshot();
+    assert!(
+        simulator.step(Action::ConfirmCards { choice_id }).is_err(),
+        "nothing is picked, so there is nothing to confirm"
+    );
+    let mut stranger = candidates[0].clone();
+    stranger.fingerprint = CardFingerprint::base(id("CARD.FOLLY"));
+    assert!(
+        simulator
+            .step(Action::PickCard {
+                choice_id,
+                card: stranger
+            })
+            .is_err(),
+        "a card the screen does not offer refuses"
+    );
+    assert_eq!(simulator.snapshot(), before, "a refusal changes nothing");
+
+    pick_one(&mut simulator);
+    let picked = candidates[0].clone();
+    assert!(
+        simulator
+            .step(Action::PickCard {
+                choice_id,
+                card: picked
+            })
+            .is_err(),
+        "a card already in the selection is not picked twice"
     );
 }
 
@@ -262,7 +357,7 @@ fn four_clicks_build_and_finish_the_removal() {
 /// never laid it out.
 #[test]
 fn a_whole_set_in_one_answer_is_taken_directly() {
-    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
     take_the_relic(&mut simulator);
     let deck_before = simulator.state().run_player.deck.len();
     let DecisionContext::ChooseCards {
@@ -290,7 +385,7 @@ fn a_whole_set_in_one_answer_is_taken_directly() {
 /// a card named twice, or a card that is not on the screen.
 #[test]
 fn the_gate_still_reads_the_screens_counts() {
-    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
     take_the_relic(&mut simulator);
     let DecisionContext::ChooseCards {
         choice_id,
@@ -309,6 +404,16 @@ fn the_gate_still_reads_the_screens_counts() {
             })
             .is_err(),
         "five cards on an exactly-four screen refuse"
+    );
+    let three = candidates[..3].to_vec();
+    assert!(
+        simulator
+            .step(Action::ChooseCards {
+                choice_id,
+                cards: three
+            })
+            .is_err(),
+        "three cards on an exactly-four screen refuse"
     );
     let twice = vec![
         candidates[0].clone(),
@@ -339,10 +444,10 @@ fn the_gate_still_reads_the_screens_counts() {
 }
 
 /// Pael's tooth asks for exactly five of the upgradable deck — another
-/// over-cap screen a chest can open — and it is answered the same way.
+/// screen a chest can open — and it is answered the same way.
 #[test]
-fn a_paels_tooth_over_a_big_deck_is_answered_in_clicks() {
-    let mut simulator = run_at_a_chest("RELIC.PAELS_TOOTH");
+fn a_paels_tooth_over_a_big_deck_is_answered_in_picks() {
+    let mut simulator = run_at_a_chest("RELIC.PAELS_TOOTH", 23);
     take_the_relic(&mut simulator);
     let deck_before = simulator.state().run_player.deck.len();
 
@@ -354,26 +459,105 @@ fn a_paels_tooth_over_a_big_deck_is_answered_in_clicks() {
     );
     assert_eq!(candidates, 23, "every padded card is upgradable");
     assert_eq!(
-        offered_answers(&simulator).len(),
+        offered_picks(&simulator).len(),
         23,
         "the screen has answers"
     );
     for _ in 0..5 {
-        let answer = offered_answers(&simulator)
-            .first()
-            .cloned()
-            .expect("a click is offered");
-        simulator.step(answer).expect("the click applies");
+        pick_one(&mut simulator);
     }
     assert!(
         !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
-        "the fifth click finished the answer"
+        "the fifth pick finished the answer"
     );
     assert_eq!(
         simulator.state().run_player.deck.len(),
         deck_before - 5,
         "the tooth took its five"
     );
+}
+
+/// A gnarled hammer puts Sharp on up to three cards of the deck: a screen that
+/// takes a range, with a confirm button and a way to take nothing. The confirm
+/// comes onto the list once a card is picked, and answers with the selection
+/// as it stands.
+#[test]
+fn a_gnarled_hammer_confirms_what_is_picked_so_far() {
+    let mut simulator = run_at_a_chest("RELIC.GNARLED_HAMMER", 23);
+    take_the_relic(&mut simulator);
+
+    let (choice_id, minimum, maximum, candidates, _) = the_screen(&simulator);
+    assert_eq!((minimum, maximum), (0, 3), "up to three");
+    assert!(candidates > 3, "more than the hammer can take");
+    assert_eq!(
+        offered_picks(&simulator).len(),
+        candidates,
+        "a pick per card"
+    );
+    assert!(!lays_out_a_whole_answer(&simulator), "and no set of them");
+    assert!(
+        !offers_a_confirm(&simulator),
+        "with nothing picked there is nothing to confirm"
+    );
+    assert!(
+        simulator.legal_actions().contains(&Action::ChooseCards {
+            choice_id,
+            cards: Vec::new()
+        }),
+        "taking nothing is on the list"
+    );
+
+    pick_one(&mut simulator);
+    assert_eq!(offered_picks(&simulator).len(), candidates - 1);
+    assert!(
+        offers_a_confirm(&simulator),
+        "one card picked can be confirmed"
+    );
+    simulator
+        .step(Action::ConfirmCards { choice_id })
+        .expect("the confirm applies");
+    assert!(
+        !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
+        "the confirm finished the answer"
+    );
+    assert_eq!(
+        enchanted(&simulator),
+        1,
+        "the one card picked was enchanted"
+    );
+}
+
+/// The pick that fills a ranged screen finishes it without a confirm, and
+/// taking nothing part-way through enchants nothing.
+#[test]
+fn a_gnarled_hammer_fills_on_the_third_pick_or_takes_nothing() {
+    let mut simulator = run_at_a_chest("RELIC.GNARLED_HAMMER", 23);
+    take_the_relic(&mut simulator);
+    for _ in 0..3 {
+        pick_one(&mut simulator);
+    }
+    assert!(
+        !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
+        "the third pick filled the screen"
+    );
+    assert_eq!(enchanted(&simulator), 3);
+
+    let mut simulator = run_at_a_chest("RELIC.GNARLED_HAMMER", 23);
+    take_the_relic(&mut simulator);
+    let (choice_id, _) = the_candidates(&simulator);
+    pick_one(&mut simulator);
+    pick_one(&mut simulator);
+    simulator
+        .step(Action::ChooseCards {
+            choice_id,
+            cards: Vec::new(),
+        })
+        .expect("taking nothing is still an answer");
+    assert!(
+        !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
+        "the screen closed"
+    );
+    assert_eq!(enchanted(&simulator), 0, "nothing was enchanted");
 }
 
 /// The standing screen's id and candidates.
@@ -429,11 +613,11 @@ fn replayed(simulator: Simulator, record: &Record) -> (Simulator, Action) {
 }
 
 /// A recorded hug names its four cards in one record, in the order they were
-/// picked. The action list past the cap never lays that set out, and replay
-/// answers the screen with it all the same.
+/// picked. The action list never lays that set out, and replay answers the
+/// screen with it all the same.
 #[test]
 fn a_recorded_hug_answers_its_screen_in_one_record() {
-    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
     take_the_relic(&mut simulator);
     let deck_before = simulator.state().run_player.deck.len();
     let (choice_id, candidates) = the_candidates(&simulator);
@@ -444,10 +628,8 @@ fn a_recorded_hug_answers_its_screen_in_one_record() {
         candidates[7].clone(),
     ];
     assert!(
-        offered_answers(&simulator)
-            .iter()
-            .all(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 1)),
-        "past the cap the list carries no whole set"
+        !lays_out_a_whole_answer(&simulator),
+        "the list carries no whole set"
     );
 
     let (after, applied) = replayed(simulator, &recorded_answer(choice_id, &picked));
@@ -471,7 +653,7 @@ fn a_recorded_hug_answers_its_screen_in_one_record() {
 /// refused.
 #[test]
 fn a_recorded_answer_the_screen_would_not_take_is_refused() {
-    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG");
+    let mut simulator = run_at_a_chest("RELIC.BIIIG_HUG", 23);
     take_the_relic(&mut simulator);
     let (choice_id, candidates) = the_candidates(&simulator);
 
@@ -493,21 +675,20 @@ fn a_recorded_answer_the_screen_would_not_take_is_refused() {
     }
 }
 
-/// A beautiful bracelet asks for three of twenty-three: few enough sets for
-/// the list to carry each once, in candidate order, but not every order of
-/// them. A record that picked them in another order is replayed in that
-/// order, which is the order the build hands them back in.
+/// A beautiful bracelet asks for three of twenty-three. The list works the
+/// screen a pick at a time and carries no set of three in any order, while a
+/// record that picked them in its own order is replayed in that order, which
+/// is the order the build hands them back in.
 #[test]
 fn a_recorded_bracelet_keeps_the_order_it_was_picked_in() {
-    let mut simulator = run_at_a_chest("RELIC.BEAUTIFUL_BRACELET");
+    let mut simulator = run_at_a_chest("RELIC.BEAUTIFUL_BRACELET", 23);
     take_the_relic(&mut simulator);
-    let (_, minimum, maximum, count, _) = the_screen(&simulator);
+    let (_, minimum, maximum, _, _) = the_screen(&simulator);
     assert_eq!(
         (minimum, maximum),
         (3, 3),
         "the bracelet asks for exactly three"
     );
-    assert!(count > 12, "a screen this big lists sets, not orders");
     let (choice_id, candidates) = the_candidates(&simulator);
     let picked = vec![
         candidates[9].clone(),
@@ -520,19 +701,9 @@ fn a_recorded_bracelet_keeps_the_order_it_was_picked_in() {
     };
     assert!(
         !simulator.legal_actions().contains(&recorded),
-        "the list does not carry this order"
+        "the list does not carry the set"
     );
-    assert!(
-        simulator.legal_actions().contains(&Action::ChooseCards {
-            choice_id,
-            cards: vec![
-                candidates[0].clone(),
-                candidates[4].clone(),
-                candidates[9].clone(),
-            ],
-        }),
-        "the list carries the set in candidate order"
-    );
+    assert!(!lays_out_a_whole_answer(&simulator), "nor any other");
 
     let (after, applied) = replayed(simulator, &recorded_answer(choice_id, &picked));
     assert_eq!(applied, recorded, "the record's own order");
@@ -540,4 +711,29 @@ fn a_recorded_bracelet_keeps_the_order_it_was_picked_in() {
         !matches!(after.decision(), DecisionContext::ChooseCards { .. }),
         "the record finished the answer"
     );
+}
+
+/// A recorded hammer that enchanted one card names that one card, which is
+/// also the shape a single pick has on the list — and a recorded answer is a
+/// finished one, not a pick: the gate takes it whole and the screen closes.
+#[test]
+fn a_recorded_single_card_on_a_ranged_screen_finishes_it() {
+    let mut simulator = run_at_a_chest("RELIC.GNARLED_HAMMER", 23);
+    take_the_relic(&mut simulator);
+    let (choice_id, candidates) = the_candidates(&simulator);
+    let picked = vec![candidates[5].clone()];
+
+    let (after, applied) = replayed(simulator, &recorded_answer(choice_id, &picked));
+    assert_eq!(
+        applied,
+        Action::ChooseCards {
+            choice_id,
+            cards: picked
+        }
+    );
+    assert!(
+        !matches!(after.decision(), DecisionContext::ChooseCards { .. }),
+        "the record finished the answer"
+    );
+    assert_eq!(enchanted(&after), 1);
 }

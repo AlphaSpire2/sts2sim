@@ -117,6 +117,16 @@ means one unambiguous thing, and it carries how few cards an answer may name as
 well as how many, because a screen that can be backed out of accepts none at all
 while one that cannot does not.
 
+A screen that takes one card is answered with it in one `ChooseCards` action. A
+screen that takes several is worked the way the game's own is: one `PickCard`
+per card not yet in the selection, the selection so far carried in the
+decision's `picked`, a `ConfirmCards` once the selection holds the minimum
+with room left, and the pick that fills the screen finishing the answer on its
+own. The action list never lays out whole sets. A recorded run answers such a
+screen with its whole set in one `ChooseCards` action, in the order the cards
+were picked; the legality gate takes that on any screen whose counts it fits,
+and the order is kept because the game hands the cards back in it.
+
 Legal actions are a deterministic ordered list. Their equality and encoding may
 use visible portable identities such as player slot, visible map coordinate,
 combat-card index plus card fingerprint, creature combat ID plus model
@@ -368,15 +378,15 @@ machine-stable order used when a selector answers for the player: rarity, then
 model ID, stably, so identical cards keep their relative places. Every other
 pile is presented in pile order, and the run deck in deck order.
 
-A multi-card screen with more answers than the action list can lay out is
-offered the way the game's own screen is worked: the player clicks cards in and
-out of a set one at a time, and the selection completes as soon as the set is
-big enough. Past the
-enumeration cap each offered action names the selection so far plus one more
-card, an action reaching the minimum finishes the answer, the decision carries
-the selection standing between the clicks, and the legality gate takes a whole
-set in one action — the shape a recorded run answers with — whether or not the
-list laid it out.
+A screen that takes several cards is offered the way the game's own screen is
+worked: the player picks cards into a selection one at a time, and the
+selection completes when the pick that fills the screen lands or, on a screen
+that takes a range, when it is confirmed. Each offered `PickCard` names one
+card not yet picked, the decision carries the selection standing between the
+picks, `ConfirmCards` is offered once the selection holds the minimum with
+room left, and the legality gate takes a whole set in one `ChooseCards`
+action — the shape a recorded run answers with — though the list never lays
+one out.
 
 A rest site's smith and a merchant's card removal are this surface too, not
 engine special cases: each is an option that opens a deck screen, and neither

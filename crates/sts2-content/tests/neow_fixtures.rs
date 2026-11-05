@@ -279,13 +279,17 @@ fn neows_bones_wait_for_shears_acquisition_in_either_claim_order() {
         let restored =
             Simulator::from_generated_state(saved, sts2_content::standard_registry()).unwrap();
         simulator.restore(&restored.snapshot()).unwrap();
-        let choice = simulator
-            .legal_actions()
-            .iter()
-            .find(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 2))
-            .cloned()
-            .unwrap();
-        simulator.step(choice).unwrap();
+        // The shears ask for two, picked one at a time; the second pick
+        // fills the screen and finishes the answer.
+        for _ in 0..2 {
+            let pick = simulator
+                .legal_actions()
+                .iter()
+                .find(|action| matches!(action, Action::PickCard { .. }))
+                .cloned()
+                .unwrap();
+            simulator.step(pick).unwrap();
+        }
         assert_eq!(simulator.state().run_player.current_hp, hp - 16);
         if shears_first {
             assert_eq!(simulator.state().run_player.deck.len(), deck - 2);

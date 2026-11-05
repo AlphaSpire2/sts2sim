@@ -118,9 +118,32 @@ impl ScriptWriter {
     /// One record per *engine* action, never per policy decision: a decision
     /// that expands into several steps writes one record for each, each
     /// against the screen that step is taken on, so a script stays the
-    /// sequence of clicks a driver replays into the live game.
+    /// sequence of clicks a driver replays into the live game. The one
+    /// exception is a screen that takes several cards, which the engine works
+    /// a pick at a time while the recorder's format knows only the completed
+    /// choice: the picks that leave the screen standing write nothing, and the
+    /// pick that fills it — or the confirm — writes the whole selection as one
+    /// record, the shape the live game records and the replay adapter builds
+    /// back into one answer.
     pub fn record(&mut self, simulator: &Simulator, action: &Action) -> Result<(), Unscriptable> {
-        let (kind, data) = encode(simulator, action)?;
+        let completed = match action {
+            Action::PickCard { choice_id, card } => {
+                match completed_selection(simulator, *choice_id, Some(card))? {
+                    Some(cards) => Some(Action::ChooseCards {
+                        choice_id: *choice_id,
+                        cards,
+                    }),
+                    None => return Ok(()),
+                }
+            }
+            Action::ConfirmCards { choice_id } => completed_selection(simulator, *choice_id, None)?
+                .map(|cards| Action::ChooseCards {
+                    choice_id: *choice_id,
+                    cards,
+                }),
+            _ => None,
+        };
+        let (kind, data) = encode(simulator, completed.as_ref().unwrap_or(action))?;
         self.push_decision(kind, &data);
         Ok(())
     }
@@ -273,6 +296,37 @@ fn selected_indexes(
 /// announced, and the `CombatState` stays up behind the rewards screen
 /// until the room is left. A drink taken there is an out-of-combat drink,
 /// which is what the engine itself reads in `use_potion`.
+/// The selection a pick or a confirm completes on the standing screen: the
+/// cards picked so far plus `card`, where the pick fills the screen; the cards
+/// picked so far, for a confirm. Nothing while a pick leaves the screen up.
+fn completed_selection(
+    simulator: &Simulator,
+    choice_id: sts2_core::ChoiceId,
+    card: Option<&CardHandle>,
+) -> Result<Option<Vec<CardHandle>>, Unscriptable> {
+    let DecisionContext::ChooseCards {
+        choice_id: standing,
+        maximum,
+        candidates,
+        picked,
+        ..
+    } = simulator.decision()
+    else {
+        return Err(Unscriptable("a pick without its screen".to_owned()));
+    };
+    if *standing != choice_id {
+        return Err(Unscriptable(
+            "a pick names a screen not standing".to_owned(),
+        ));
+    }
+    let mut cards = picked.clone();
+    let Some(card) = card else {
+        return Ok(Some(cards));
+    };
+    cards.push(card.clone());
+    Ok((cards.len() >= (*maximum).min(candidates.len())).then_some(cards))
+}
+
 fn in_a_fight(simulator: &Simulator) -> bool {
     simulator
         .state()
@@ -494,6 +548,13 @@ fn encode(simulator: &Simulator, action: &Action) -> Result<(&'static str, Value
                     )
                 }
             }
+        }
+        // A pick or a confirm is recorded by `ScriptWriter::record` as the
+        // completed choice it finishes, and never reaches here on its own.
+        Action::PickCard { .. } | Action::ConfirmCards { .. } => {
+            return Err(Unscriptable(
+                "a pick is recorded only as the choice it completes".to_owned(),
+            ));
         }
         Action::ChooseAlternative {
             choice_id,

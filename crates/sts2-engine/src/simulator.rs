@@ -843,29 +843,6 @@ fn choose_cards_decision(choice: &SuspendedChoice) -> DecisionContext {
     }
 }
 
-/// Whether a multi-card screen has more answers than the action list can lay
-/// out, which is where it stops being enumerated and starts being worked the way
-/// the build's own screen is: one card clicked into the selection at a time (a
-/// click toggles a card in or out of the selection, and the selection completes
-/// once it holds enough).
-///
-/// A screen that takes one card, or nothing, keeps its whole answers: a
-/// single-card answer under a minimum of one already means the screen is done,
-/// so a click protocol there would collide with answers that stand.
-fn selection_is_past_the_cap(
-    minimum: usize,
-    maximum: usize,
-    candidates: usize,
-    bundled: bool,
-) -> bool {
-    let upper = maximum.min(candidates);
-    !bundled
-        && minimum >= 2
-        && upper > 1
-        && candidates > 12
-        && unordered_selection_count(candidates, minimum.max(2), upper) > ORDERED_SELECTION_LIMIT
-}
-
 /// The name a screen is reported under, for the diagnostics that name it.
 const fn screen_name(screen: &CardSelectCmd) -> &'static str {
     match screen {
@@ -2053,7 +2030,7 @@ impl Simulator {
         if self.legal_actions.contains(action) {
             return Ok(());
         }
-        if self.answer_the_list_could_not_carry(action) || self.order_the_list_left_out(action) {
+        if self.a_whole_answer_within_the_counts(action) {
             return Ok(());
         }
         let expected = decision_family(&self.decision);
@@ -2067,51 +2044,16 @@ impl Simulator {
             .with_detail("decision_family", expected))
     }
 
-    /// A screen past the enumeration cap takes every selection its counts
-    /// allow, not just the click walk the action list lays out: the build's
-    /// screen is clicked one card at a time and completes on any set that is
-    /// big enough, and the cap on the action list is a boundary this baseline
-    /// draws rather than a rule of the build's. A recorded run answers such
-    /// a screen with its whole set in one record, so the gate reads the screen
-    /// rather than the list: any distinct candidates within the counts, complete
-    /// or still being built.
-    fn answer_the_list_could_not_carry(&self, action: &Action) -> bool {
-        let Action::ChooseCards { choice_id, cards } = action else {
-            return false;
-        };
-        let DecisionContext::ChooseCards {
-            choice_id: standing,
-            minimum,
-            maximum,
-            candidates,
-            bundles,
-            ..
-        } = &self.decision
-        else {
-            return false;
-        };
-        if standing != choice_id
-            || !selection_is_past_the_cap(*minimum, *maximum, candidates.len(), !bundles.is_empty())
-        {
-            return false;
-        }
-        cards.len() <= (*maximum).min(candidates.len())
-            && !cards.is_empty()
-            && cards.iter().all(|card| candidates.contains(card))
-            && cards
-                .iter()
-                .enumerate()
-                .all(|(index, card)| !cards[..index].contains(card))
-    }
-
-    /// A screen whose orders are too many to lay out — or whose candidates are
-    /// more than a dozen — offers each set once, in candidate order, but the
-    /// build's screen hands its cards back in the order they were picked and a
-    /// body that works through them one at a time follows it. The cap on the action list is a boundary this baseline
-    /// draws rather than a rule of the build's, so the gate takes any order of
-    /// a set the list does carry: a whole answer of distinct candidates, within
-    /// the screen's counts.
-    fn order_the_list_left_out(&self, action: &Action) -> bool {
+    /// A screen that takes several cards is worked one card at a time on the
+    /// action list — a pick per card, and a confirm once enough are in — but
+    /// the build's recorder writes only the completed choice: every card
+    /// picked, in the order they were picked. A recorded run therefore answers
+    /// such a screen with its whole set in one action the list never lays
+    /// out, and the gate reads the screen rather than the list: distinct
+    /// candidates, within the screen's counts, in any order. The order is
+    /// kept, because the build hands the cards back in it and a body that
+    /// works through them one at a time follows it.
+    fn a_whole_answer_within_the_counts(&self, action: &Action) -> bool {
         let Action::ChooseCards { choice_id, cards } = action else {
             return false;
         };
@@ -2127,13 +2069,10 @@ impl Simulator {
             return false;
         };
         let upper = (*maximum).min(candidates.len());
-        let least = (*minimum).max(2);
         standing == choice_id
             && bundles.is_empty()
-            && (candidates.len() > 12
-                || ordered_selection_count(candidates.len(), least, upper)
-                    > ORDERED_SELECTION_LIMIT)
-            && (least..=upper).contains(&cards.len())
+            && upper > 1
+            && ((*minimum).max(1)..=upper).contains(&cards.len())
             && cards.iter().all(|card| candidates.contains(card))
             && cards
                 .iter()
@@ -2258,27 +2197,28 @@ impl Simulator {
             }
             Action::ChooseCards { choice_id, cards } => {
                 self.suspension_block = None;
-                // A click that grows the selection on a screen past the cap
-                // settles nothing: no body runs, and the build's recorder
-                // writes only the completed choice, so there is no checkpoint
-                // to align to either.
-                if self.selection_grows(*choice_id, cards) {
-                    return Ok(());
-                }
                 self.resolve_choice(*choice_id, cards, events)?;
-                let victory = if self.state.combat.is_some() {
-                    self.settle_queue(events)?
-                } else {
-                    // Out of combat what waits is the rest of whatever body the
-                    // screen interrupted.
-                    self.settle_run_pending(events)?;
-                    self.settle_purchase_owed_by_rewards(events)?;
-                    false
-                };
-                self.push_checkpoint("choice.settled")?;
-                if victory {
-                    self.finish_combat(events)?;
+                self.settle_answered_screen(events)?;
+            }
+            // A pick puts one more card into the standing selection. On its
+            // own it settles nothing — no body runs, and the build's recorder
+            // writes only the completed choice, so there is no checkpoint to
+            // align to either — unless it is the card that fills the screen,
+            // which finishes the answer the way the build's own screen closes
+            // on its last click.
+            Action::PickCard { choice_id, card } => {
+                self.suspension_block = None;
+                if let Some(cards) = self.selection_grown_by(*choice_id, card)? {
+                    self.resolve_choice(*choice_id, &cards, events)?;
+                    self.settle_answered_screen(events)?;
                 }
+            }
+            // The confirm button: the selection as it stands is the answer.
+            Action::ConfirmCards { choice_id } => {
+                self.suspension_block = None;
+                let cards = self.standing_selection(*choice_id)?;
+                self.resolve_choice(*choice_id, &cards, events)?;
+                self.settle_answered_screen(events)?;
             }
             Action::ChooseAlternative {
                 choice_id,
@@ -21596,11 +21536,12 @@ impl Simulator {
         self.claim_reward(set_id, reward_index, events)
     }
 
-    /// Takes an under-minimum answer on a screen past the enumeration cap as
-    /// the selection now standing, the way the build's own screen holds the
-    /// clicks until enough are in. Answers on any other screen, and answers big
-    /// enough to finish this one, pass through to be resolved.
-    fn selection_grows(&mut self, choice_id: ChoiceId, cards: &[CardHandle]) -> bool {
+    /// The suspended choice a pick or a confirm names, wherever the screen is
+    /// held.
+    fn suspended_choice_mut(
+        &mut self,
+        choice_id: ChoiceId,
+    ) -> Result<&mut SuspendedChoice, EngineError> {
         let choice = if let Some(combat) = self.state.combat.as_mut() {
             combat.suspended_choice.as_mut()
         } else {
@@ -21609,23 +21550,58 @@ impl Simulator {
                 .as_mut()
                 .and_then(|run| run.suspended_choice.as_mut())
         };
-        let Some(choice) = choice else {
-            return false;
-        };
-        if choice.id != choice_id
-            || cards.is_empty()
-            || cards.len() >= choice.minimum
-            || !selection_is_past_the_cap(
-                choice.minimum,
-                choice.maximum,
-                choice.candidates.len(),
-                !choice.bundles.is_empty(),
-            )
-        {
-            return false;
+        match choice {
+            Some(choice) if choice.id == choice_id => Ok(choice),
+            _ => Err(invariant_error(InvariantViolation::ChoiceMismatch)),
         }
-        choice.picked = cards.to_vec();
-        true
+    }
+
+    /// Puts `card` into the standing selection, the way the build's own screen
+    /// holds the clicks until enough are in. The selection comes back where
+    /// the pick filled the screen — the answer is complete — and nothing
+    /// while the screen stays up for more.
+    fn selection_grown_by(
+        &mut self,
+        choice_id: ChoiceId,
+        card: &CardHandle,
+    ) -> Result<Option<Vec<CardHandle>>, EngineError> {
+        let choice = self.suspended_choice_mut(choice_id)?;
+        if !choice.candidates.contains(card) || choice.picked.contains(card) {
+            return Err(invariant_error(InvariantViolation::ChoiceMismatch));
+        }
+        choice.picked.push(card.clone());
+        let upper = choice.maximum.min(choice.candidates.len());
+        Ok((choice.picked.len() >= upper).then(|| choice.picked.clone()))
+    }
+
+    /// The selection standing on the screen, for the confirm to answer with.
+    fn standing_selection(&mut self, choice_id: ChoiceId) -> Result<Vec<CardHandle>, EngineError> {
+        let choice = self.suspended_choice_mut(choice_id)?;
+        if choice.picked.is_empty() || choice.picked.len() < choice.minimum {
+            return Err(invariant_error(InvariantViolation::ChoiceMismatch));
+        }
+        Ok(choice.picked.clone())
+    }
+
+    /// What follows an answered screen: in combat the queue the screen
+    /// interrupted settles, and may finish the fight; out of combat what waits
+    /// is the rest of whatever body the screen interrupted.
+    fn settle_answered_screen(
+        &mut self,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<(), EngineError> {
+        let victory = if self.state.combat.is_some() {
+            self.settle_queue(events)?
+        } else {
+            self.settle_run_pending(events)?;
+            self.settle_purchase_owed_by_rewards(events)?;
+            false
+        };
+        self.push_checkpoint("choice.settled")?;
+        if victory {
+            self.finish_combat(events)?;
+        }
+        Ok(())
     }
 
     #[allow(
@@ -28399,103 +28375,45 @@ impl Simulator {
                 // answer its counts allow, which is the button being
                 // cancelable puts on it.
                 let least = if *cancelable { 0 } else { *minimum };
-                let mut actions = Vec::new();
-                // One card is an answer only where the screen's own minimum takes
-                // one: confirm stays disabled while the least and the most are
-                // the same, and completing needs the selection to have reached
-                // the minimum.
-                if *minimum <= 1 && *maximum >= 1 {
-                    actions.extend(candidates.iter().cloned().map(|candidate| {
-                        Action::ChooseCards {
-                            choice_id: *choice_id,
-                            cards: vec![candidate],
-                        }
-                    }));
-                }
-                // A screen that takes several cards at once hands them back in
-                // the order they were picked, and that order is kept: cards
-                // going to the deck join it in it. So every order the screen
-                // would accept is its own answer, not just every set.
-                //
-                // Past a dozen candidates the sets alone are too many to lay
-                // out, and past `ORDERED_SELECTION_LIMIT` answers so are the
-                // orders; a screen that big offers each set once, in candidate
-                // order, which is the boundary this baseline draws on the
-                // action list rather than a rule of the build's.
                 let upper = (*maximum).min(candidates.len());
-                // A screen over a whole run deck has more candidates than a
-                // mask walk can enumerate, but it usually wants only a couple
-                // of cards: a bracelet asks for three of a deck of twenty-odd.
-                // Those sets are laid out one at a time, in candidate order.
-                if upper > 1 && candidates.len() > 12 {
-                    let least = (*minimum).max(2);
-                    let sets = unordered_selection_count(candidates.len(), least, upper);
-                    if sets <= ORDERED_SELECTION_LIMIT {
-                        for size in least..=upper {
-                            for chosen in combinations_of(candidates, size) {
-                                actions.push(Action::ChooseCards {
-                                    choice_id: *choice_id,
-                                    cards: chosen,
-                                });
+                let mut actions = Vec::new();
+                if upper <= 1 {
+                    // A screen that takes one card is answered with it. One
+                    // card is an answer only where the screen's own minimum
+                    // takes one: confirm stays disabled until the selection
+                    // has reached the minimum.
+                    if *minimum <= 1 && *maximum >= 1 {
+                        actions.extend(candidates.iter().cloned().map(|candidate| {
+                            Action::ChooseCards {
+                                choice_id: *choice_id,
+                                cards: vec![candidate],
                             }
-                        }
+                        }));
                     }
-                }
-                // Past the cap the sets themselves are too many, so the
-                // screen is offered the way the build's own is worked: one
-                // card clicked into the selection at a time, each action
-                // naming the selection so far plus one more card. An action
-                // that reaches the minimum is a finished answer; one below it
-                // leaves the screen standing with the selection grown. A
-                // recorded run names its whole set in one answer instead, and
-                // the legality gate takes that directly — see
-                // `answer_the_list_could_not_carry`.
-                if selection_is_past_the_cap(
-                    *minimum,
-                    *maximum,
-                    candidates.len(),
-                    !bundles.is_empty(),
-                ) && picked.len() < upper
-                {
+                } else {
+                    // A screen that takes several cards is worked the way the
+                    // build's own is: one card picked into the selection at a
+                    // time, and the selection confirmed once it holds enough —
+                    // or closed by the pick that fills it. Laying out whole
+                    // answers instead would put one action per set on the
+                    // list, which for a few cards out of a deck is thousands,
+                    // and a pick per card is the screen the player sees. A
+                    // recorded run names its whole set in one answer, and the
+                    // legality gate takes that directly — see
+                    // `a_whole_answer_within_the_counts`.
                     for candidate in candidates {
                         if picked.contains(candidate) {
                             continue;
                         }
-                        let mut cards = picked.clone();
-                        cards.push(candidate.clone());
-                        actions.push(Action::ChooseCards {
+                        actions.push(Action::PickCard {
                             choice_id: *choice_id,
-                            cards,
+                            card: candidate.clone(),
                         });
                     }
-                }
-                if upper > 1 && candidates.len() <= 12 {
-                    let least = (*minimum).max(2);
-                    let ordered = ordered_selection_count(candidates.len(), least, upper);
-                    for mask in 1_u32..(1 << candidates.len()) {
-                        let size = mask.count_ones() as usize;
-                        if size < 2 || size < *minimum || size > upper {
-                            continue;
-                        }
-                        let picked: Vec<_> = candidates
-                            .iter()
-                            .enumerate()
-                            .filter(|(index, _)| mask & (1 << index) != 0)
-                            .map(|(_, candidate)| candidate.clone())
-                            .collect();
-                        if ordered <= ORDERED_SELECTION_LIMIT {
-                            for order in permutations_of(&picked) {
-                                actions.push(Action::ChooseCards {
-                                    choice_id: *choice_id,
-                                    cards: order,
-                                });
-                            }
-                        } else {
-                            actions.push(Action::ChooseCards {
-                                choice_id: *choice_id,
-                                cards: picked,
-                            });
-                        }
+                    if !picked.is_empty() && picked.len() >= *minimum && picked.len() < upper {
+                        actions.push(Action::ConfirmCards {
+                            choice_id: *choice_id,
+                        });
                     }
                 }
                 // Taking nothing is offered after the cards themselves, which is
@@ -29973,7 +29891,10 @@ fn action_matches_family(action: &Action, expected: &str) -> bool {
                 Action::PlayCard { .. } | Action::EndTurn { .. } | Action::UsePotion { .. },
                 "combat_priority"
             )
-            | (Action::ChooseCards { .. }, "choose_cards")
+            | (
+                Action::ChooseCards { .. } | Action::PickCard { .. } | Action::ConfirmCards { .. },
+                "choose_cards"
+            )
             | (Action::ClaimReward { .. } | Action::AdvanceAct, "rewards")
             | (Action::Proceed, "rewards" | "room_proceed")
     )
@@ -30665,91 +30586,6 @@ pub(crate) fn round_half_even(value: f64) -> f64 {
     } else {
         floor + 1.0
     }
-}
-
-/// How many ordered answers a multi-card screen may lay out before this
-/// baseline stops enumerating the orders and offers each set once.
-const ORDERED_SELECTION_LIMIT: usize = 4096;
-
-/// How many unordered selections of `least..=most` cards there are out of
-/// `candidates`, saturating rather than overflowing.
-fn unordered_selection_count(candidates: usize, least: usize, most: usize) -> usize {
-    let mut total: usize = 0;
-    for size in least..=most {
-        let mut sets: usize = 1;
-        for step in 0..size {
-            sets = sets.saturating_mul(candidates.saturating_sub(step)) / (step + 1);
-        }
-        total = total.saturating_add(sets);
-    }
-    total
-}
-
-/// Every set of exactly `size` candidates, in candidate order.
-fn combinations_of<T: Clone>(candidates: &[T], size: usize) -> Vec<Vec<T>> {
-    if size == 0 || size > candidates.len() {
-        return Vec::new();
-    }
-    let mut picks: Vec<usize> = (0..size).collect();
-    let mut out = Vec::new();
-    loop {
-        out.push(
-            picks
-                .iter()
-                .map(|index| candidates[*index].clone())
-                .collect(),
-        );
-        let mut at = size;
-        loop {
-            if at == 0 {
-                return out;
-            }
-            at -= 1;
-            if picks[at] != at + candidates.len() - size {
-                break;
-            }
-        }
-        picks[at] += 1;
-        for step in at + 1..size {
-            picks[step] = picks[step - 1] + 1;
-        }
-    }
-}
-
-/// How many ordered selections of `least..=most` cards there are out of
-/// `candidates`, saturating rather than overflowing.
-fn ordered_selection_count(candidates: usize, least: usize, most: usize) -> usize {
-    let mut total: usize = 0;
-    for size in least..=most {
-        let mut arrangements: usize = 1;
-        for step in 0..size {
-            arrangements = arrangements.saturating_mul(candidates.saturating_sub(step));
-        }
-        total = total.saturating_add(arrangements);
-        if total > ORDERED_SELECTION_LIMIT {
-            return usize::MAX;
-        }
-    }
-    total
-}
-
-/// Every order the picked cards could have been chosen in, in a stable order:
-/// each card in turn taken first, with the rest ordered the same way behind it.
-fn permutations_of(cards: &[CardHandle]) -> Vec<Vec<CardHandle>> {
-    if cards.len() <= 1 {
-        return vec![cards.to_vec()];
-    }
-    let mut orders = Vec::new();
-    for (index, card) in cards.iter().enumerate() {
-        let mut rest = cards.to_vec();
-        rest.remove(index);
-        for mut tail in permutations_of(&rest) {
-            let mut order = vec![card.clone()];
-            order.append(&mut tail);
-            orders.push(order);
-        }
-    }
-    orders
 }
 
 fn unsupported_content(model_id: &ModelId) -> EngineError {

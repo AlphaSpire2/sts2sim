@@ -2170,22 +2170,22 @@ fn what_a_gorge_takes_joins_the_deck_where_the_relics_can_see_it() {
         &mut gorged,
         "ROOM_FULL_OF_CHEESE.pages.INITIAL.options.GORGE",
     );
-    let (choice_id, candidates) = gorged
-        .legal_actions()
-        .iter()
-        .find_map(|action| match action {
-            Action::ChooseCards { choice_id, cards } => Some((*choice_id, cards.clone())),
-            _ => None,
-        })
-        .expect("the grid asks for two");
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        candidates,
+        ..
+    } = gorged.decision().clone()
+    else {
+        panic!("the grid asks for two: {:?}", gorged.decision());
+    };
     let before = gorged.state().run_player.deck.len();
 
-    gorged
-        .step(Action::ChooseCards {
-            choice_id,
-            cards: candidates[..2].to_vec(),
-        })
-        .expect("the pick applies");
+    // The grid asks for two, picked one at a time; the second fills it.
+    for card in candidates[..2].iter().cloned() {
+        gorged
+            .step(Action::PickCard { choice_id, card })
+            .expect("the pick applies");
+    }
 
     assert_eq!(
         gorged.state().run_player.deck.len(),

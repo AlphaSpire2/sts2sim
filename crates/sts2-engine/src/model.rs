@@ -5950,11 +5950,10 @@ pub enum DecisionContext {
         /// bundle screens: an answer names one whole bundle and nothing else.
         #[serde(default)]
         bundles: Vec<Vec<usize>>,
-        /// What the answer being built already holds, on a screen with more
-        /// answers than the action list can lay out: such a screen is worked
-        /// the way the build's own is, one card toggled in at a time, and this
-        /// is the selection standing between the clicks. Empty on every screen
-        /// small enough to enumerate whole answers.
+        /// What the answer being built already holds, on a screen that takes
+        /// several cards: such a screen is worked the way the build's own is,
+        /// one card picked in at a time, and this is the selection standing
+        /// between the picks. Empty on a screen that takes one card.
         #[serde(default)]
         picked: Vec<CardHandle>,
     },
@@ -6045,9 +6044,31 @@ pub enum Action {
     EndTurn {
         turn: u32,
     },
+    /// The whole answer to a card screen: every card picked, in the order
+    /// they were picked. The action list lays this out for a screen that takes
+    /// one card — and, on a bundle screen, one whole bundle — while a screen
+    /// that takes several is worked with [`Action::PickCard`] and
+    /// [`Action::ConfirmCards`]. The legality gate still takes a whole answer
+    /// on any screen, because the build's recorder writes only the completed
+    /// choice and a recorded run answers with it in one step.
     ChooseCards {
         choice_id: ChoiceId,
         cards: Vec<CardHandle>,
+    },
+    /// One card picked into the standing selection of a screen that takes
+    /// several, the way the build's own screen is clicked. The pick that fills
+    /// the screen finishes the answer; one that leaves room keeps the screen
+    /// up, with the selection so far in the decision's `picked`.
+    PickCard {
+        choice_id: ChoiceId,
+        card: CardHandle,
+    },
+    /// The confirm button of a screen that takes several cards: the selection
+    /// standing in the decision's `picked` is the answer. It is offered once
+    /// the selection holds the screen's minimum while the screen still has
+    /// room for more.
+    ConfirmCards {
+        choice_id: ChoiceId,
     },
     /// Answering a screen with one of the buttons that is not a card, which a
     /// relic put there.
@@ -6076,7 +6097,9 @@ impl Action {
             Self::UsePotion { .. } | Self::DiscardPotion { .. } => "potion",
             Self::AdvanceAct => "act_transition",
             Self::PlayCard { .. } | Self::EndTurn { .. } => "combat_priority",
-            Self::ChooseCards { .. } => "choose_cards",
+            Self::ChooseCards { .. } | Self::PickCard { .. } | Self::ConfirmCards { .. } => {
+                "choose_cards"
+            }
             Self::ChooseAlternative { .. } => "choose_alternative",
             Self::ClaimReward { .. } => "rewards",
             Self::Proceed => "room_proceed",

@@ -735,10 +735,11 @@ fn a_dredge_takes_what_the_hand_has_room_for() {
     assert!(pile(&simulator, PileName::Exhaust).contains(&"CARD.DREDGE".to_owned()));
 }
 
-/// A dredge over a discard pile of more than a dozen is offered each set of
-/// three once, in pile order, and still takes the three in whatever order they
-/// were picked: they join the hand in that order. Seed `XGTTW8TTEQ`, record
-/// 1125, three of eighteen named against pile order.
+/// A dredge over a discard pile is worked a pick at a time on the action list,
+/// and the screen still takes a whole set in whatever order it was picked —
+/// the shape a recorded run answers with: the three join the hand in that
+/// order. Seed `XGTTW8TTEQ`, record 1125, three of eighteen named against pile
+/// order.
 #[test]
 fn a_dredge_over_a_big_discard_takes_its_cards_in_the_order_they_were_named() {
     let mut scenario = scenario(&[39], &[("CARD.DREDGE", 0)], &[]);
@@ -764,35 +765,28 @@ fn a_dredge_over_a_big_discard_takes_its_cards_in_the_order_they_were_named() {
     let mut simulator = built(scenario);
     play(&mut simulator, "CARD.DREDGE");
     let named = ["CARD.UNLEASH", "CARD.BONE_SHARDS", "CARD.SIC_EM"];
-    let (choice_id, cards) = simulator
-        .legal_actions()
-        .iter()
-        .find_map(|action| match action {
-            Action::ChooseCards { choice_id, cards }
-                if cards.len() == named.len()
-                    && named.iter().all(|model| {
-                        cards
-                            .iter()
-                            .any(|card| card.fingerprint.model_id == id(model))
-                    }) =>
-            {
-                Some((*choice_id, cards.clone()))
-            }
-            _ => None,
-        })
-        .expect("the set is on the list");
-    assert_eq!(
-        cards[0].fingerprint.model_id,
-        id("CARD.SIC_EM"),
-        "the list carries the set in pile order"
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        candidates,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("the dredge names its cards: {:?}", simulator.decision());
+    };
+    assert!(
+        !simulator
+            .legal_actions()
+            .iter()
+            .any(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() > 1)),
+        "the list lays out no whole set: the screen is worked a pick at a time"
     );
     let in_order: Vec<_> = named
         .iter()
         .map(|model| {
-            cards
+            candidates
                 .iter()
                 .find(|card| card.fingerprint.model_id == id(model))
-                .expect("the card is in the set")
+                .expect("the card is on the screen")
                 .clone()
         })
         .collect();
@@ -801,7 +795,7 @@ fn a_dredge_over_a_big_discard_takes_its_cards_in_the_order_they_were_named() {
             choice_id,
             cards: in_order,
         })
-        .expect("an order of a set the list carries is an answer");
+        .expect("a whole set within the screen's counts is an answer");
     assert_eq!(pile(&simulator, PileName::Hand), named);
 }
 

@@ -118,39 +118,48 @@ fn play_action(simulator: &Simulator, model_id: &str) -> Option<Action> {
         .cloned()
 }
 
-/// Answers a card screen with the one card the test names.
+/// Answers a card screen with the one card the test names: the whole answer
+/// where the screen takes one card, and a pick confirmed where it takes
+/// several.
 fn choose(simulator: &mut Simulator, model_id: &str) {
-    let wanted = id(model_id);
-    let action = simulator
-        .legal_actions()
-        .iter()
-        .find(|action| {
-            matches!(action, Action::ChooseCards { cards, .. }
-                if cards.len() == 1 && cards[0].fingerprint.model_id == wanted)
-        })
-        .cloned()
-        .unwrap_or_else(|| panic!("{model_id} was not on the screen"));
-    simulator.step(action).expect("the choice applies");
+    choose_in_order(simulator, &[model_id]);
 }
 
 /// Answers a card screen with the cards the test names, in the order it names
-/// them, which is the order the screen hands them back in.
+/// them, which is the order the screen hands them back in: the whole answer
+/// where the screen takes one card, and a pick per card — then the confirm,
+/// where the screen still has room — where it takes several.
 fn choose_in_order(simulator: &mut Simulator, model_ids: &[&str]) {
-    let wanted: Vec<_> = model_ids.iter().map(|model_id| id(model_id)).collect();
-    let action = simulator
+    for model_id in model_ids {
+        let wanted = id(model_id);
+        let action = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| match action {
+                Action::ChooseCards { cards, .. } => {
+                    cards.len() == 1 && cards[0].fingerprint.model_id == wanted
+                }
+                Action::PickCard { card, .. } => card.fingerprint.model_id == wanted,
+                _ => false,
+            })
+            .cloned()
+            .unwrap_or_else(|| panic!("{model_id} was not on the screen"));
+        simulator.step(action).expect("the choice applies");
+    }
+    confirm_if_offered(simulator);
+}
+
+/// Presses the confirm where a screen that takes several cards is still up
+/// with enough picked.
+fn confirm_if_offered(simulator: &mut Simulator) {
+    if let Some(confirm) = simulator
         .legal_actions()
         .iter()
-        .find(|action| {
-            matches!(action, Action::ChooseCards { cards, .. }
-                if cards.len() == wanted.len()
-                    && cards
-                        .iter()
-                        .zip(&wanted)
-                        .all(|(card, wanted)| card.fingerprint.model_id == *wanted))
-        })
+        .find(|action| matches!(action, Action::ConfirmCards { .. }))
         .cloned()
-        .unwrap_or_else(|| panic!("{model_ids:?} was not an answer the screen took"));
-    simulator.step(action).expect("the choice applies");
+    {
+        simulator.step(confirm).expect("the confirm applies");
+    }
 }
 
 /// Answers a card screen with whatever it offers first, which is what a test
@@ -159,10 +168,14 @@ fn choose_anything(simulator: &mut Simulator) {
     let action = simulator
         .legal_actions()
         .iter()
-        .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+        .find(|action| {
+            matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty())
+                || matches!(action, Action::PickCard { .. })
+        })
         .cloned()
         .expect("the screen offers something");
     simulator.step(action).expect("the choice applies");
+    confirm_if_offered(simulator);
 }
 
 fn end_turn(simulator: &mut Simulator) {
@@ -1423,10 +1436,10 @@ fn replay_a_charge_over(size: usize) -> (Vec<Action>, Action, Action, Simulator)
     )
 }
 
-/// A recorded charge over a draw pile of more than a dozen is replayed in the
-/// order it was recorded. The action list carries each pair once, in pile
-/// order, so the recorded order is not on it — but the dive bombs are made in
-/// the order the cards were named, so replay keeps that order.
+/// A recorded charge over a draw pile is replayed in the order it was
+/// recorded. The action list works the screen a pick at a time, so the
+/// recorded pair is not on it — but the dive bombs are made in the order the
+/// cards were named, so replay keeps that order.
 #[test]
 fn a_recorded_charge_is_replayed_in_the_order_it_was_named() {
     let (listed, recorded, applied, after) = replay_a_charge_over(14);
@@ -1438,19 +1451,25 @@ fn a_recorded_charge_is_replayed_in_the_order_it_was_named() {
     assert_eq!(count_in(&after, PileName::Draw, "CARD.MINION_DIVE_BOMB"), 2);
 }
 
-/// Over a pile of ninety-two the pairs are past the cap (C(92, 2) = 4186), so
-/// the action list grows the selection a card at a time and carries no pair
-/// at all. A recorded charge names its pair in one record and is replayed
-/// all the same.
+/// Over a pile of ninety-two the list still grows the selection a pick at a
+/// time and carries no pair at all. A recorded charge names its pair in one
+/// record and is replayed all the same.
 #[test]
-fn a_recorded_charge_past_the_cap_is_replayed_in_one_record() {
+fn a_recorded_charge_over_a_big_pile_is_replayed_in_one_record() {
     let (listed, recorded, applied, after) = replay_a_charge_over(92);
-    assert!(
+    assert_eq!(
         listed
             .iter()
-            .filter(|action| matches!(action, Action::ChooseCards { .. }))
-            .all(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() == 1)),
-        "past the cap the list carries no whole pair"
+            .filter(|action| matches!(action, Action::PickCard { .. }))
+            .count(),
+        92,
+        "a pick per card"
+    );
+    assert!(
+        !listed
+            .iter()
+            .any(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty())),
+        "the list carries no whole pair"
     );
     assert_eq!(applied, recorded, "the record's own order");
     assert_eq!(count_in(&after, PileName::Draw, "CARD.MINION_DIVE_BOMB"), 2);
@@ -1499,11 +1518,11 @@ fn a_crush_under_that_kills_its_dampener_saps_as_the_upgraded_card() {
     );
 }
 
-/// A guards over a hand of seven has more orders than the action list lays
-/// out, so the list carries each set once — and the screen still takes the set
-/// in whatever order it was picked, because the sacrifices are made in that
-/// order. Seed `PCFYFYGRAS`, record 2171: four of seven named against hand
-/// order.
+/// A guards over a hand of seven is worked a pick at a time on the action
+/// list, and the screen still takes a whole set in whatever order it was
+/// picked — the shape a recorded run answers with — because the sacrifices are
+/// made in that order. Seed `PCFYFYGRAS`, record 2171: four of seven named
+/// against hand order.
 #[test]
 fn a_guards_over_a_big_hand_takes_its_cards_in_the_order_they_were_named() {
     let mut simulator = fight(&[
@@ -1518,36 +1537,28 @@ fn a_guards_over_a_big_hand_takes_its_cards_in_the_order_they_were_named() {
     ]);
     play(&mut simulator, "CARD.GUARDS");
     let named = ["CARD.GLOW", "CARD.STRIKE_REGENT", "CARD.DEFEND_REGENT"];
-    let set = simulator
-        .legal_actions()
-        .iter()
-        .find_map(|action| match action {
-            Action::ChooseCards { choice_id, cards }
-                if cards.len() == named.len()
-                    && named.iter().all(|model| {
-                        cards
-                            .iter()
-                            .any(|card| card.fingerprint.model_id == id(model))
-                    }) =>
-            {
-                Some((*choice_id, cards.clone()))
-            }
-            _ => None,
-        })
-        .expect("the set is on the list");
-    let (choice_id, cards) = set;
-    assert_eq!(
-        cards[0].fingerprint.model_id,
-        id("CARD.DEFEND_REGENT"),
-        "the list carries the set in hand order"
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        candidates,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("the guards name their cards: {:?}", simulator.decision());
+    };
+    assert!(
+        !simulator
+            .legal_actions()
+            .iter()
+            .any(|action| matches!(action, Action::ChooseCards { cards, .. } if cards.len() > 1)),
+        "the list lays out no whole set: the screen is worked a pick at a time"
     );
     let in_order: Vec<_> = named
         .iter()
         .map(|model| {
-            cards
+            candidates
                 .iter()
                 .find(|card| card.fingerprint.model_id == id(model))
-                .expect("the card is in the set")
+                .expect("the card is on the screen")
                 .clone()
         })
         .collect();
@@ -1556,7 +1567,7 @@ fn a_guards_over_a_big_hand_takes_its_cards_in_the_order_they_were_named() {
             choice_id,
             cards: in_order,
         })
-        .expect("an order of a set the list carries is an answer");
+        .expect("a whole set within the screen's counts is an answer");
     let hand = ids_in(&simulator, PileName::Hand);
     let sacrifice_at = |index: usize| {
         assert_eq!(hand[index].1, "CARD.MINION_SACRIFICE", "{hand:?}");
@@ -1581,17 +1592,15 @@ fn a_guards_over_a_big_hand_takes_its_cards_in_the_order_they_were_named() {
         ("CARD.PARTICLE_WALL", 0),
     ]);
     play(&mut refused, "CARD.GUARDS");
-    let (choice_id, mut cards) = refused
-        .legal_actions()
-        .iter()
-        .find_map(|action| match action {
-            Action::ChooseCards { choice_id, cards } if cards.len() == 2 => {
-                Some((*choice_id, cards.clone()))
-            }
-            _ => None,
-        })
-        .expect("a pair is on the list");
-    cards[1] = cards[0].clone();
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        candidates,
+        ..
+    } = refused.decision().clone()
+    else {
+        panic!("the guards name their cards: {:?}", refused.decision());
+    };
+    let cards = vec![candidates[0].clone(), candidates[0].clone()];
     assert!(
         refused
             .step(Action::ChooseCards { choice_id, cards })
