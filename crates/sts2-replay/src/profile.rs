@@ -76,7 +76,9 @@ impl TraceProfile {
         simulated_terminal: Option<&str>,
     ) -> ReplayVerification {
         let outcome = match failure {
-            Some(AdapterErrorCode::MalformedRecord) => ReplayOutcome::InvalidInput,
+            Some(AdapterErrorCode::MalformedRecord | AdapterErrorCode::UnrecordedProgress) => {
+                ReplayOutcome::InvalidInput
+            }
             Some(AdapterErrorCode::UnsupportedContent) => ReplayOutcome::UnsupportedContent,
             Some(AdapterErrorCode::IllegalAction | AdapterErrorCode::StateDivergence) => {
                 ReplayOutcome::Diverged
@@ -349,6 +351,10 @@ mod tests {
             ),
             (
                 AdapterErrorCode::MalformedRecord,
+                ReplayOutcome::InvalidInput,
+            ),
+            (
+                AdapterErrorCode::UnrecordedProgress,
                 ReplayOutcome::InvalidInput,
             ),
         ] {

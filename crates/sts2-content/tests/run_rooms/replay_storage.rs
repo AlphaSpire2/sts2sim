@@ -285,3 +285,64 @@ fn an_unchanged_field_in_a_delta_still_produces_the_same_first_divergence() {
         assert_eq!(actual.divergence, expected.divergence);
     }
 }
+
+/// Walks onto a fight, ends a turn, quits and loads, then observes the load
+/// with `edit` applied to the state the load really comes back to.
+fn resume_observed(edit: impl FnOnce(&mut Value)) -> AdapterError {
+    let mut source = ReplayAdapter::new(super::generated_run());
+    let mut records = vec![record(1, "map.choose", json!({"data":{"col":4,"row":1}}))];
+    source.accept(&records[0]).unwrap();
+    records.push(observe(
+        2,
+        1,
+        "action.settled",
+        &observation::render(source.simulator()),
+    ));
+    for record in [
+        record(3, "combat.end_turn", json!({"data":{}})),
+        record(4, "run.resume", resume_data(false)),
+    ] {
+        source.accept(&record).unwrap();
+        records.push(record);
+    }
+    let mut loaded = observation::render(source.simulator());
+    edit(&mut loaded);
+    records.push(observe(5, 4, "run.resume", &loaded));
+    records.push(record(6, "combat.end_turn", json!({"data":{}})));
+    let (_, error) = replay(&encode(&records, 2, true, false));
+    error.expect("the edited load is reported")
+}
+
+#[test]
+fn a_load_further_along_the_map_than_the_recording_reached_is_unrecorded_play() {
+    let error = resume_observed(|state| {
+        state["run"]["visited_map"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"col":4,"row":2}));
+        state["run"]["current_map_coord"] = json!({"col":4,"row":2});
+    });
+    assert_eq!(
+        error.code,
+        sts2_replay::AdapterErrorCode::UnrecordedProgress
+    );
+    assert_eq!(error.record_sequence, 5);
+    assert!(error.detail.contains("record 4"), "{}", error.detail);
+    assert!(
+        error
+            .divergence
+            .as_ref()
+            .unwrap()
+            .differences
+            .iter()
+            .any(|difference| difference.pointer == "/run/visited_map/length"),
+        "the differing fields are still reported"
+    );
+}
+
+#[test]
+fn a_load_that_differs_without_being_further_along_is_a_state_divergence() {
+    let error = resume_observed(|state| state["players"][0]["gold"] = json!(123_456));
+    assert_eq!(error.code, sts2_replay::AdapterErrorCode::StateDivergence);
+    assert_eq!(error.record_sequence, 5);
+}

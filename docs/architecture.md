@@ -2363,7 +2363,11 @@ differing field, its expected and simulated values, and the last matching
 checkpoint.
 
 On resume, the adapter restores its save point and applies the load's own
-marks; every resume takes this one path. The recorder's
+marks; every resume takes this one path. It keeps how far along the map the
+recording had reached before the quit. If the first observation compared after
+the load differs and stands further along than that, the play between the quit
+and the load was never recorded, and replay stops with an unrecorded-progress
+error, the differing fields attached, instead of a state divergence. The recorder's
 `combat_runtime` block describes only the turn-handover flags, which the
 renderer does not emit, so it is not read. The flags in recorded observations
 are listed among the uncovered fields.

@@ -19,6 +19,9 @@ pub enum AdapterErrorCode {
     UnsupportedContent,
     /// The simulation and the recording disagree about state.
     StateDivergence,
+    /// The run was loaded further along the map than the recording reached
+    /// before the quit: play between the quit and the load was not recorded.
+    UnrecordedProgress,
 }
 
 #[derive(Debug)]
@@ -95,6 +98,41 @@ pub struct ReplayAdapter {
     actions_since_save: usize,
     resumes: usize,
     rewound_actions: usize,
+    /// The `run.resume` record and how far along the map the recording had
+    /// reached before that quit, held until the first observation after the
+    /// load is compared.
+    resume_reach: Option<(u64, MapProgress)>,
+}
+
+/// How far along the map a run stands: the act, then how many of its map
+/// points have been walked onto. A save is written on the way, so a load can
+/// only come back to a point the run had already reached.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct MapProgress {
+    act: usize,
+    points: usize,
+}
+
+impl MapProgress {
+    fn simulated(state: &sts2_engine::GameState) -> Option<Self> {
+        state.run.as_ref().map(|run| Self {
+            act: run.current_act,
+            points: run.visited.len(),
+        })
+    }
+
+    fn recorded(state: &Value) -> Option<Self> {
+        Some(Self {
+            act: usize::try_from(state.pointer("/run/act")?.as_u64()?).ok()?,
+            points: state.pointer("/run/visited_map")?.as_array()?.len(),
+        })
+    }
+}
+
+impl Display for MapProgress {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "act {}, map point {}", self.act + 1, self.points)
+    }
 }
 
 impl ReplayAdapter {
@@ -128,6 +166,7 @@ impl ReplayAdapter {
             actions_since_save: 0,
             resumes: 0,
             rewound_actions: 0,
+            resume_reach: None,
         }
     }
 
@@ -538,10 +577,20 @@ impl ReplayAdapter {
     /// the save point, and the load's own marks are applied on top of it.
     /// A recorded `combat_runtime` block carries only the turn-handover flags,
     /// which no gameplay reads and replay does not compare, so it is not read.
+    ///
+    /// The save can only be somewhere the run had already reached at the
+    /// quit, so how far the recording got is kept: a load observed further
+    /// along than that means the game was played on without being recorded.
     fn resume(&mut self, record: &Record) -> Result<(), AdapterError> {
         if self.verify_observations {
             self.pass_over_stage_observation();
             self.verify_pending_observation()?;
+            if let Some(reached) = MapProgress::simulated(self.simulator.state()) {
+                let reached = self
+                    .resume_reach
+                    .map_or(reached, |(_, earlier)| earlier.max(reached));
+                self.resume_reach = Some((record.sequence, reached));
+            }
         }
         let Some(save_point) = self.save_point.as_ref() else {
             return Err(Self::error(
@@ -1290,28 +1339,46 @@ impl ReplayAdapter {
         let before = differences.len();
         differences.retain(|difference| !unwritten_reward_block(expected, difference));
         self.unwritten_reward_blocks += before - differences.len();
+        let resume_reach = self.resume_reach.take();
         if differences.is_empty() {
             self.compared_observations += 1;
             self.last_matching_checkpoint = Some(sequence);
             return Ok(());
         }
         let first = differences[0].clone();
-        let mut error = Self::error(
-            &record,
-            AdapterErrorCode::StateDivergence,
-            format!(
-                "{} expected {} but simulated {}",
-                first.pointer,
-                first
-                    .expected
-                    .as_ref()
-                    .map_or("nothing".to_owned(), ToString::to_string),
-                first
-                    .actual
-                    .as_ref()
-                    .map_or("nothing".to_owned(), ToString::to_string),
-            ),
-        );
+        let unrecorded = resume_reach.and_then(|(resume, reached)| {
+            MapProgress::recorded(expected)
+                .filter(|loaded| *loaded > reached)
+                .map(|loaded| (resume, reached, loaded))
+        });
+        let mut error = if let Some((resume, reached, loaded)) = unrecorded {
+            Self::error(
+                &record,
+                AdapterErrorCode::UnrecordedProgress,
+                format!(
+                    "the run loaded at record {resume} stands at {loaded}, past {reached} \
+                     where the recording stopped before the quit; play between the quit \
+                     and the load was not recorded"
+                ),
+            )
+        } else {
+            Self::error(
+                &record,
+                AdapterErrorCode::StateDivergence,
+                format!(
+                    "{} expected {} but simulated {}",
+                    first.pointer,
+                    first
+                        .expected
+                        .as_ref()
+                        .map_or("nothing".to_owned(), ToString::to_string),
+                    first
+                        .actual
+                        .as_ref()
+                        .map_or("nothing".to_owned(), ToString::to_string),
+                ),
+            )
+        };
         error.divergence = Some(Box::new(crate::FirstDivergence {
             fixture_id: String::new(),
             compatibility_id: self.simulator.state().compatibility_id.clone(),

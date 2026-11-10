@@ -30,7 +30,11 @@ the resumed records on from there. The report counts the reloads and the
 rewound actions. A resume needs nothing beyond the record itself: the game's
 turn-handover flags, which a reload can carry over from a game process that
 survived the quit, are read by no gameplay and are not compared, so a
-recording's `combat_runtime` resume block is ignored.
+recording's `combat_runtime` resume block is ignored. A save can only be
+somewhere the run had already reached at the quit, so a load observed further
+along the map (act, then map points walked onto in it) than the recording got
+before the quit means play went unrecorded; replay stops there with
+`unrecorded_progress` rather than a state divergence.
 
 A `Mods` header states which mods were loaded, in whichever order the loader
 enumerated them. There is no allowlist: any mod may be loaded, and neither ids
@@ -238,7 +242,9 @@ are:
   inconsistent inputs;
 - `wrong_decision_context` and `illegal_action` for well-formed actions that
   cannot be applied now;
-- `state_divergence` for a conformance mismatch; and
+- `state_divergence` for a conformance mismatch;
+- `unrecorded_progress` for a recording that loads its run further along than
+  it recorded, so the play in between is missing; and
 - `internal_invariant` for impossible simulator state.
 
 An error includes a stable code, decision/location context, and structured
