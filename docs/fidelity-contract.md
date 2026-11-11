@@ -30,7 +30,9 @@ the resumed records on from there. The report counts the reloads and the
 rewound actions. A resume needs nothing beyond the record itself: the game's
 turn-handover flags, which a reload can carry over from a game process that
 survived the quit, are read by no gameplay and are not compared, so a
-recording's `combat_runtime` resume block is ignored. A save can only be
+recording's `combat_runtime` resume block is ignored. The run's reload count
+is read by no gameplay either and is not compared, so a load whose session
+went unrecorded does not by itself stop replay. A save can only be
 somewhere the run had already reached at the quit, so a load observed further
 along the map (act, then map points walked onto in it) than the recording got
 before the quit means play went unrecorded; replay stops there with

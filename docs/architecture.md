@@ -2370,7 +2370,9 @@ and the load was never recorded, and replay stops with an unrecorded-progress
 error, the differing fields attached, instead of a state divergence. The recorder's
 `combat_runtime` block describes only the turn-handover flags, which the
 renderer does not emit, so it is not read. The flags in recorded observations
-are listed among the uncovered fields.
+are listed among the uncovered fields. So are the run's reload count and each
+history room's turns taken: no gameplay reads either, and a load the recorder
+missed raises the recorded count with nothing else changed.
 
 A replay reports, for the recording it ran, how many observations it compared,
 the exact set of recorded fields the renderer does not emit, and how the run

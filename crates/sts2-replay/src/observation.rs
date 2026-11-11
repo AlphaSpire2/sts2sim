@@ -324,6 +324,9 @@ fn render_relic(relic: &RelicInstance, content: &sts2_engine::ContentRegistry) -
     })
 }
 
+/// The run's reload count and each history room's `turns_taken` are left
+/// unrendered, and so uncovered: no gameplay reads either, and a load the
+/// recorder missed leaves the count behind with nothing else changed.
 fn render_run(state: &GameState, run: &RunState) -> Value {
     let odds = run.unknown_room_odds.weights();
     json!({
@@ -345,7 +348,6 @@ fn render_run(state: &GameState, run: &RunState) -> Value {
             "unknown_map_point_treasure": odds[2],
             "unknown_map_point_shop": odds[3],
         },
-        "reloads": run.reloads,
         "extra": {"started_with_neow": run.started_with_neow},
         "mode": match run.config.mode {
             sts2_engine::RunMode::Standard => "standard",
@@ -386,7 +388,6 @@ fn render_run(state: &GameState, run: &RunState) -> Value {
                                     .iter()
                                     .map(|monster| monster.model_id.to_string())
                                     .collect::<Vec<_>>(),
-                                "turns_taken": room.turns_taken,
                             }))
                             .collect::<Vec<_>>(),
                     }))
