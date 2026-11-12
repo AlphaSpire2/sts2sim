@@ -1448,11 +1448,11 @@ pub fn pael() -> EventDefinition {
                     relic: id("RELIC.PAELS_BLOOD"),
                     available: EventCondition::Always,
                 },
-                // The condition asks for the Necrobinder's Osty, which no run
-                // this baseline generates can have.
+                // Legion is laid out only for a player without an event pet:
+                // no relic that brings one, and no egg in the deck.
                 sts2_engine::ConditionalRelic {
                     relic: id("RELIC.PAELS_LEGION"),
-                    available: EventCondition::Always,
+                    available: EventCondition::NoEventPet,
                 },
             ],
         },
@@ -2628,8 +2628,7 @@ pub fn wood_carvings() -> EventDefinition {
                 sts2_engine::CardSelectCmd::FromDeckGeneric {
                     semantics: ChoiceSemantics::known(vec![
                         ChoiceOp::new(ChoiceOperationKind::Transform, ChoiceScope::Run)
-                            .model(id(into))
-                            .inheriting(true, false),
+                            .model(id(into)),
                     ]),
                     prefs: sts2_engine::SelectorPrefs::exactly(1),
                     filter: sts2_engine::CardFilter::BasicTransformable,
@@ -2637,10 +2636,11 @@ pub fn wood_carvings() -> EventDefinition {
                         sts2_engine::CardCmd::TransformDeckCards {
                             cards: sts2_engine::CardSelector::Chosen,
                             // The replacement is named, so nothing is rolled
-                            // for it.
+                            // for it, and it is a fresh card: an upgraded
+                            // starter still becomes an unupgraded carving.
                             replacement: sts2_engine::CardTransformReplacement::Named {
                                 model: id(into),
-                                keeps_upgrade: true,
+                                keeps_upgrade: false,
                                 keeps_enchantment: false,
                             },
                             one_at_a_time: false,

@@ -3256,6 +3256,74 @@ fn a_prismatic_gem_is_held_once_it_is_taken() {
     );
 }
 
+/// A card reward a gem widened names every pool it drew on: each character's,
+/// in the order the widening lays them out, which is what the reward's own
+/// description carries.
+#[test]
+fn a_card_reward_a_prismatic_gem_widened_names_every_pool() {
+    let mut gemmed = run_winning_a_fight(&["RELIC.PRISMATIC_GEM"], true);
+    win_the_fight(&mut gemmed);
+    let card = offered_rewards(&gemmed)
+        .into_iter()
+        .find(|reward| reward.reward_type == "card")
+        .expect("the fight pays a card reward");
+    let pools: Vec<String> = card.card_pools.iter().map(ToString::to_string).collect();
+    assert_eq!(
+        pools,
+        vec![
+            "CARD_POOL.IRONCLAD_CARD_POOL",
+            "CARD_POOL.SILENT_CARD_POOL",
+            "CARD_POOL.REGENT_CARD_POOL",
+            "CARD_POOL.NECROBINDER_CARD_POOL",
+            "CARD_POOL.DEFECT_CARD_POOL",
+        ]
+    );
+}
+
+/// An archaic tooth's ancient card wears the enchantment the starter it
+/// replaces wore, both in the deck and on the card the relic keeps.
+#[test]
+fn an_archaic_tooth_keeps_the_starters_enchantment() {
+    let built = run_holding_with_treasure(&[], "RELIC.ARCHAIC_TOOTH");
+    let mut state = built.state().clone();
+    let mut bash = CardFingerprint::base(id("CARD.BASH"));
+    bash.enchantment = Some(sts2_engine::EnchantmentFingerprint {
+        model_id: id("ENCHANTMENT.SOWN"),
+        amount: 1,
+        properties: std::collections::BTreeMap::new(),
+    });
+    state.run_player.deck = vec![CardFingerprint::base(id("CARD.STRIKE_IRONCLAD")), bash];
+    let mut simulator =
+        Simulator::from_generated_state(state, sts2_content::standard_registry()).unwrap();
+    take_the_treasure(&mut simulator);
+    let sown = |card: &CardFingerprint| {
+        card.enchantment
+            .as_ref()
+            .map(|worn| (worn.model_id.to_string(), worn.amount))
+    };
+    let ancient = simulator
+        .state()
+        .run_player
+        .deck
+        .iter()
+        .find(|card| card.model_id == id("CARD.BREAK"))
+        .expect("the bash became a break");
+    assert_eq!(sown(ancient), Some(("ENCHANTMENT.SOWN".to_owned(), 1)));
+    let tooth = simulator
+        .state()
+        .run_player
+        .relics
+        .iter()
+        .find(|relic| relic.model_id == id("RELIC.ARCHAIC_TOOTH"))
+        .expect("the tooth is held");
+    let (_, kept) = tooth
+        .saved_cards
+        .iter()
+        .find(|(name, _)| name == "AncientCard")
+        .expect("the tooth keeps its ancient card");
+    assert_eq!(sown(kept), Some(("ENCHANTMENT.SOWN".to_owned(), 1)));
+}
+
 #[test]
 fn a_prismatic_gem_widens_every_card_reward() {
     let mut plain = run_winning_a_fight(&[], true);
@@ -8285,6 +8353,37 @@ fn a_popper_that_finishes_a_monster_still_leaves_it_in_the_history() {
         listed,
         vec!["MONSTER.SHRINKER_BEETLE".to_owned()],
         "the beetle the popper killed is still what the room held"
+    );
+}
+
+/// A popper that empties the room as the first turn opens wins the fight
+/// there: the turn start's win check ends it before any play, so nothing is
+/// left to play or end and the fight is over as the room is entered.
+#[test]
+fn a_popper_that_empties_the_room_ends_the_fight_before_any_play() {
+    let mut simulator = run_holding_full(
+        &["RELIC.FESTIVE_POPPER"],
+        "RELIC.LANTERN",
+        5,
+        None,
+        Vec::new(),
+    );
+    walk_to(&mut simulator, 3);
+    assert!(
+        simulator
+            .state()
+            .combat
+            .as_ref()
+            .is_none_or(|combat| combat.has_ended),
+        "the fight ended as the room was entered"
+    );
+    assert!(
+        !simulator
+            .legal_actions()
+            .iter()
+            .any(|action| matches!(action, Action::PlayCard { .. } | Action::EndTurn { .. })),
+        "and no play phase opened: {:?}",
+        simulator.legal_actions()
     );
 }
 

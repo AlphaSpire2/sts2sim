@@ -52,6 +52,8 @@ struct Visit {
     max_hp: i32,
     potions: usize,
     deck: Vec<&'static str>,
+    /// The deck cards that stand upgraded.
+    upgraded: Vec<&'static str>,
     bag: Vec<&'static str>,
     relics: Vec<&'static str>,
     named_potion: Option<&'static str>,
@@ -71,6 +73,7 @@ impl Visit {
             max_hp: 80,
             potions: 0,
             deck: vec!["CARD.STRIKE_IRONCLAD", "CARD.DEFEND_IRONCLAD"],
+            upgraded: Vec::new(),
             bag: Vec::new(),
             relics: Vec::new(),
             named_potion: None,
@@ -90,6 +93,11 @@ impl Visit {
 
     fn deck(mut self, deck: &[&'static str]) -> Self {
         self.deck = deck.to_vec();
+        self
+    }
+
+    fn upgraded(mut self, cards: &[&'static str]) -> Self {
+        self.upgraded = cards.to_vec();
         self
     }
 
@@ -151,7 +159,13 @@ impl Visit {
         state.run_player.deck = self
             .deck
             .iter()
-            .map(|card| CardFingerprint::base(id(card)))
+            .map(|card| {
+                let mut fingerprint = CardFingerprint::base(id(card));
+                if self.upgraded.contains(card) {
+                    fingerprint.upgrade_level = 1;
+                }
+                fingerprint
+            })
             .collect();
         state.run_player.relics.extend(
             self.relics
@@ -774,6 +788,83 @@ fn wood_carvings_turn_a_starter_into_a_named_card() {
         .and_then(|run| run.suspended_choice.as_ref())
         .expect("the transform screen is standing");
     assert_eq!(choice.candidates.len(), 2);
+}
+
+/// A carving is a fresh card of its own: an upgraded starter carved into a
+/// Peck or into Toric Toughness leaves the upgrade behind.
+#[test]
+fn a_carving_of_an_upgraded_starter_is_not_upgraded() {
+    for (option, into) in [("BIRD", "CARD.PECK"), ("TORUS", "CARD.TORIC_TOUGHNESS")] {
+        let mut carved = Visit::new("EVENT.WOOD_CARVINGS")
+            .deck(&["CARD.DEFEND_IRONCLAD", "CARD.TREMBLE"])
+            .upgraded(&["CARD.DEFEND_IRONCLAD"])
+            .enter();
+        choose(
+            &mut carved,
+            &format!("WOOD_CARVINGS.pages.INITIAL.options.{option}"),
+        );
+        if let Some(pick) = carved
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, Action::ChooseCards { cards, .. } if !cards.is_empty()))
+            .cloned()
+        {
+            carved.step(pick).expect("the pick applies");
+        }
+        let carving = carved
+            .state()
+            .run_player
+            .deck
+            .iter()
+            .find(|card| card.model_id == id(into))
+            .unwrap_or_else(|| panic!("the defend became {into}"));
+        assert_eq!(
+            carving.upgrade_level, 0,
+            "{into} carved from an upgraded defend is not upgraded"
+        );
+    }
+}
+
+/// Pael lays Legion out only for a player with no event pet: holding a
+/// Byrdpip takes it out of the third pool, so the roll lands on the eye or the
+/// blood whatever the seed.
+#[test]
+fn pael_offers_no_legion_to_a_player_with_an_event_pet() {
+    let seeds = [
+        "N3Z9EE2CXB",
+        "7HGT3KD2MW",
+        "A1B2C3D4E5",
+        "QWERTYU2P3",
+        "ZXCVBNMASD",
+        "LKJHGFDSAP",
+        "MNBVCXZLKJ",
+        "P9UYTREWQ4",
+        "ASDFGHJKLZ",
+        "1QAZ2WSX3E",
+        "R4TF5GYH6U",
+        "J7XK8ML9P0",
+    ];
+    let third = |simulator: &Simulator| option_ids(simulator)[2].clone();
+    let legion = "PAEL.pages.INITIAL.options.PAELS_LEGION";
+    let mut legion_without_a_pet = false;
+    for seed in seeds {
+        let plain = Visit::new("EVENT.PAEL").act(1).seed(seed).enter();
+        legion_without_a_pet |= third(&plain) == legion;
+        let petted = Visit::new("EVENT.PAEL")
+            .act(1)
+            .seed(seed)
+            .relics(&["RELIC.BYRDPIP"])
+            .enter();
+        assert_ne!(
+            third(&petted),
+            legion,
+            "seed {seed}: a Byrdpip keeps Legion off the page"
+        );
+    }
+    assert!(
+        legion_without_a_pet,
+        "without a pet some seed lays Legion out"
+    );
 }
 
 #[test]

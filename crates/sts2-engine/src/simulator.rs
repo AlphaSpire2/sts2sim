@@ -2099,10 +2099,12 @@ impl Simulator {
             Action::ChooseMap { destination } => {
                 self.choose_map(*destination, events)?;
                 self.push_checkpoint("room.enter")?;
+                self.finish_a_fight_its_opening_won(events)?;
             }
             Action::ChooseEvent { index, option_id } => {
                 self.choose_event(*index, option_id, events)?;
                 self.push_checkpoint("event.choice.settled")?;
+                self.finish_a_fight_its_opening_won(events)?;
             }
             Action::BuyShopItem {
                 offer_index,
@@ -5580,8 +5582,8 @@ impl Simulator {
         let outer = self.suspension_block.take();
         let mut result = self.start_turn(&mut opening);
         // A death listener that asked during the opening is answered as the
-        // first play phase opens. A fight that opening won is left to the next
-        // action's win check, as any other won opening is.
+        // first play phase opens. A fight the opening won is finished by the
+        // step that entered the room, once the room is wholly entered.
         if result.is_ok()
             && self
                 .state
@@ -5593,6 +5595,29 @@ impl Simulator {
         }
         self.suspension_block = outer;
         result
+    }
+
+    /// The win check the turn start makes as the player's opening turn ends its
+    /// setup: a fight the opening emptied of enemies — a festive popper over
+    /// enemies a fur coat left at one hit point — ends there, before any play,
+    /// and its rewards are offered. A loss the opening dealt is settled the
+    /// same way. A fight with a screen standing is left to the answer.
+    fn finish_a_fight_its_opening_won(
+        &mut self,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<(), EngineError> {
+        let in_progress = self
+            .state
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.in_progress && !combat.has_ended);
+        if !in_progress || self.suspended() {
+            return Ok(());
+        }
+        if self.check_win_condition()? == CombatOutcome::Won {
+            self.finish_combat(events)?;
+        }
+        Ok(())
     }
 
     /// Rolls the health of a fight's enemies without standing the fight up.
@@ -7267,6 +7292,7 @@ impl Simulator {
                 let mut creation =
                     reward_creation(&spec, crate::RarityOdds::RegularEncounter, false);
                 creation.flags.no_upgrade_roll = true;
+                let listed = self.creation_pool_ids(&creation);
                 let mut rewards = Vec::with_capacity(count);
                 for _ in 0..count {
                     let offered = self.create_cards(&creation)?;
@@ -7274,7 +7300,7 @@ impl Simulator {
                         crate::RewardFingerprint::of("card")
                             .with_cards(
                                 offered,
-                                spec.card_pools.clone(),
+                                listed.clone(),
                                 crate::RarityOdds::RegularEncounter,
                             )
                             .from_creation(creation.clone())
@@ -7609,16 +7635,13 @@ impl Simulator {
         // drifting rarity odds untouched.
         let creation = reward_creation(spec, crate::RarityOdds::RegularEncounter, false);
         let offered_cards = self.create_cards(&creation)?;
+        let listed = self.creation_pool_ids(&creation);
         let rng = self.state.player_rng.stream_mut(PlayerStream::Rewards);
         let potion = generate_reward_potion(rng, spec)?;
         Ok(vec![
             crate::RewardFingerprint::of("potion").with_model(potion),
             crate::RewardFingerprint::of("card")
-                .with_cards(
-                    offered_cards,
-                    spec.card_pools.clone(),
-                    crate::RarityOdds::RegularEncounter,
-                )
+                .with_cards(offered_cards, listed, crate::RarityOdds::RegularEncounter)
                 .from_creation(creation)
                 // An event's card reward names no encounter behind it.
                 .from_source(crate::RewardSource::Other),
@@ -7753,6 +7776,7 @@ impl Simulator {
             .record_potion_reward(include_potion);
         let creation = reward_creation(pools, spec.rarity_odds, true);
         let offered_cards = self.create_cards(&creation)?;
+        let listed = self.creation_pool_ids(&creation);
         let relic = if spec.offers_relic {
             let rarity = roll_relic_rarity(self.state.player_rng.stream_mut(PlayerStream::Rewards));
             self.prune_disallowed_relics(false);
@@ -7782,7 +7806,7 @@ impl Simulator {
         }
         rewards.push(
             crate::RewardFingerprint::of("card")
-                .with_cards(offered_cards, pools.card_pools.clone(), spec.rarity_odds)
+                .with_cards(offered_cards, listed, spec.rarity_odds)
                 .from_creation(creation)
                 .from_source(crate::RewardSource::Encounter),
         );
@@ -11478,7 +11502,7 @@ impl Simulator {
                 let creation = reward_creation(&spec, odds, true);
                 let offered = self.create_cards(&creation)?;
                 let reward = crate::RewardFingerprint::of("card")
-                    .with_cards(offered, spec.card_pools.clone(), odds)
+                    .with_cards(offered, self.creation_pool_ids(&creation), odds)
                     .from_creation(creation)
                     .from_source(crate::RewardSource::Encounter);
                 self.combat_mut()?.victory_rewards.push(reward);
@@ -13030,10 +13054,7 @@ impl Simulator {
                     if self.content.card(&into).is_none() {
                         return Err(unsupported_content(&into));
                     }
-                    let mut replacement = self.content.fresh_card(&into);
-                    // The replacement is upgraded before it joins, where the
-                    // card it stands in for was upgraded.
-                    replacement.upgrade_level = original.upgrade_level;
+                    let replacement = self.transcendence_card(&original, &into);
                     self.add_card_to_deck(replacement);
                 }
             }
@@ -15747,8 +15768,7 @@ impl Simulator {
             .find(|(from, _)| *from == starter.model_id)
             .map(|(_, into)| into.clone())
             .expect("the card was found by the same table");
-        let mut ancient = self.content.fresh_card(&into);
-        ancient.upgrade_level = starter.upgrade_level;
+        let ancient = self.transcendence_card(&starter, &into);
         if let Some(relic) = self
             .state
             .run_player
@@ -15761,6 +15781,25 @@ impl Simulator {
                 ("StarterCard".to_owned(), starter),
             ];
         }
+    }
+
+    /// The ancient form a starter card transcends into: upgraded where the
+    /// starter was, and wearing the starter's enchantment. The same card is
+    /// what the deck receives and what the relic saves as it is set up.
+    fn transcendence_card(
+        &self,
+        starter: &crate::CardFingerprint,
+        into: &ModelId,
+    ) -> crate::CardFingerprint {
+        let mut ancient = self.content.fresh_card(into);
+        ancient.upgrade_level = starter.upgrade_level;
+        if let Some(worn) = &starter.enchantment
+            && let Some(enchantment) = self.content.enchantment(&worn.model_id)
+            && self.content.can_enchant(enchantment, &ancient, false)
+        {
+            ancient.enchantment = Some(worn.clone());
+        }
+        ancient
     }
 
     /// The starter relic its owner is holding and what it would be refined
@@ -27201,7 +27240,7 @@ impl Simulator {
                 Ok(crate::RewardFingerprint::of("card")
                     .with_cards(
                         cards,
-                        spec.card_pools.clone(),
+                        self.creation_pool_ids(&creation),
                         crate::RarityOdds::RegularEncounter,
                     )
                     .from_creation(creation)
@@ -27282,7 +27321,7 @@ impl Simulator {
                 let creation = reward_creation(&spec, odds, true);
                 let cards = self.create_cards(&creation)?;
                 Ok(crate::RewardFingerprint::of("card")
-                    .with_cards(cards, spec.card_pools.clone(), odds)
+                    .with_cards(cards, self.creation_pool_ids(&creation), odds)
                     .from_creation(creation)
                     .from_source(crate::RewardSource::Encounter))
             }
@@ -27624,6 +27663,20 @@ impl Simulator {
         &self,
         creation: &crate::CardCreation,
     ) -> Vec<(ModelId, Vec<crate::PoolCard>)> {
+        self.creation_pool_ids(creation)
+            .into_iter()
+            .filter_map(|model_id| {
+                self.content
+                    .card_pool(&model_id)
+                    .map(|cards| (model_id, cards.clone()))
+            })
+            .collect()
+    }
+
+    /// The names of the pools a creation rolls against, in the order the
+    /// widening pass leaves them. A card reward lists these as its pools, so
+    /// an offer a relic widened names every pool it was rolled from.
+    fn creation_pool_ids(&self, creation: &crate::CardCreation) -> Vec<ModelId> {
         let mut named: Vec<ModelId> = creation
             .pools
             .iter()
@@ -27666,13 +27719,6 @@ impl Simulator {
             }
         }
         named
-            .into_iter()
-            .filter_map(|model_id| {
-                self.content
-                    .card_pool(&model_id)
-                    .map(|cards| (model_id, cards.clone()))
-            })
-            .collect()
     }
 
     /// Who is playing. A run says so in its own configuration; a scenario stood
