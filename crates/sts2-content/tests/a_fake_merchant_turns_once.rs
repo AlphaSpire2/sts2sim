@@ -149,3 +149,67 @@ fn the_second_throw_is_not_offered_over_the_won_fights_rewards() {
         simulator.legal_actions()
     );
 }
+
+/// His shelf is bought from while he stands, and gone once he has turned:
+/// what was stocked is in the fight's rewards, and the map that leaves the
+/// room offers nothing from it.
+#[test]
+fn the_shelf_is_not_offered_once_the_merchant_has_turned() {
+    let mut state = a_fake_merchant_with_two_foul_potions().state().clone();
+    state.run_player.gold = 999;
+    let run = state.run.as_mut().expect("the run stands");
+    let Some(ActiveRoom::Event { shelf, .. }) = run.active_room.as_mut() else {
+        panic!("the merchant's page stands");
+    };
+    *shelf = vec![sts2_engine::ShopOffer {
+        index: 0,
+        item: sts2_engine::ShopItem::Relic(id("RELIC.FAKE_MANGO")),
+        slot: sts2_engine::ShopSlot::Relic,
+        base_price: 50,
+        price: 50,
+        sold: false,
+    }];
+    let mut simulator = Simulator::from_scenario(state, sts2_content::standard_registry())
+        .expect("the state rebuilds");
+    let buys = |simulator: &Simulator| {
+        simulator
+            .legal_actions()
+            .iter()
+            .filter(|action| matches!(action, Action::BuyShopItem { .. }))
+            .count()
+    };
+    assert_eq!(buys(&simulator), 1, "his shelf is open while he stands");
+
+    let throw = the_throw(&simulator).expect("the merchant is there");
+    simulator.step(throw).expect("the throw applies");
+    simulator
+        .resolve_combat_won(40)
+        .expect("the fight settles as won");
+    let DecisionContext::Rewards { offers, .. } = simulator.decision() else {
+        panic!("the fight paid out: {:?}", simulator.decision());
+    };
+    assert!(
+        offers
+            .iter()
+            .any(|offer| offer.model_id == Some(id("RELIC.FAKE_MANGO"))),
+        "what he had stocked is a reward: {offers:?}"
+    );
+    let proceed = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::Proceed))
+        .cloned()
+        .expect("the rewards can be left");
+    simulator.step(proceed).expect("the proceed applies");
+    assert!(
+        matches!(simulator.decision(), DecisionContext::MapNavigation { .. }),
+        "the room is left by the map: {:?}",
+        simulator.decision()
+    );
+    assert_eq!(
+        buys(&simulator),
+        0,
+        "and nothing from his shelf is offered: {:?}",
+        simulator.legal_actions()
+    );
+}

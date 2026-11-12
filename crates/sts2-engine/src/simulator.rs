@@ -19198,6 +19198,17 @@ impl Simulator {
                             ShopItem::Card(_) | ShopItem::Potion(_) => None,
                         }),
                 );
+                // A merchant who has turned keeps no shop: what he had stocked
+                // is in the fight's rewards, and his shelf is not offered again
+                // on this visit.
+                if let Some(ActiveRoom::Event { shelf, .. }) = self
+                    .state
+                    .run
+                    .as_mut()
+                    .and_then(|run| run.active_room.as_mut())
+                {
+                    shelf.clear();
+                }
                 self.enter_pushed_combat(&throw.encounter, rewards, false, None, Vec::new())?;
             }
             None => {}
