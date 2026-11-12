@@ -26,6 +26,9 @@ use crate::observation::{
 pub struct ScriptWriter {
     lines: Vec<String>,
     sequence: u64,
+    /// A `room.proceed` taken but not yet written, because the recorder writes
+    /// it only as the next map point is chosen.
+    held_proceed: bool,
 }
 
 impl ScriptWriter {
@@ -93,7 +96,11 @@ impl ScriptWriter {
                 }],
             }},
         });
-        let mut writer = Self { lines, sequence: 0 };
+        let mut writer = Self {
+            lines,
+            sequence: 0,
+            held_proceed: false,
+        };
         writer.push("run.start", &start);
         Ok(writer)
     }
@@ -144,11 +151,31 @@ impl ScriptWriter {
             _ => None,
         };
         let (kind, data) = encode(simulator, completed.as_ref().unwrap_or(action))?;
+        match kind {
+            // Leaving a fight's rewards or a treasure room only opens the map
+            // in the game, and the recorder writes that proceed as the next
+            // point is chosen, right before `map.choose`. Whatever is done in
+            // between — a potion drunk or thrown away on the map — is written
+            // ahead of it, where a recording of the same play has it.
+            "room.proceed" if proceed_waits_for_the_map(simulator) => {
+                self.held_proceed = true;
+                return Ok(());
+            }
+            "map.choose" if self.held_proceed => {
+                self.held_proceed = false;
+                self.push_decision("room.proceed", &json!({}));
+            }
+            // Walking into the next act settles the room without one.
+            "act.next" => self.held_proceed = false,
+            _ => {}
+        }
         self.push_decision(kind, &data);
         Ok(())
     }
 
     /// The finished script, terminal token `*`: nothing authoritative ended.
+    /// A proceed still held is dropped, since no map point was chosen to
+    /// write it beside.
     #[must_use]
     pub fn finish(mut self) -> String {
         self.lines.push("*".to_owned());
@@ -613,6 +640,32 @@ fn encode(simulator: &Simulator, action: &Action) -> Result<(&'static str, Value
         ),
     };
     Ok(record)
+}
+
+/// Whether a proceed is one the recorder writes only once the next map point is
+/// chosen: leaving a treasure room, or leaving a fight's rewards when the fight
+/// is not returning to the event that started it. A fight that pays nothing
+/// and a fight that resumes its event are left on the spot. Read before the
+/// proceed is stepped.
+fn proceed_waits_for_the_map(simulator: &Simulator) -> bool {
+    let state = simulator.state();
+    let Some(run) = state.run.as_ref() else {
+        return false;
+    };
+    match state.combat.as_ref() {
+        Some(combat) => {
+            combat.rewards_open
+                && !run
+                    .pushed_room
+                    .as_ref()
+                    .is_some_and(|room| room.resumes_parent)
+                && simulator
+                    .content()
+                    .encounter(&combat.encounter_model)
+                    .is_none_or(|encounter| encounter.gives_rewards)
+        }
+        None => run.current_room_type == Some(sts2_engine::MapPointType::Treasure),
+    }
 }
 
 /// A combat reward screen is the room's terminal rewards screen. Its Proceed
