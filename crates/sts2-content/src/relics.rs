@@ -3453,8 +3453,11 @@ fn pen_nib() -> RelicDefinition {
         counter_property: Some("AttacksPlayed".to_owned()),
         counter_kind: Some(sts2_engine::CounterKind::Cycle { wraps_at: 10 }),
         hooks: vec![
+            // A fight's card ids are its own, so a card noted in an earlier
+            // fight is never the one doubled in this one.
+            ModifierHook::every_turn(HookEvent::BeforeCombatStart, vec![bind_card(false)]),
             // The count is wound on before the card's own body runs, and the
-            // tenth is the one that is doubled.
+            // tenth is the card that is doubled.
             ModifierHook::every_turn(
                 HookEvent::BeforeCardPlayed,
                 counts_to(10)
@@ -3462,20 +3465,23 @@ fn pen_nib() -> RelicDefinition {
                     .chain(std::iter::once(Command::When {
                         otherwise: Vec::new(),
                         condition: Condition::ListeningRelicCounterIs(0),
-                        then: vec![latch(true)],
+                        then: vec![Command::Relic(RelicCmd::BindPlayedCardToTheRelic)],
                     }))
                     .collect(),
             )
             .when(HookCondition::PlayedCardIsOfType(
                 sts2_engine::CardType::Attack,
             )),
+            // Only the tenth card's own blows are doubled: an attack played
+            // inside its play, such as a strike it draws that is auto-played,
+            // is not.
             ModifierHook::every_turn(
                 HookEvent::ModifyDamageMultiplicative,
                 vec![Command::When {
                     otherwise: Vec::new(),
                     condition: Condition::All(vec![
-                        Condition::ListeningRelicIsLatched,
                         Condition::DamageCameFromACard,
+                        Condition::AnnouncedCardIsTheRelicsBoundCard,
                     ]),
                     then: vec![Command::Modify(ModifierCmd::Scale(Amount::Fixed(200)))],
                 }],
@@ -3486,12 +3492,13 @@ fn pen_nib() -> RelicDefinition {
                 HookCondition::Not(Box::new(HookCondition::OwnerDealsPoweredDamage)),
                 HookCondition::Not(Box::new(HookCondition::OwnersPetDealsPoweredDamage)),
             ])))),
+            // The doubling is spent as the tenth card's own play finishes.
             ModifierHook::every_turn(
                 HookEvent::AfterCardPlayed,
                 vec![Command::When {
                     otherwise: Vec::new(),
-                    condition: Condition::ListeningRelicIsLatched,
-                    then: vec![latch(false)],
+                    condition: Condition::PlayedCardIsTheRelicsBoundCard,
+                    then: vec![bind_card(false)],
                 }],
             ),
         ],

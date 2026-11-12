@@ -7935,11 +7935,13 @@ impl Simulator {
                 card: CardOrigin::Card(card),
             }),
             ShopItem::Potion(potion) => {
-                // A potion purchase fails for want of space where the procure
-                // found no slot, and the rest of the purchase is skipped:
-                // nothing is paid, the offer stays on the shelf, and the player
-                // can make room and click again.
-                if !self.state.run_player.potions.iter().any(Option::is_none) {
+                // A potion purchase fails where the procure does — for want of
+                // space, or because a relic turns potions away — and the rest
+                // of the purchase is skipped: nothing is paid and the offer
+                // stays on the shelf.
+                if !self.state.run_player.potions.iter().any(Option::is_none)
+                    || self.a_relic_refuses_potions()
+                {
                     return Ok(());
                 }
                 Command::Potion(PotionCmd::TryToProcure(crate::PotionOrigin::Model(potion)))
@@ -13594,15 +13596,6 @@ impl Simulator {
                 }
                 let count =
                     usize::try_from(self.resolve_amount(count, context)?.max(0)).unwrap_or(0);
-                // What the pile held before the cards were made, so that what
-                // was made can be told apart from it afterwards. Taking the
-                // last few of the pile would do for a card put on the bottom
-                // and not for one shuffled into a rolled place, which is where
-                // every Soul goes.
-                let before: BTreeSet<CardInstanceId> = pile_of(&self.combat()?.player.piles, *pile)
-                    .iter()
-                    .map(|card| card.id)
-                    .collect();
                 // Whoever issued the command is the creator the cards are
                 // announced with when that is the player. A monster names no
                 // creator for what it puts in the player's piles.
@@ -13614,7 +13607,11 @@ impl Simulator {
                 let generated =
                     self.generate_cards_to_combat(card, count, *pile, *position, context);
                 self.generating_without_a_creator = outer;
-                generated?;
+                // What the command made carries what the command gives it
+                // wherever it landed: a card bound for a full hand is put in
+                // the discard pile, and it is still free, ethereal or grown
+                // there.
+                let added = generated?;
                 let growth = self.resolve_amount(grown_by, context)?;
                 if *ethereal
                     || *retain
@@ -13623,16 +13620,11 @@ impl Simulator {
                     || growth != 0
                     || enchantment.is_some()
                 {
-                    let added: Vec<CardInstanceId> = pile_of(&self.combat()?.player.piles, *pile)
-                        .iter()
-                        .map(|card| card.id)
-                        .filter(|id| !before.contains(id))
-                        .collect();
                     let ethereal = *ethereal;
                     let keeps_itself = *retain;
                     let temporary_cost = *temporary_cost;
                     let piles = &mut self.combat_mut()?.player.piles;
-                    for card in pile_of_mut(piles, *pile) {
+                    for card in piles.all_cards_mut() {
                         if added.contains(&card.id) {
                             card.ethereal |= ethereal;
                             card.retain |= keeps_itself;
@@ -13655,7 +13647,7 @@ impl Simulator {
                             return Err(unsupported_content(&enchantment));
                         };
                         let piles = &mut self.combat_mut()?.player.piles;
-                        for card in pile_of_mut(piles, *pile) {
+                        for card in piles.all_cards_mut() {
                             if added.contains(&card.id) {
                                 enchant_fingerprint(&mut card.fingerprint, &definition, amount);
                             }
@@ -15999,6 +15991,12 @@ impl Simulator {
             // order, every item obtained without paying.
             RelicCmd::BuyTheWholeShelfForNothing => {
                 self.owe_the_whole_shelf();
+            }
+            RelicCmd::BindPlayedCardToTheRelic => {
+                let card = context.played_card;
+                let relic = self.listening_relic_mut(context)?;
+                relic.bound_card = card;
+                relic.bound_power = None;
             }
             RelicCmd::BindAnnouncedCardToTheRelic { bind } => {
                 let card = bind.then_some(self.hook_context.value.card).flatten();
@@ -22302,35 +22300,44 @@ impl Simulator {
         pile: PileName,
         position: crate::DrawPilePosition,
         context: &CommandContext,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Vec<CardInstanceId>, EngineError> {
+        let mut created = Vec::new();
         match card {
             CardOrigin::Model(model_id) => {
-                self.add_cards_to_pile(&model_id.clone(), count, pile, position)?;
+                created = self.add_cards_to_pile(&model_id.clone(), count, pile, position)?;
             }
 
             CardOrigin::Card(fingerprint) => {
                 let fingerprint = fingerprint.clone();
                 for _ in 0..count {
-                    self.add_card_instance_to_pile(fingerprint.clone(), pile, position)?;
+                    created.push(self.add_card_instance_to_pile(
+                        fingerprint.clone(),
+                        pile,
+                        position,
+                    )?);
                 }
             }
             CardOrigin::CloneOfSource => {
                 if let Some(card_id) = context.card {
                     for _ in 0..count {
-                        self.add_card_copy(card_id, pile)?;
+                        created.push(self.add_card_copy(card_id, pile)?);
                     }
                 }
             }
             CardOrigin::CloneOfPlayedCard => {
                 if let Some(card_id) = context.played_card {
                     for _ in 0..count {
-                        self.add_card_copy(card_id, pile)?;
+                        created.push(self.add_card_copy(card_id, pile)?);
                     }
                 }
             }
             CardOrigin::Chosen => {
                 for chosen in context.chosen.clone() {
-                    self.add_card_instance_to_pile(chosen.fingerprint().clone(), pile, position)?;
+                    created.push(self.add_card_instance_to_pile(
+                        chosen.fingerprint().clone(),
+                        pile,
+                        position,
+                    )?);
                 }
             }
             // A clone of the card the power wrote down as it was
@@ -22352,7 +22359,11 @@ impl Simulator {
                         });
                 if let Some(fingerprint) = held {
                     for _ in 0..count {
-                        self.add_card_instance_to_pile(fingerprint.clone(), pile, position)?;
+                        created.push(self.add_card_instance_to_pile(
+                            fingerprint.clone(),
+                            pile,
+                            position,
+                        )?);
                     }
                 }
             }
@@ -22367,12 +22378,12 @@ impl Simulator {
                     .collect();
                 for card_id in chosen {
                     for _ in 0..count {
-                        self.add_card_copy(card_id, pile)?;
+                        created.push(self.add_card_copy(card_id, pile)?);
                     }
                 }
             }
         }
-        Ok(())
+        Ok(created)
     }
 
     /// Adds freshly created combat cards to one of the player's piles, as
@@ -22383,11 +22394,12 @@ impl Simulator {
         count: usize,
         pile: PileName,
         position: crate::DrawPilePosition,
-    ) -> Result<(), EngineError> {
-        for _ in 0..count {
-            self.add_card_instance_to_pile(self.content.fresh_card(model_id), pile, position)?;
-        }
-        Ok(())
+    ) -> Result<Vec<CardInstanceId>, EngineError> {
+        (0..count)
+            .map(|_| {
+                self.add_card_instance_to_pile(self.content.fresh_card(model_id), pile, position)
+            })
+            .collect()
     }
 
     /// One freshly created card, priced by the form it is in, into a pile. A
@@ -22465,7 +22477,7 @@ impl Simulator {
         &mut self,
         card_id: CardInstanceId,
         pile: crate::PileName,
-    ) -> Result<(), EngineError> {
+    ) -> Result<CardInstanceId, EngineError> {
         let source = self
             .combat()?
             .player
@@ -22488,7 +22500,8 @@ impl Simulator {
         let pile = self.pile_a_card_can_join(pile)?;
         pile_of_mut(&mut self.combat_mut()?.player.piles, pile).push(copy);
         self.announce_card_changed_piles(id, None)?;
-        self.announce_card_generated(id)
+        self.announce_card_generated(id)?;
+        Ok(id)
     }
 
     /// Where the hand already holds the most cards a hand can, a card bound for
@@ -24209,8 +24222,10 @@ impl Simulator {
         }
         let removed: BTreeSet<_> = dead.difference(&reviving).copied().collect();
         // Only a power that says so comes off when whoever worked it dies:
-        // `AfterDeath` testing whether the dead creature applied it. Nothing
-        // else notices.
+        // `AfterDeath` testing whether the dead creature applied it. The
+        // after-death pass takes such a power off at its own place among the
+        // listeners; what is still standing here is one that pass never
+        // reached, as over a fight that is ending.
         let doomed: Vec<(usize, Vec<bool>)> =
             self.combat()?
                 .creatures
@@ -24748,6 +24763,45 @@ impl Simulator {
         result
     }
 
+    /// A power that comes off when whoever worked it dies does so as its own
+    /// after-death listener, at its place in the pass: the owner's powers come
+    /// before that player's relics, so a relic answering the same death — a
+    /// draw that shuffles, say — already sees what the removal gave back. A
+    /// death the creature does not stay down for removes nothing.
+    fn remove_power_its_dead_applier_held(
+        &mut self,
+        listener: &Listener,
+        dead: Option<CreatureCombatId>,
+    ) -> Result<bool, EngineError> {
+        let Some(dead) = dead else {
+            return Ok(false);
+        };
+        if listener.source != ListenerSource::Power
+            || !self
+                .content
+                .power(&listener.model_id)
+                .is_some_and(|definition| definition.removed_when_applier_dies)
+            || self
+                .creature(dead)
+                .is_ok_and(|creature| self.revives_on_death(creature))
+        {
+            return Ok(false);
+        }
+        let Ok(owner) = self.creature(listener.owner) else {
+            return Ok(false);
+        };
+        let Some(at) = owner.powers.iter().position(|power| {
+            Some(power.instance) == listener.power_instance && power.applier == Some(dead)
+        }) else {
+            return Ok(false);
+        };
+        let detached = self.creature_mut(listener.owner)?.powers.remove(at);
+        if let Some(definition) = self.content.power(&listener.model_id).cloned() {
+            self.run_power_removal(listener.owner, &definition, Some(detached))?;
+        }
+        Ok(true)
+    }
+
     fn walk_hook_pass(
         &mut self,
         pass: &mut SuspendedHookPass,
@@ -24757,6 +24811,14 @@ impl Simulator {
         while pass.next < pass.listeners.len() {
             let listener = pass.listeners[pass.next].clone();
             pass.next += 1;
+            if pass.event == crate::HookEvent::AfterDeath
+                && self.remove_power_its_dead_applier_held(
+                    &listener,
+                    pass.context.announced_creature,
+                )?
+            {
+                continue;
+            }
             // What a listener declares is read off the registry and what keeps
             // it live is read off the state, so the cheaper of the two goes
             // first: most of a pass's list is the piles, and a card that

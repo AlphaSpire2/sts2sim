@@ -1034,6 +1034,43 @@ fn the_offer_potions_lay_out_three_of_their_own_kind() {
     }
 }
 
+/// A card a potion conjures into a full hand goes to the discard pile, and it is
+/// still free for the turn there.
+#[test]
+fn a_conjured_card_that_overflows_a_full_hand_is_still_free() {
+    let hand: Vec<(&str, u8)> = std::iter::repeat_n(("CARD.DEFEND_IRONCLAD", 0), 10).collect();
+    let mut simulator = fight(&["POTION.POWER_POTION"], &hand, &[]);
+    drink(&mut simulator, "POTION.POWER_POTION");
+    let DecisionContext::ChooseCards { candidates, .. } = simulator.decision() else {
+        panic!("the potion opens a screen");
+    };
+    let content = sts2_content::standard_registry();
+    let taken = candidates
+        .iter()
+        .map(|offered| offered.fingerprint.model_id.clone())
+        .find(|model_id| {
+            content
+                .card(model_id)
+                .is_some_and(|definition| definition.energy_cost > 0)
+        })
+        .expect("one of the powers on offer costs energy")
+        .to_string();
+    choose(&mut simulator, &[&taken]);
+    assert_eq!(pile(&simulator, PileName::Discard), [taken]);
+    let discarded = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing")
+        .player
+        .piles
+        .discard[0];
+    assert_eq!(
+        discarded.energy_cost, 0,
+        "free for the turn in the discard pile"
+    );
+}
+
 /// Orobic acid rolls one attack, one skill, and one power out of the drinker's
 /// own pool and hands all three over free for the turn: three distinct rolls
 /// off the combat card-generation stream, no screen at all.

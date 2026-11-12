@@ -567,6 +567,41 @@ fn a_pen_nib_doubles_the_tenth_attack() {
     assert_eq!(relic_counter(&simulator, "RELIC.PEN_NIB"), 0);
 }
 
+/// A pen nib doubles the tenth attack itself and nothing played inside it: a
+/// pommel strike that is the tenth draws a strike that a hellraiser plays on
+/// the spot, and only the pommel strike's blow is doubled.
+#[test]
+fn a_pen_nib_doubles_only_the_tenth_card_and_not_an_attack_played_inside_it() {
+    let mut nib = sts2_engine::RelicInstance::new(id("RELIC.PEN_NIB"));
+    nib.counter = 9;
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(30, 30)
+        .turn(1, 1)
+        .relic_instances(vec![nib])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "SHRINKER_MOVE")
+        .power(
+            0,
+            id("POWER.HELLRAISER_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.POMMEL_STRIKE", 0), 1)
+        .card(PileName::Draw, 1, card("CARD.STRIKE_IRONCLAD", 0), 1)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    let before = creature(&simulator, 1).current_hp;
+    play(&mut simulator, "CARD.POMMEL_STRIKE");
+    assert_eq!(
+        before - creature(&simulator, 1).current_hp,
+        9 * 2 + 6,
+        "the pommel strike's nine is doubled and the strike's six is not"
+    );
+    assert_eq!(relic_counter(&simulator, "RELIC.PEN_NIB"), 1);
+}
+
 /// A vambrace doubles the first block a card works up in a fight and is spent
 /// for the play that did it.
 #[test]
@@ -704,6 +739,89 @@ fn a_gremlin_horn_answers_a_death() {
     // The strike costs one and the horn pays one back, so the pool is level.
     assert_eq!(energy(&simulator), before_energy - 1 + 1);
     assert_eq!(hand_size(&simulator), 1);
+}
+
+/// A power that comes off when its caster dies does so at its own place among
+/// the death's listeners, ahead of its owner's relics. A magi knight's dampen
+/// gives its upgrades back before a gremlin horn draws for the same death, so
+/// the shuffle that draw makes sorts the discard by its restored upgrades:
+/// it deals the same card as a fight where nothing was ever dampened.
+#[test]
+fn a_dampen_gives_its_upgrades_back_before_a_gremlin_horn_shuffles() {
+    let drawn_after_the_kill = |magi_move: &str| -> (u64, u8) {
+        let mut scenario = ScenarioBuilder::new(SEED, id("ENCOUNTER.KNIGHTS_ELITE"))
+            .player_hp(80, 80)
+            .energy(9, 9)
+            .turn(1, 1)
+            .relics(&[id("RELIC.GREMLIN_HORN")])
+            .rng_counter(RunStream::MonsterAi, 0)
+            .rng_counter(RunStream::CombatTargets, 0)
+            .enemy(1, id("MONSTER.FLAIL_KNIGHT"), 90, 90, "RAM_MOVE")
+            .enemy(2, id("MONSTER.MAGI_KNIGHT"), 1, 80, magi_move)
+            .card(PileName::Discard, 0, card("CARD.STRIKE_IRONCLAD", 1), 1)
+            .card(PileName::Discard, 1, card("CARD.STRIKE_IRONCLAD", 0), 1);
+        // Exactly the five cards the next turn draws, so the horn's draw
+        // finds the draw pile empty.
+        scenario = scenario.card(PileName::Draw, 2, card("CARD.STRIKE_IRONCLAD", 0), 1);
+        for index in 3..7 {
+            scenario = scenario.card(PileName::Draw, index, card("CARD.DEFEND_IRONCLAD", 0), 1);
+        }
+        let mut simulator = scenario
+            .build(sts2_content::standard_registry())
+            .expect("the scenario builds");
+        end_turn(&mut simulator);
+        assert_eq!(
+            player(&simulator)
+                .powers
+                .iter()
+                .any(|power| power.model_id == id("POWER.DAMPEN_POWER")),
+            magi_move == "DAMPEN_MOVE",
+            "the dampen is on exactly when the knight cast it"
+        );
+        let strike = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| {
+                matches!(action, Action::PlayCard { card, target: Some(target), .. }
+                    if card.fingerprint.model_id == id("CARD.STRIKE_IRONCLAD")
+                        && target.combat_id.get() == 2)
+            })
+            .cloned()
+            .expect("a strike can be aimed at the magi knight");
+        simulator.step(strike).expect("the strike kills the knight");
+        assert!(
+            simulator
+                .state()
+                .combat
+                .as_ref()
+                .expect("the other knight is still standing")
+                .creatures
+                .iter()
+                .all(|creature| creature.id.get() != 2 || !creature.alive()),
+            "the magi knight is down"
+        );
+        let piles = &simulator
+            .state()
+            .combat
+            .as_ref()
+            .expect("the other knight is still standing")
+            .player
+            .piles;
+        assert_eq!(
+            piles.draw.len(),
+            1,
+            "the horn's draw shuffled the discard in"
+        );
+        let drawn = piles
+            .hand
+            .iter()
+            .find(|card| card.id.get() < 2)
+            .expect("the horn drew one of the two discarded strikes");
+        (drawn.id.get(), drawn.fingerprint.upgrade_level)
+    };
+    let dampened = drawn_after_the_kill("DAMPEN_MOVE");
+    let undampened = drawn_after_the_kill("PREP_MOVE");
+    assert_eq!(dampened, undampened);
 }
 
 /// A petrified toad hands over a rock as the fight opens, and a reptile trinket
@@ -4939,6 +5057,39 @@ fn the_two_relics_that_move_a_merchants_prices_chain_multiplicatively() {
         )),
         [40]
     );
+}
+
+/// A potion bought while a sozu turns potions away is not bought at all: the
+/// purchase fails before anything is paid, and the potion stays on the shelf.
+#[test]
+fn a_sozu_keeps_a_potion_on_the_shelf_and_the_gold_in_the_purse() {
+    let mut simulator = run_at_a_shop(&["RELIC.SOZU"], vec![shelf(0, 10)]);
+    let gold = simulator.state().run_player.gold;
+    let belt = simulator.state().run_player.potions.clone();
+    let buy = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::BuyShopItem { .. }))
+        .cloned()
+        .expect("the potion is affordable");
+    simulator.step(buy).expect("the click applies");
+    assert_eq!(simulator.state().run_player.gold, gold, "nothing was paid");
+    assert_eq!(
+        simulator.state().run_player.potions,
+        belt,
+        "and no potion was taken"
+    );
+    match simulator
+        .state()
+        .run
+        .as_ref()
+        .and_then(|run| run.active_room.as_ref())
+    {
+        Some(sts2_engine::ActiveRoom::Shop { offers, .. }) => {
+            assert!(!offers[0].sold, "the potion is still on the shelf");
+        }
+        _ => panic!("the run is still in the shop"),
+    }
 }
 
 /// The card-removal entry is a merchant entry too, so the same price hooks

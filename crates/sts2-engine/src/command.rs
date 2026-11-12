@@ -1612,6 +1612,10 @@ pub enum RelicCmd {
     BindAnnouncedCardToTheRelic {
         bind: bool,
     },
+    /// The card whose play is announced, written onto the listening relic, the
+    /// way a Pen Nib notes which attack it doubles. Clearing it is
+    /// `BindAnnouncedCardToTheRelic { bind: false }`.
+    BindPlayedCardToTheRelic,
     /// What a Pael's Tooth does once it is taken: the cards the enclosing
     /// selection picked are copied onto the listening relic, ordered by model
     /// ID, and leave the deck. The relic keeps them until it hands them back.
