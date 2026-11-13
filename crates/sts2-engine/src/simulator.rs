@@ -12478,6 +12478,15 @@ impl Simulator {
         context: &CommandContext,
     ) -> Result<bool, EngineError> {
         if self.combat_is_ending() {
+            // Over a fight that is ending the command does nothing, but a card
+            // picked at random was picked by the body before the command was
+            // asked to act: the roll is made, and only what it would do is
+            // withheld.
+            if let Some(selector) = card_command_selector(command)
+                && selector_rolls_a_combat_pile(selector)
+            {
+                self.select_cards(selector, context)?;
+            }
             return Ok(false);
         }
         match command {
@@ -20755,13 +20764,24 @@ impl Simulator {
     /// a fight won by something at the start of the player's turn is one where
     /// no hand is drawn at all, and no shuffle is rolled for one.
     fn draw_cards(&mut self, count: usize, from_hand_draw: bool) -> Result<(), EngineError> {
+        self.draw_cards_reporting(count, from_hand_draw).map(|_| ())
+    }
+
+    /// The same draw, handing back the cards it drew in the order they were
+    /// drawn, wherever each of them went afterwards: a card a listener plays
+    /// the moment it is drawn was drawn all the same.
+    fn draw_cards_reporting(
+        &mut self,
+        count: usize,
+        from_hand_draw: bool,
+    ) -> Result<Vec<CardInstanceId>, EngineError> {
         if self.combat_is_over_or_ending() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         if !from_hand_draw && self.draw_is_refused()? {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        self.draw_the_rest(count, from_hand_draw)
+        self.draw_the_rest_reporting(count, from_hand_draw)
     }
 
     /// The draw loop itself, one card at a time.
@@ -20773,6 +20793,16 @@ impl Simulator {
     /// owes itself. A draw picked back up that way re-enters here, past the
     /// refusal it already asked.
     fn draw_the_rest(&mut self, count: usize, from_hand_draw: bool) -> Result<(), EngineError> {
+        self.draw_the_rest_reporting(count, from_hand_draw)
+            .map(|_| ())
+    }
+
+    fn draw_the_rest_reporting(
+        &mut self,
+        count: usize,
+        from_hand_draw: bool,
+    ) -> Result<Vec<CardInstanceId>, EngineError> {
+        let mut reported = Vec::new();
         for drawn in 0..count {
             if self.combat()?.player.piles.hand.len() >= Self::MAX_CARDS_IN_HAND {
                 break;
@@ -20788,10 +20818,11 @@ impl Simulator {
                     remaining: count - drawn,
                     from_hand_draw,
                 })))?;
-                return Ok(());
+                return Ok(reported);
             }
             let card = self.combat_mut()?.player.piles.draw.remove(0);
             let drawn = card.id;
+            reported.push(drawn);
             self.combat_mut()?.player.piles.hand.push(card);
             self.combat_mut()?.player.cards_drawn_this_combat += 1;
             if self
@@ -20823,7 +20854,7 @@ impl Simulator {
                 },
             )?;
         }
-        Ok(())
+        Ok(reported)
     }
 
     /// The opening turn's own preparation of the draw pile: every card whose
@@ -20919,17 +20950,25 @@ impl Simulator {
     }
 
     /// A Pillage's draw: one card, and another for as long as the last one was
-    /// what the filter names and the hand is not full.
+    /// what the filter names and the hand is not full. The card tested is the
+    /// one the draw drew, wherever it went: a strike a hellraiser plays the
+    /// moment it is drawn is still an attack drawn, and the draw goes on.
     fn draw_while(&mut self, filter: CardFilter) -> Result<(), EngineError> {
         loop {
-            let before = self.combat()?.player.piles.hand.len();
-            self.draw_cards(1, false)?;
-            let hand = &self.combat()?.player.piles.hand;
-            if hand.len() == before {
+            let Some(drawn) = self.draw_cards_reporting(1, false)?.first().copied() else {
                 return Ok(());
-            }
-            let drawn = hand.last().cloned().expect("a card was drawn");
-            if !self.instance_passes(&drawn, &[filter])
+            };
+            let Some(card) = self
+                .combat()?
+                .player
+                .piles
+                .all_cards()
+                .find(|card| card.id == drawn)
+                .cloned()
+            else {
+                return Ok(());
+            };
+            if !self.instance_passes(&card, &[filter])
                 || self.combat()?.player.piles.hand.len() >= Self::MAX_CARDS_IN_HAND
             {
                 return Ok(());
@@ -29472,6 +29511,53 @@ fn crystal_sphere_card_creation(rarity: crate::CardRarity) -> crate::CardCreatio
 /// with: the pools the spec names, no filter, and the odds and source the
 /// caller asked for. A card reward marks whatever it is built with as a card
 /// reward, and every offer this shape builds is one.
+/// The cards a card command acts on, where it names them with a selector.
+fn card_command_selector(command: &CardCmd) -> Option<&CardSelector> {
+    match command {
+        CardCmd::Exhaust { cards }
+        | CardCmd::AutoPlay { cards, .. }
+        | CardCmd::AutoPlayDupe { cards }
+        | CardCmd::Upgrade { cards }
+        | CardCmd::Downgrade { cards }
+        | CardCmd::ModifyProperty { cards, .. }
+        | CardCmd::SetLocal { cards, .. }
+        | CardCmd::Discard { cards }
+        | CardCmd::DiscardAndDraw { cards, .. }
+        | CardCmd::RandomizeCost { cards, .. }
+        | CardCmd::SetTemporaryCost { cards, .. }
+        | CardCmd::GrowDamage { cards, .. }
+        | CardCmd::AddCostThisTurn { cards, .. }
+        | CardCmd::AddCostThisCombat { cards, .. }
+        | CardCmd::Enchant { cards, .. }
+        | CardCmd::ClearEnchantment { cards }
+        | CardCmd::ModifyEnchantmentAmount { cards, .. }
+        | CardCmd::SetEnchantmentStatus { cards, .. }
+        | CardCmd::ModifyEnchantmentLocal { cards, .. }
+        | CardCmd::AddCostUntilPlayed { cards, .. }
+        | CardCmd::Afflict { cards, .. }
+        | CardCmd::ClearAffliction { cards, .. }
+        | CardCmd::ModifyReplayCount { cards, .. }
+        | CardCmd::Transform { cards, .. }
+        | CardCmd::TransformToRolled { cards, .. }
+        | CardCmd::TransformDeckCards { cards, .. }
+        | CardCmd::ApplyKeyword { cards, .. }
+        | CardCmd::ApplySingleTurnKeyword { cards, .. } => Some(cards),
+        _ => None,
+    }
+}
+
+/// Whether a selector picks combat cards at random, which reads a stream
+/// whatever the cards are then used for.
+fn selector_rolls_a_combat_pile(selector: &CardSelector) -> bool {
+    matches!(
+        selector,
+        CardSelector::ShuffledFromPile { .. }
+            | CardSelector::StablyShuffledFromPile { .. }
+            | CardSelector::ShuffleRolledFromPile { .. }
+            | CardSelector::RandomFromPile { .. }
+    )
+}
+
 fn reward_creation(
     spec: &crate::GeneratedRewardSpec,
     odds: crate::RarityOdds,

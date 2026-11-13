@@ -1085,6 +1085,54 @@ fn pillage_draws_while_it_keeps_turning_up_attacks() {
     );
 }
 
+/// The card a pillage tests is the one it drew, wherever that card went: a
+/// strike a hellraiser plays the moment it is drawn is still an attack drawn,
+/// so the pillage draws again, and the defend after it stops the run.
+#[test]
+fn pillage_keeps_drawing_past_an_attack_a_hellraiser_plays_on_the_spot() {
+    let mut scenario = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatCardSelection, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .power(
+            0,
+            id("POWER.HELLRAISER_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.PILLAGE", 0), 0);
+    for (index, model_id) in [
+        "CARD.STRIKE_IRONCLAD",
+        "CARD.DEFEND_IRONCLAD",
+        "CARD.STRIKE_IRONCLAD",
+    ]
+    .iter()
+    .enumerate()
+    {
+        scenario = scenario.card(
+            PileName::Draw,
+            u64::try_from(index + 1).expect("small index"),
+            card(model_id, 0),
+            0,
+        );
+    }
+    let mut simulator = scenario
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.PILLAGE");
+    assert_eq!(
+        creature(&simulator, 1).current_hp,
+        39 - 6 - 6,
+        "the pillage and the strike it drew both landed"
+    );
+    assert_eq!(pile(&simulator, PileName::Hand), ["CARD.DEFEND_IRONCLAD"]);
+    assert_eq!(pile(&simulator, PileName::Draw), ["CARD.STRIKE_IRONCLAD"]);
+}
+
 /// A second wind burns every card of the hand that is not an attack and works
 /// up block for each of them, one at a time.
 #[test]

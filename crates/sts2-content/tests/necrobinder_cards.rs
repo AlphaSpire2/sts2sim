@@ -1242,6 +1242,39 @@ fn a_drain_power_upgrades_two_cards_of_the_discard_pile() {
     assert_eq!(upgraded, 2);
 }
 
+/// A drain power that kills the last enemy still picks its cards: the body
+/// runs on past the blow and the pick reads the combat card-selection stream,
+/// a full shuffle of the upgradable cards, even though nothing is upgraded in
+/// a fight that is over.
+#[test]
+fn a_drain_power_that_wins_the_fight_still_rolls_its_pick() {
+    let mut simulator = scenario(&[6], &[("CARD.DRAIN_POWER", 0)], &[])
+        .card(PileName::Discard, 20, card("CARD.STRIKE_NECROBINDER", 0), 0)
+        .card(PileName::Discard, 21, card("CARD.DEFEND_NECROBINDER", 0), 0)
+        .card(PileName::Discard, 22, card("CARD.STRIKE_NECROBINDER", 0), 0)
+        .card(PileName::Discard, 23, card("CARD.DEFEND_NECROBINDER", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.DRAIN_POWER");
+    assert!(
+        simulator
+            .state()
+            .combat
+            .as_ref()
+            .is_none_or(|combat| combat.has_ended || !combat.in_progress),
+        "the blow won the fight"
+    );
+    assert_eq!(
+        simulator
+            .state()
+            .rng
+            .stream(RunStream::CombatCardSelection)
+            .counter(),
+        3,
+        "four upgradable cards shuffled: three draws"
+    );
+}
+
 /// The scythe grows every time it is played, on the fight's copy and on the run
 /// deck's own card alike.
 #[test]
