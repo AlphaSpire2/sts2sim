@@ -478,16 +478,17 @@ fn a_paels_tooth_over_a_big_deck_is_answered_in_picks() {
 }
 
 /// A gnarled hammer puts Sharp on up to three cards of the deck: a screen that
-/// takes a range, with a confirm button and a way to take nothing. The confirm
-/// comes onto the list once a card is picked, and answers with the selection
-/// as it stands.
+/// takes a range and has a confirm button, but no way to back out, and whose
+/// confirm does nothing until a card is picked. So at least one card is taken.
+/// The confirm comes onto the list once a card is picked, and answers with the
+/// selection as it stands.
 #[test]
 fn a_gnarled_hammer_confirms_what_is_picked_so_far() {
     let mut simulator = run_at_a_chest("RELIC.GNARLED_HAMMER", 23);
     take_the_relic(&mut simulator);
 
     let (choice_id, minimum, maximum, candidates, _) = the_screen(&simulator);
-    assert_eq!((minimum, maximum), (0, 3), "up to three");
+    assert_eq!((minimum, maximum), (1, 3), "one to three");
     assert!(candidates > 3, "more than the hammer can take");
     assert_eq!(
         offered_picks(&simulator).len(),
@@ -500,11 +501,11 @@ fn a_gnarled_hammer_confirms_what_is_picked_so_far() {
         "with nothing picked there is nothing to confirm"
     );
     assert!(
-        simulator.legal_actions().contains(&Action::ChooseCards {
+        !simulator.legal_actions().contains(&Action::ChooseCards {
             choice_id,
             cards: Vec::new()
         }),
-        "taking nothing is on the list"
+        "taking nothing is not on the list"
     );
 
     pick_one(&mut simulator);
@@ -527,10 +528,10 @@ fn a_gnarled_hammer_confirms_what_is_picked_so_far() {
     );
 }
 
-/// The pick that fills a ranged screen finishes it without a confirm, and
-/// taking nothing part-way through enchants nothing.
+/// The pick that fills a ranged screen finishes it without a confirm, and the
+/// screen cannot be answered with nothing part-way through.
 #[test]
-fn a_gnarled_hammer_fills_on_the_third_pick_or_takes_nothing() {
+fn a_gnarled_hammer_fills_on_the_third_pick_and_takes_no_empty_answer() {
     let mut simulator = run_at_a_chest("RELIC.GNARLED_HAMMER", 23);
     take_the_relic(&mut simulator);
     for _ in 0..3 {
@@ -547,17 +548,35 @@ fn a_gnarled_hammer_fills_on_the_third_pick_or_takes_nothing() {
     let (choice_id, _) = the_candidates(&simulator);
     pick_one(&mut simulator);
     pick_one(&mut simulator);
-    simulator
-        .step(Action::ChooseCards {
-            choice_id,
-            cards: Vec::new(),
-        })
-        .expect("taking nothing is still an answer");
     assert!(
-        !matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
-        "the screen closed"
+        simulator
+            .step(Action::ChooseCards {
+                choice_id,
+                cards: Vec::new(),
+            })
+            .is_err(),
+        "taking nothing is refused"
     );
-    assert_eq!(enchanted(&simulator), 0, "nothing was enchanted");
+    assert!(
+        matches!(simulator.decision(), DecisionContext::ChooseCards { .. }),
+        "the screen still stands"
+    );
+}
+
+/// A kifuda's screen is built the same way, and takes at least one card too.
+#[test]
+fn a_kifuda_takes_at_least_one_card() {
+    let mut simulator = run_at_a_chest("RELIC.KIFUDA", 23);
+    take_the_relic(&mut simulator);
+    let (choice_id, minimum, maximum, _, _) = the_screen(&simulator);
+    assert_eq!((minimum, maximum), (1, 3), "one to three");
+    assert!(
+        !simulator.legal_actions().contains(&Action::ChooseCards {
+            choice_id,
+            cards: Vec::new()
+        }),
+        "taking nothing is not on the list"
+    );
 }
 
 /// The standing screen's id and candidates.

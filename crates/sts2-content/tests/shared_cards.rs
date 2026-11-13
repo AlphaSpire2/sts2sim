@@ -315,6 +315,62 @@ fn normality_allows_three_card_plays_a_turn() {
     assert!(play_action(&simulator, "CARD.DEFEND_IRONCLAD").is_none());
 }
 
+/// A strike wearing Spiral is played twice, and a play limit counts every pass
+/// of the play loop.
+fn spiral_strike() -> CardFingerprint {
+    let mut fingerprint = card("CARD.STRIKE_IRONCLAD", 0);
+    fingerprint.enchantment = Some(sts2_engine::EnchantmentFingerprint {
+        model_id: id("ENCHANTMENT.SPIRAL"),
+        amount: 1,
+        properties: std::collections::BTreeMap::new(),
+    });
+    fingerprint
+}
+
+/// Normality counts plays as they start, so a card played twice counts twice:
+/// a spiral strike and one defend make three, and the next defend is refused.
+#[test]
+fn normality_counts_both_plays_of_a_spiral_strike() {
+    let mut simulator = scenario(
+        &[
+            ("CARD.NORMALITY", 0),
+            ("CARD.DEFEND_IRONCLAD", 0),
+            ("CARD.DEFEND_IRONCLAD", 0),
+        ],
+        &[],
+        999,
+    )
+    .card(PileName::Hand, 50, spiral_strike(), 0)
+    .build(sts2_content::standard_registry())
+    .expect("the scenario builds");
+    play(&mut simulator, "CARD.STRIKE_IRONCLAD");
+    play(&mut simulator, "CARD.DEFEND_IRONCLAD");
+    assert!(
+        play_action(&simulator, "CARD.DEFEND_IRONCLAD").is_none(),
+        "three plays have started"
+    );
+}
+
+/// Sloth counts the same way: on two, a spiral strike's two plays use it up.
+#[test]
+fn sloth_counts_both_plays_of_a_spiral_strike() {
+    let mut simulator = scenario(&[("CARD.DEFEND_IRONCLAD", 0)], &[], 999)
+        .card(PileName::Hand, 50, spiral_strike(), 0)
+        .power(
+            0,
+            id("POWER.SLOTH_POWER"),
+            2,
+            sts2_engine::PowerType::Debuff,
+        )
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.STRIKE_IRONCLAD");
+    assert!(
+        play_action(&simulator, "CARD.DEFEND_IRONCLAD").is_none(),
+        "two plays have started"
+    );
+}
+
 /// A poor sleep is kept in hand when the turn ends, and everything beside it
 /// goes to the discard pile.
 #[test]

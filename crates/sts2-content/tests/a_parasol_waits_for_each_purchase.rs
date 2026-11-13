@@ -25,11 +25,33 @@ const POTION: &str = "POTION.FIRE_POTION";
 /// A penniless run standing one step below a merchant whose shelf holds a
 /// gnarled hammer and a potion, with the parasol in the relic row and the
 /// belt empty.
+fn a_parasol_below_the_shop() -> Simulator {
+    a_parasol_below_a_shop_selling(vec![
+        sts2_engine::ShopOffer {
+            index: 0,
+            item: sts2_engine::ShopItem::Relic(id(HAMMER)),
+            slot: sts2_engine::ShopSlot::Relic,
+            base_price: 150,
+            price: 150,
+            sold: false,
+        },
+        sts2_engine::ShopOffer {
+            index: 1,
+            item: sts2_engine::ShopItem::Potion(id(POTION)),
+            slot: sts2_engine::ShopSlot::Potion,
+            base_price: 50,
+            price: 50,
+            sold: false,
+        },
+    ])
+}
+
+/// The same run below a merchant whose shelf holds these offers.
 #[allow(
     clippy::too_many_lines,
     reason = "one function stands a whole run's state up"
 )]
-fn a_parasol_below_the_shop() -> Simulator {
+fn a_parasol_below_a_shop_selling(offers: Vec<sts2_engine::ShopOffer>) -> Simulator {
     let mut state = sts2_content::shrinker_beetle_fixture()
         .expect("the fixture builds")
         .state()
@@ -70,24 +92,7 @@ fn a_parasol_below_the_shop() -> Simulator {
         coord: shop,
         definition: RoomDefinition::Shop {
             model_id: None,
-            offers: vec![
-                sts2_engine::ShopOffer {
-                    index: 0,
-                    item: sts2_engine::ShopItem::Relic(id(HAMMER)),
-                    slot: sts2_engine::ShopSlot::Relic,
-                    base_price: 150,
-                    price: 150,
-                    sold: false,
-                },
-                sts2_engine::ShopOffer {
-                    index: 1,
-                    item: sts2_engine::ShopItem::Potion(id(POTION)),
-                    slot: sts2_engine::ShopSlot::Potion,
-                    base_price: 50,
-                    price: 50,
-                    sold: false,
-                },
-            ],
+            offers,
             removal_price: 75,
         },
     }];
@@ -331,4 +336,56 @@ fn the_parasols_removal_is_free() {
         "the shop is what is left to answer: {:?}",
         simulator.decision()
     );
+}
+
+/// An orrery bought on the walk puts its card offers up as it arrives, and the
+/// walk waits for them too: the offers are answered before the potion behind
+/// it is bought and before the removal is asked for.
+#[test]
+fn the_walk_waits_for_an_orrerys_card_offers() {
+    let mut simulator = a_parasol_below_a_shop_selling(vec![
+        sts2_engine::ShopOffer {
+            index: 0,
+            item: sts2_engine::ShopItem::Relic(id("RELIC.ORRERY")),
+            slot: sts2_engine::ShopSlot::Relic,
+            base_price: 150,
+            price: 150,
+            sold: false,
+        },
+        sts2_engine::ShopOffer {
+            index: 1,
+            item: sts2_engine::ShopItem::Potion(id(POTION)),
+            slot: sts2_engine::ShopSlot::Potion,
+            base_price: 50,
+            price: 50,
+            sold: false,
+        },
+    ]);
+    walk_in(&mut simulator);
+    assert!(
+        matches!(simulator.decision(), DecisionContext::Rewards { .. }),
+        "the orrery's offers are what is asked for: {:?}",
+        simulator.decision()
+    );
+    assert!(
+        !removal_is_used(&simulator),
+        "the removal waits behind them"
+    );
+
+    // Leave the offers; the orrery's purchase settles, the potion is bought,
+    // and the removal comes last.
+    simulator
+        .step(Action::Proceed)
+        .expect("the offers can be left");
+    let DecisionContext::ChooseCards { cancelable, .. } = simulator.decision() else {
+        panic!("the removal is asked for last: {:?}", simulator.decision());
+    };
+    assert!(!cancelable, "and it cannot be backed out of");
+    answer_with_a_card(&mut simulator);
+    assert!(
+        holds_relic(&simulator, "RELIC.ORRERY"),
+        "the orrery was obtained"
+    );
+    assert!(holds_potion(&simulator, POTION), "the potion was bought");
+    assert!(removal_is_used(&simulator), "the removal was made");
 }

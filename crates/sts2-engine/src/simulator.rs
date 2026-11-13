@@ -2092,7 +2092,7 @@ impl Simulator {
         if self.is_owed_automatic(action) {
             return self.apply_owed_automatic(action, events);
         }
-        if self.owes_the_shelf() && !self.suspended() {
+        if self.owes_the_shelf() && !self.suspended() && !self.purchase_waits_on_its_rewards() {
             self.settle_owed_shelf(events)?;
         }
         match action {
@@ -8192,6 +8192,13 @@ impl Simulator {
         run.owed_removal = !removal_used;
     }
 
+    fn purchase_waits_on_its_rewards(&self) -> bool {
+        self.state
+            .run
+            .as_ref()
+            .is_some_and(|run| run.purchase_owed_by_rewards.is_some())
+    }
+
     fn owes_the_shelf(&self) -> bool {
         self.state
             .run
@@ -8288,6 +8295,12 @@ impl Simulator {
     /// stepped. A purchase that opens a screen stops here with the rest still
     /// owed; they are made once the screen is answered.
     fn settle_owed_shelf(&mut self, events: &mut Vec<SemanticEvent>) -> Result<(), EngineError> {
+        // A purchase whose item put a reward screen up is not finished until
+        // that screen is answered, and the parasol waits for it before buying
+        // anything else or asking for the removal.
+        if self.purchase_waits_on_its_rewards() {
+            return Ok(());
+        }
         while let Some(offer_index) = self
             .state
             .run
@@ -8313,7 +8326,7 @@ impl Simulator {
                 continue;
             };
             self.buy_shop_item_for_nothing(offer_index, &item, events)?;
-            if self.queue_is_held() {
+            if self.queue_is_held() || self.purchase_waits_on_its_rewards() {
                 return Ok(());
             }
         }
@@ -14240,8 +14253,16 @@ impl Simulator {
                         .stream_mut(shuffle_stream_of(*stream))
                         .shuffle(&mut shuffled);
                 }
+                // The enchant screen confirms nothing until a card is picked,
+                // so one that cannot be backed out of takes at least one card
+                // whatever its own minimum says. It is still skipped where
+                // nothing can take the enchantment.
+                let mut prefs = *prefs;
+                if !prefs.cancelable && !candidates.is_empty() {
+                    prefs.minimum = prefs.minimum.max(1);
+                }
                 only = Some(candidates);
-                (SelectionSource::Deck, *prefs, vec![*filter], then)
+                (SelectionSource::Deck, prefs, vec![*filter], then)
             }
             CardSelectCmd::ChooseAGeneratedBundle {
                 pools,
@@ -28044,8 +28065,10 @@ impl Simulator {
         self.legal_actions = self.compute_legal_actions()?;
         // While the parasol owes the shelf, the decision offered is the one
         // that stands once it has bought everything: the purchases are not a
-        // choice, and the game makes them before it asks for anything.
-        if self.owes_the_shelf() && !self.suspended() {
+        // choice, and the game makes them before it asks for anything. A
+        // purchase still waiting on its own reward screen has nothing to make
+        // yet: that screen is the decision.
+        if self.owes_the_shelf() && !self.suspended() && !self.purchase_waits_on_its_rewards() {
             let mut bought = self.clone();
             bought.settle_owed_shelf(&mut Vec::new())?;
             bought.rebuild_boundary()?;
@@ -28649,8 +28672,11 @@ impl Simulator {
                         return false;
                     }
                 }
+                // Every pass of the play loop counts, a replay's and an
+                // automatic play's included.
                 Some(crate::CardPlayRestriction::CardsEachTurn(allowed))
-                    if i64::from(combat.player.cards_played_this_turn) >= i64::from(allowed) =>
+                    if combat.player.play_types_started_this_turn.len()
+                        >= usize::try_from(allowed).unwrap_or(usize::MAX) =>
                 {
                     return false;
                 }
@@ -28681,8 +28707,13 @@ impl Simulator {
                         return false;
                     }
                 }
+                // Every pass of the play loop counts, a replay's and an
+                // automatic play's included.
                 Some(crate::PlayRestriction::CardsEachTurn) => {
-                    if i64::from(combat.player.cards_played_this_turn) >= i64::from(power.amount) {
+                    if i64::try_from(combat.player.play_types_started_this_turn.len())
+                        .unwrap_or(i64::MAX)
+                        >= i64::from(power.amount)
+                    {
                         return false;
                     }
                 }
