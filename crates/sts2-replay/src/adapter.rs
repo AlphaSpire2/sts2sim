@@ -682,6 +682,15 @@ impl ReplayAdapter {
             .is_some_and(|choice| choice.queued)
     }
 
+    /// Whether this engine holds a fight with no screen standing in it.
+    fn fight_stands_without_a_screen(&self) -> bool {
+        self.simulator
+            .state()
+            .combat
+            .as_ref()
+            .is_some_and(|combat| combat.suspended_choice.is_none())
+    }
+
     fn observation_stage(&self, record: &Record, state: &Value) -> ObservationStage {
         let context = record.payload.pointer("/context").and_then(Value::as_str);
         // A pushed combat exits before Resume pays its parent's rewards and
@@ -713,6 +722,19 @@ impl ReplayAdapter {
             // of the handover rather than one this engine settles on. A screen
             // the build waits for is asked where this engine stands too, and
             // its snapshot is compared.
+            ObservationStage::Handover
+        } else if context == Some("choice.offered")
+            && state
+                .pointer("/combat/players/0/phase")
+                .and_then(Value::as_str)
+                == Some("auto_pre_play")
+            && self.fight_stands_without_a_screen()
+        {
+            // A screen shown while the turn start is still playing cards
+            // automatically, which this engine has not stopped on, is one the
+            // build answers inside that play. The recorder can write it as the
+            // last state before the next input when the turn start's own
+            // snapshot comes late, but the turn start settles past it.
             ObservationStage::Handover
         } else if context == Some("room.enter")
             && state.get("combat").is_some_and(|combat| !combat.is_null())

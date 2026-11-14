@@ -6298,7 +6298,8 @@ impl Simulator {
         Ok(stopped || self.combat_is_over())
     }
 
-    /// One orb's passive, fired outside its turn trigger.
+    /// One orb's passive, fired outside its turn trigger. A passive asked for
+    /// this way does nothing once the fight is over or ending.
     fn run_orb_passive(
         &mut self,
         orb: sts2_core::OrbInstanceId,
@@ -6307,6 +6308,22 @@ impl Simulator {
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
         if self.combat_is_over_or_ending() {
+            return Ok(false);
+        }
+        self.fire_orb_passive(orb, target, context, events)
+    }
+
+    /// One orb's passive, run as its own turn trigger runs it: nothing short
+    /// of the fight being gone stops it, so an orb behind the one whose passive
+    /// won the fight still fires.
+    fn fire_orb_passive(
+        &mut self,
+        orb: sts2_core::OrbInstanceId,
+        target: Option<CreatureCombatId>,
+        context: &CommandContext,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        if self.state.combat.is_none() {
             return Ok(false);
         }
         let Some(held) = self.orb_queue()?.get(orb).cloned() else {
@@ -6368,7 +6385,8 @@ impl Simulator {
             // all for the other, so an orb that answers the opposite trigger is
             // walked to, counted for, and then does nothing. Every orb the build
             // declares answers exactly one, and each answers it by running its
-            // own passive.
+            // own passive. The walk goes on past a passive that won the fight,
+            // and stops only once the fight is gone.
             let answers = self
                 .orb_queue()?
                 .get(orb)
@@ -6379,8 +6397,8 @@ impl Simulator {
                     break;
                 }
                 let context = CommandContext::default();
-                let stopped = self.run_orb_passive(orb, None, &context, events)?;
-                if stopped && !self.suspended() {
+                self.fire_orb_passive(orb, None, &context, events)?;
+                if self.state.combat.is_none() && !self.suspended() {
                     return Ok(());
                 }
                 if self.suspended() {
@@ -13321,17 +13339,19 @@ impl Simulator {
                 || self
                     .content
                     .card_has_keyword(&card.fingerprint, crate::CardKeyword::Exhaust));
-        // An unplayable card is put down where the play would have put it,
-        // without running anything.
+        // A card put down unplayed goes where the play would have put it,
+        // except a copy made to be played once, which leaves the fight even
+        // unplayed.
+        let put_down = if card.dupe {
+            crate::PlayedCardDestination::Removed
+        } else if exhausts {
+            crate::PlayedCardDestination::Exhaust
+        } else {
+            crate::PlayedCardDestination::Discard
+        };
+        // An unplayable card is put down without running anything.
         if definition.unplayable {
-            self.move_played_card(
-                card_id,
-                if exhausts {
-                    crate::PlayedCardDestination::Exhaust
-                } else {
-                    crate::PlayedCardDestination::Discard
-                },
-            )?;
+            self.move_played_card(card_id, put_down)?;
             return Ok(false);
         }
         // An auto-play asks whether the play is allowed before it rolls a target
@@ -13340,14 +13360,7 @@ impl Simulator {
         // carries itself test how the play came about, so they stay on the
         // manual path.
         if !self.power_and_relic_allow_play(self.combat()?, &card) {
-            self.move_played_card(
-                card_id,
-                if exhausts {
-                    crate::PlayedCardDestination::Exhaust
-                } else {
-                    crate::PlayedCardDestination::Discard
-                },
-            )?;
+            self.move_played_card(card_id, put_down)?;
             return Ok(false);
         }
         self.combat_mut()?.fatal_kill_this_play = false;
@@ -13355,14 +13368,7 @@ impl Simulator {
         self.combat_mut()?.played_card_was_chosen = false;
         let Some(target) = self.auto_play_target(&definition, &card.fingerprint, aimed_at)? else {
             // Nothing left to aim at means the card is put down unplayed.
-            self.move_played_card(
-                card_id,
-                if exhausts {
-                    crate::PlayedCardDestination::Exhaust
-                } else {
-                    crate::PlayedCardDestination::Discard
-                },
-            )?;
+            self.move_played_card(card_id, put_down)?;
             return Ok(false);
         };
         // An automatic play spends no energy, but an X-cost card still takes

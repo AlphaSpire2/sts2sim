@@ -1914,11 +1914,15 @@ walks the queue one orb at a time: for every orb,
 `ModifyOrbPassiveTriggerCount` says how many times it fires, and then it fires
 that many times — the count pass runs for every orb whether or not that orb
 answers this boundary, so a queue of Plasma orbs still reads the cables' dice
-at the turn's end. Whether the owner is still in a combat is asked twice per
-orb, once before the count and once after it, so a fight that ends mid-pass
-stops where it stopped. The whole of it is a frame — which trigger, which orbs,
-how far along, how many fires are left — so a body that opens a screen puts the
-pass down and picks it back up.
+at the turn's end. Whether the owner is still in a combat is asked before the
+count, after it, and after every fire, so a fight that is gone mid-pass stops
+where it stopped. A fight that is only won is not gone: the orbs behind a
+passive that kills the last enemy still fire, which is how a Dark orb behind a
+lethal Glass orb still banks its passive. A passive asked for by a command
+rather than by the turn trigger does nothing once the fight is over or ending.
+The whole of it is a frame — which trigger, which orbs, how far along, how many
+fires are left — so a body that opens a screen puts the pass down and picks it
+back up.
 
 An orb body runs in a context of its own rather than in the context of whatever
 played the card: the listening model is the orb, the owner is the player, and

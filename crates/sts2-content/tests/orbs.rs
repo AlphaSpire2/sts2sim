@@ -318,6 +318,27 @@ fn a_glass_orb_wears_down_as_it_fires() {
     assert_eq!(creature(&simulator, 1).current_hp, 35);
 }
 
+/// The turn-end pass goes on past a passive that wins the fight: the Glass orb
+/// takes the last beetle down, and the Dark orb behind it still banks its six.
+/// A passive asked for by a card stops at a won fight instead.
+#[test]
+fn an_orb_behind_the_one_that_won_the_fight_still_fires_at_the_turn_end() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[4],
+        orbs: &["ORB.GLASS_ORB", "ORB.DARK_ORB"],
+        ..Fight::default()
+    });
+    end_turn(&mut simulator);
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is held");
+    assert!(combat.has_ended, "the Glass orb's four won the fight");
+    assert_eq!(models(&simulator), ["ORB.GLASS_ORB", "ORB.DARK_ORB"]);
+    assert_eq!(queue(&simulator).orbs[1].evoke, 12);
+}
+
 /// A Plasma orb is the one orb whose trigger is the turn opening rather than
 /// the turn ending, and its energy lands on top of the reset that refilled it.
 #[test]
