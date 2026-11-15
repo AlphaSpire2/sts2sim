@@ -1102,6 +1102,50 @@ fn bullet_time_makes_the_hand_free() {
     }
 }
 
+/// A play that wins the fight still spends the cost it was made free with.
+/// The fight is over before the card can be put down, so it stays in the play
+/// pile, but what stood on it until it was played is gone: it shows its own
+/// cost again. The fight is one that pays no rewards, whose piles stand until
+/// the player proceeds.
+#[test]
+fn a_card_made_free_that_wins_the_fight_is_left_at_its_own_cost() {
+    let mut simulator =
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
+            .played_as(id("CHARACTER.SILENT"))
+            .player_hp(70, 70)
+            .energy(9, 9)
+            .turn(1, 1)
+            .rng_counter(RunStream::MonsterAi, 0)
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 1, 39, "SHRINKER_MOVE")
+            .card(PileName::Hand, 0, card("CARD.BULLET_TIME", 0), 0)
+            .card(PileName::Hand, 1, card("CARD.STRIKE_SILENT", 0), 0)
+            .build(sts2_content::standard_registry())
+            .expect("the scenario builds");
+    play(&mut simulator, "CARD.BULLET_TIME");
+    play(&mut simulator, "CARD.STRIKE_SILENT");
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is held");
+    assert!(combat.has_ended, "the strike won the fight");
+    let strike = combat
+        .player
+        .piles
+        .play
+        .iter()
+        .find(|card| card.fingerprint.model_id == id("CARD.STRIKE_SILENT"))
+        .expect("the strike is still in the play pile");
+    assert!(
+        strike
+            .temporary_costs
+            .iter()
+            .all(|cost| !cost.clears_when_played),
+        "the play spent the cost that stood until it was played"
+    );
+    assert_eq!(strike.energy_cost, 1);
+}
+
 /// A bouncing flask throws poison three times, rolling its target each throw.
 #[test]
 fn bouncing_flask_throws_poison_over_and_over() {

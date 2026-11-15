@@ -452,6 +452,57 @@ fn a_frantic_escape_pays_the_sandpit_and_grows_dearer() {
     assert_eq!(card.energy_cost, 2);
 }
 
+/// A cost set for the fight after a frantic escape grew dearer replaces the
+/// growth rather than sitting under it. The escape is played and costs one
+/// more; a confused draw then rolls it a cost for the fight, and the roll is
+/// what it costs. The growth still shows on the card's face.
+#[test]
+fn a_cost_rolled_after_a_frantic_escape_grew_dearer_replaces_the_growth() {
+    let mut simulator = scenario(
+        &[("CARD.FRANTIC_ESCAPE", 0), ("CARD.POMMEL_STRIKE", 0)],
+        &[],
+        39,
+    )
+    .power(
+        0,
+        id("POWER.CONFUSED_POWER"),
+        1,
+        sts2_engine::PowerType::Debuff,
+    )
+    .rng_counter(RunStream::CombatEnergyCosts, 0)
+    .rng_counter(RunStream::Shuffle, 0)
+    .build(sts2_content::standard_registry())
+    .expect("the scenario builds");
+    play(&mut simulator, "CARD.FRANTIC_ESCAPE");
+    // The draw pile is empty, so the pommel strike's draw shuffles the escape
+    // back in and draws it.
+    play(&mut simulator, "CARD.POMMEL_STRIKE");
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing");
+    let escape = combat
+        .player
+        .piles
+        .hand
+        .iter()
+        .find(|card| card.fingerprint.model_id == id("CARD.FRANTIC_ESCAPE"))
+        .expect("the escape was drawn back");
+    let rolled = escape
+        .temporary_costs
+        .iter()
+        .rev()
+        .find(|cost| !cost.relative)
+        .expect("the confused draw rolled a cost")
+        .cost;
+    assert_eq!(
+        escape.cost_this_combat, 1,
+        "the growth is on the card's face"
+    );
+    assert_eq!(escape.energy_cost, rolled, "the roll replaced the growth");
+}
+
 /// A guilt counts the fights the run has seen on the deck's own card, and
 /// leaves the deck once it has counted five.
 #[test]

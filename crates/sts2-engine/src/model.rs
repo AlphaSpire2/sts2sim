@@ -348,8 +348,10 @@ pub struct CardInstance {
     /// whose star cost is X resolves through.
     #[serde(default)]
     pub last_stars_spent: i32,
-    /// What has been put over this card's own energy cost for the rest of the
-    /// turn. End-of-turn cleanup clears it.
+    /// The total added to this card's energy cost for the rest of the turn.
+    /// It is the card's face: the cost itself reads the added amounts as
+    /// entries of `temporary_costs`, in order among the costs set there.
+    /// End-of-turn cleanup clears it.
     #[serde(default)]
     pub cost_this_turn: i32,
     /// The same, standing until the fight ends rather than until the turn
@@ -445,10 +447,10 @@ pub struct CardInstance {
     /// alone.
     #[serde(default, alias = "temporary_star_cost", with = "one_or_many_costs")]
     pub temporary_star_costs: Vec<TemporaryCost>,
-    /// What has been added to this card's own cost until the card is next
-    /// played. It shifts the cost rather than standing over it, so it stacks
-    /// with itself: a slumbering essence held through three turn ends is worth
-    /// three.
+    /// The total added to this card's own cost until the card is next played.
+    /// It stacks with itself — a slumbering essence held through three turn
+    /// ends is worth three — and, like the two totals above, it is the card's
+    /// face: each addition is also an entry of `temporary_costs`.
     #[serde(default)]
     pub cost_until_played: i32,
     /// Whether the enchantment this copy carries still acts. It is neither
@@ -517,14 +519,19 @@ mod one_or_many_costs {
 
 /// A cost put over a card's own, and what takes it back off. A card carries a
 /// list of them and reads them in the order they were put on, each standing
-/// over what the one before it left.
+/// over what the one before it left: an entry that sets the cost replaces
+/// whatever the entries before it made of it, and an entry that adds to the
+/// cost shifts it. So a cost added for the fight and then a cost rolled for
+/// the fight leave the card at the roll, while the roll and then the addition
+/// leave it at the roll plus the addition.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "each flag is one independent term of a temporary card cost"
 )]
 pub struct TemporaryCost {
-    /// What the card costs while this stands.
+    /// What the card costs while this stands, or, for an entry that adds to
+    /// the cost, how much it adds.
     pub cost: i32,
     /// Whether the end of the turn takes it back off.
     pub clears_when_turn_ends: bool,
@@ -543,6 +550,9 @@ pub struct TemporaryCost {
     /// anything that makes a card *free* makes it free of both.
     #[serde(default)]
     pub frees_the_star_cost: bool,
+    /// Whether the entry shifts the cost by `cost` rather than setting it.
+    #[serde(default)]
+    pub relative: bool,
 }
 
 impl TemporaryCost {
@@ -556,6 +566,7 @@ impl TemporaryCost {
             clears_when_played: true,
             reduce_only: false,
             frees_the_star_cost: false,
+            relative: false,
         }
     }
 
@@ -580,6 +591,7 @@ impl TemporaryCost {
             clears_when_played: false,
             reduce_only: false,
             frees_the_star_cost: false,
+            relative: false,
         }
     }
 
@@ -592,6 +604,7 @@ impl TemporaryCost {
             clears_when_played: false,
             reduce_only: false,
             frees_the_star_cost: false,
+            relative: false,
         }
     }
 
@@ -620,6 +633,51 @@ impl TemporaryCost {
         Self {
             reduce_only: true,
             ..Self::this_combat(cost)
+        }
+    }
+
+    /// An amount added to the cost until the turn ends. Playing the card
+    /// does not take it off.
+    #[must_use]
+    pub const fn added_this_turn(amount: i32) -> Self {
+        Self {
+            relative: true,
+            clears_when_played: false,
+            ..Self::set_this_turn(amount)
+        }
+    }
+
+    /// An amount added to the cost for the rest of the fight.
+    #[must_use]
+    pub const fn added_this_combat(amount: i32) -> Self {
+        Self {
+            relative: true,
+            ..Self::this_combat(amount)
+        }
+    }
+
+    /// An amount added to the cost until the card is next played.
+    #[must_use]
+    pub const fn added_until_played(amount: i32) -> Self {
+        Self {
+            relative: true,
+            clears_when_played: true,
+            ..Self::this_combat(amount)
+        }
+    }
+
+    /// What this entry makes of the cost the entries before it left.
+    #[must_use]
+    pub const fn apply(&self, cost: i32) -> i32 {
+        let next = if self.relative {
+            cost + self.cost
+        } else {
+            self.cost
+        };
+        if self.reduce_only && next > cost {
+            cost
+        } else {
+            next
         }
     }
 }
@@ -4598,6 +4656,13 @@ pub struct AutoPlayFrame {
     #[serde(default)]
     pub step: AutoPlayStep,
     pub destination: PlayedCardDestination,
+    /// Whether the play the auto-play runs inside was one the player chose.
+    /// The auto-play marks the running play as unchosen while it lasts and
+    /// hands this back when it is over, so the play around it — a Cascade
+    /// emptying the top of the draw pile — is still counted as chosen by the
+    /// listeners on its own end.
+    #[serde(default)]
+    pub outer_play_was_chosen: bool,
 }
 
 /// The three parts of one pass of an automatic play's repeat loop, in order:

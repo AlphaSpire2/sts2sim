@@ -370,6 +370,55 @@ fn armaments_upgrades_one_card_and_upgraded_it_upgrades_them_all() {
     assert!(hand.iter().all(|card| card.fingerprint.upgrade_level == 1));
 }
 
+/// An upgrade that makes a card cheaper brings a cost rolled for the card down
+/// with it. A confused draw rolls a havoc a cost for the fight; upgraded, the
+/// havoc costs nothing, and so does the roll standing over it.
+#[test]
+fn an_upgrade_that_makes_a_card_cheaper_brings_its_rolled_cost_down() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatCardSelection, 0)
+        .rng_counter(RunStream::CombatEnergyCosts, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .power(
+            0,
+            id("POWER.CONFUSED_POWER"),
+            1,
+            sts2_engine::PowerType::Debuff,
+        )
+        .card(PileName::Hand, 0, card("CARD.POMMEL_STRIKE", 0), 0)
+        .card(PileName::Hand, 1, card("CARD.ARMAMENTS", 1), 0)
+        .card(PileName::Draw, 2, card("CARD.HAVOC", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    let havoc = |simulator: &Simulator| {
+        simulator
+            .state()
+            .combat
+            .as_ref()
+            .expect("the fight is standing")
+            .player
+            .piles
+            .hand
+            .iter()
+            .find(|card| card.fingerprint.model_id == id("CARD.HAVOC"))
+            .cloned()
+            .expect("the havoc is in hand")
+    };
+    play(&mut simulator, "CARD.POMMEL_STRIKE");
+    assert!(
+        havoc(&simulator).energy_cost > 0,
+        "the draw rolled the havoc a cost above what the upgrade leaves"
+    );
+    play(&mut simulator, "CARD.ARMAMENTS");
+    let upgraded = havoc(&simulator);
+    assert_eq!(upgraded.fingerprint.upgrade_level, 1);
+    assert_eq!(upgraded.energy_cost, 0);
+}
+
 /// A blood wall costs two of its owner's own HP before the block goes up.
 #[test]
 fn blood_wall_pays_two_hp_for_its_block() {

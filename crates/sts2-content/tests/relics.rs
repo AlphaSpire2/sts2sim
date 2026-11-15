@@ -602,6 +602,43 @@ fn a_pen_nib_doubles_only_the_tenth_card_and_not_an_attack_played_inside_it() {
     assert_eq!(relic_counter(&simulator, "RELIC.PEN_NIB"), 1);
 }
 
+/// A brilliant scarf counts a chosen play whose body auto-plays another card.
+/// The havoc is the fourth card chosen this turn, and the strike it plays off
+/// the draw pile is not counted, so the next card is the free fifth.
+#[test]
+fn a_brilliant_scarf_counts_a_chosen_play_that_auto_plays_a_card() {
+    let mut scarf = sts2_engine::RelicInstance::new(id("RELIC.BRILLIANT_SCARF"));
+    scarf.counter = 3;
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(30, 30)
+        .turn(1, 1)
+        .relic_instances(vec![scarf])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "SHRINKER_MOVE")
+        .card(PileName::Hand, 0, card("CARD.HAVOC", 0), 1)
+        .card(PileName::Hand, 1, card("CARD.DEFEND_IRONCLAD", 0), 1)
+        .card(PileName::Draw, 2, card("CARD.STRIKE_IRONCLAD", 0), 1)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.HAVOC");
+    assert_eq!(relic_counter(&simulator, "RELIC.BRILLIANT_SCARF"), 4);
+    let defend = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing")
+        .player
+        .piles
+        .hand
+        .iter()
+        .find(|card| card.fingerprint.model_id == id("CARD.DEFEND_IRONCLAD"))
+        .expect("the defend is in hand")
+        .energy_cost;
+    assert_eq!(defend, 0, "the next card is the fifth, and free");
+}
+
 /// A vambrace doubles the first block a card works up in a fight and is spent
 /// for the play that did it.
 #[test]

@@ -2512,16 +2512,13 @@ impl Simulator {
             Frame::Loop(frame) => self.run_loop_frame(*frame, events),
             Frame::AutoPlay(frame) => {
                 if frame.plays_left == 0 {
-                    self.finish_auto_play(frame.card_id, frame.destination)
-                } else {
-                    self.run_auto_play_body(
+                    self.finish_auto_play(
                         frame.card_id,
-                        frame.target,
-                        frame.plays_left,
-                        frame.step,
                         frame.destination,
-                        events,
+                        frame.outer_play_was_chosen,
                     )
+                } else {
+                    self.run_auto_play_body(&frame, events)
                 }
             }
         }
@@ -9779,8 +9776,14 @@ impl Simulator {
                 | Effect::SettlePurchase { .. }
                 | Effect::SettleConveyorGrab { .. }
                 | Effect::BuyTheRestOfTheShelf { .. }
-                | Effect::MovePlayedCard { .. }
                 | Effect::AnnounceCardPlay { .. } => {}
+                // A play that ended the fight still spends what stood on the
+                // card until it was played; only the move to its result pile is
+                // refused, so the card stays in the play pile.
+                Effect::MovePlayedCard { card_id, .. } => {
+                    self.clear_costs_spent_by_a_play(card_id)?;
+                    self.refresh_card_costs();
+                }
             }
         }
         Ok(())
@@ -9792,25 +9795,38 @@ impl Simulator {
         card_id: CardInstanceId,
         destination: crate::PlayedCardDestination,
     ) -> Result<(), EngineError> {
-        let (was_left_in_play, fingerprint) = {
-            let combat = self.combat()?;
-            let Some(card) = combat
-                .player
-                .piles
-                .all_cards()
-                .find(|card| card.id == card_id)
-            else {
-                return Ok(());
-            };
-            (
-                combat
-                    .player
-                    .piles
-                    .play
-                    .iter()
-                    .any(|card| card.id == card_id),
-                card.fingerprint.clone(),
-            )
+        let piles = &self.combat()?.player.piles;
+        if !piles.all_cards().any(|card| card.id == card_id) {
+            return Ok(());
+        }
+        let was_left_in_play = piles.play.iter().any(|card| card.id == card_id);
+        self.clear_costs_spent_by_a_play(card_id)?;
+        // The result pile is only where the card goes if the play left it in the
+        // play pile at all. A body that put the card somewhere itself — a
+        // Shining Strike back on top of the draw pile — has already said where
+        // it lives, and the play does not take it back. Its post-play cost
+        // cleanup above still runs.
+        if !was_left_in_play {
+            self.refresh_card_costs();
+            return Ok(());
+        }
+        self.put_down_played_card(card_id, destination)
+    }
+
+    /// The costs a play spends: those standing on the card only until it was
+    /// played come off once its body and listeners have finished, even when
+    /// the body already moved the card out of the play pile (as Shining Strike
+    /// does), and even when the play ended the fight.
+    fn clear_costs_spent_by_a_play(&mut self, card_id: CardInstanceId) -> Result<(), EngineError> {
+        let Some(fingerprint) = self
+            .combat()?
+            .player
+            .piles
+            .all_cards()
+            .find(|card| card.id == card_id)
+            .map(|card| card.fingerprint.clone())
+        else {
+            return Ok(());
         };
         let canonical_energy = self.content.card(&fingerprint.model_id).map(|definition| {
             card_energy_cost(
@@ -9831,9 +9847,6 @@ impl Simulator {
                 .all_cards_mut()
                 .find(|card| card.id == card_id)
                 .expect("the played card was found immediately above");
-            // The play cleans the costs off the card itself after its body and
-            // listeners finish, even when the body already moved the card out of
-            // the play pile (as Shining Strike does).
             let cleared_relative = card.cost_until_played != 0;
             card.cost_until_played = 0;
             let before = card.temporary_costs.len();
@@ -9851,15 +9864,15 @@ impl Simulator {
                 card.energy_cost = energy;
             }
         }
-        // The result pile is only where the card goes if the play left it in the
-        // play pile at all. A body that put the card somewhere itself — a
-        // Shining Strike back on top of the draw pile — has already said where
-        // it lives, and the play does not take it back. Its post-play cost
-        // cleanup above still runs.
-        if !was_left_in_play {
-            self.refresh_card_costs();
-            return Ok(());
-        }
+        Ok(())
+    }
+
+    /// The played card, still in the play pile, put down on its result pile.
+    fn put_down_played_card(
+        &mut self,
+        card_id: CardInstanceId,
+        destination: crate::PlayedCardDestination,
+    ) -> Result<(), EngineError> {
         let combat = self.combat_mut()?;
         let index = combat
             .player
@@ -12824,15 +12837,17 @@ impl Simulator {
                     }
                 }
             }
-            // A cost added for this turn, which stands over the card's own cost
-            // until the player's next turn opens.
+            // A cost added for this turn, which shifts the card's cost until the
+            // player's next turn opens.
             CardCmd::AddCostThisTurn { cards, amount } => {
                 let amount = self.resolve_amount(amount, context)?;
                 let chosen = self.select_cards(cards, context)?;
                 let ids = card_ids(&chosen);
                 for card in self.combat_mut()?.player.piles.all_cards_mut() {
-                    if ids.contains(&card.id) {
+                    if ids.contains(&card.id) && amount != 0 {
                         card.cost_this_turn += amount;
+                        card.temporary_costs
+                            .push(crate::TemporaryCost::added_this_turn(amount));
                     }
                 }
                 self.refresh_card_costs();
@@ -12844,8 +12859,10 @@ impl Simulator {
                 let chosen = self.select_cards(cards, context)?;
                 let ids = card_ids(&chosen);
                 for card in self.combat_mut()?.player.piles.all_cards_mut() {
-                    if ids.contains(&card.id) {
+                    if ids.contains(&card.id) && amount != 0 {
                         card.cost_this_combat += amount;
+                        card.temporary_costs
+                            .push(crate::TemporaryCost::added_this_combat(amount));
                     }
                 }
                 self.refresh_card_costs();
@@ -13029,17 +13046,20 @@ impl Simulator {
                     }
                 }
             }
-            // A cost added until the card is next played, which stands over the
-            // card's own cost until then.
+            // A cost added until the card is next played, which shifts the
+            // card's cost until then.
             CardCmd::AddCostUntilPlayed { cards, amount } => {
                 let amount = self.resolve_amount(amount, context)?;
                 let ids = card_ids(&self.select_cards(cards, context)?);
                 if !ids.is_empty()
+                    && amount != 0
                     && let Ok(combat) = self.combat_mut()
                 {
                     for card in combat.player.piles.all_cards_mut() {
                         if ids.contains(&card.id) {
                             card.cost_until_played += amount;
+                            card.temporary_costs
+                                .push(crate::TemporaryCost::added_until_played(amount));
                         }
                     }
                 }
@@ -13364,10 +13384,13 @@ impl Simulator {
             return Ok(false);
         }
         self.combat_mut()?.fatal_kill_this_play = false;
-        // Nobody chose this play.
+        // Nobody chose this play. The play it runs inside gets its own mark back
+        // once this one is over.
+        let outer_play_was_chosen = self.combat()?.played_card_was_chosen;
         self.combat_mut()?.played_card_was_chosen = false;
         let Some(target) = self.auto_play_target(&definition, &card.fingerprint, aimed_at)? else {
             // Nothing left to aim at means the card is put down unplayed.
+            self.combat_mut()?.played_card_was_chosen = outer_play_was_chosen;
             self.move_played_card(card_id, put_down)?;
             return Ok(false);
         };
@@ -13406,11 +13429,14 @@ impl Simulator {
             crate::PlayedCardDestination::Discard
         };
         self.run_auto_play_body(
-            card_id,
-            target,
-            play_count,
-            crate::AutoPlayStep::Body,
-            destination,
+            &crate::AutoPlayFrame {
+                card_id,
+                target,
+                plays_left: play_count,
+                step: crate::AutoPlayStep::Body,
+                destination,
+                outer_play_was_chosen,
+            },
             events,
         )
     }
@@ -13430,13 +13456,17 @@ impl Simulator {
     /// are left and where in the interrupted one it stopped.
     fn run_auto_play_body(
         &mut self,
-        card_id: CardInstanceId,
-        target: CreatureCombatId,
-        play_count: i32,
-        step: crate::AutoPlayStep,
-        destination: crate::PlayedCardDestination,
+        frame: &crate::AutoPlayFrame,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
+        let crate::AutoPlayFrame {
+            card_id,
+            target,
+            plays_left: play_count,
+            step,
+            destination,
+            outer_play_was_chosen,
+        } = *frame;
         let Some(card) = self
             .combat()?
             .player
@@ -13445,6 +13475,7 @@ impl Simulator {
             .find(|card| card.id == card_id)
             .cloned()
         else {
+            self.combat_mut()?.played_card_was_chosen = outer_play_was_chosen;
             return Ok(false);
         };
         let definition = self
@@ -13491,6 +13522,7 @@ impl Simulator {
                             plays_left,
                             step: crate::AutoPlayStep::Enchantment,
                             destination,
+                            outer_play_was_chosen,
                         }),
                     ))))?;
                     return Ok(false);
@@ -13510,6 +13542,7 @@ impl Simulator {
                             plays_left,
                             step: crate::AutoPlayStep::Announcement,
                             destination,
+                            outer_play_was_chosen,
                         }),
                     ))))?;
                     return Ok(false);
@@ -13529,13 +13562,14 @@ impl Simulator {
                         plays_left: plays_left - 1,
                         step: crate::AutoPlayStep::Body,
                         destination,
+                        outer_play_was_chosen,
                     }),
                 ))))?;
                 return Ok(false);
             }
             step = crate::AutoPlayStep::Body;
         }
-        Ok(self.finish_auto_play(card_id, destination)? || won)
+        Ok(self.finish_auto_play(card_id, destination, outer_play_was_chosen)? || won)
     }
 
     /// The last of an auto-play: the card is put down where the play sends it,
@@ -13544,7 +13578,9 @@ impl Simulator {
         &mut self,
         card_id: CardInstanceId,
         destination: crate::PlayedCardDestination,
+        outer_play_was_chosen: bool,
     ) -> Result<bool, EngineError> {
+        self.combat_mut()?.played_card_was_chosen = outer_play_was_chosen;
         // A card the body moved out of the play pile itself is left where the
         // body put it.
         if self
@@ -15327,22 +15363,26 @@ impl Simulator {
     /// its own and nothing else. Nothing a power or relic says about every
     /// card of a kind is counted here.
     fn local_energy_cost(&self, card: &CardInstance) -> Option<i32> {
-        let definition = self.content.card(&card.fingerprint.model_id)?;
-        let own = card_energy_cost(
-            definition,
-            &card.fingerprint,
-            self.content.card_enchantment(&card.fingerprint),
-        );
+        let own = self.own_energy_cost(card)?;
         if card.costs_x || own < 0 {
             return Some(own);
         }
-        Some(card.temporary_costs.iter().fold(own, |cost, temporary| {
-            if temporary.reduce_only {
-                cost.min(temporary.cost)
-            } else {
-                temporary.cost
-            }
-        }))
+        Some(
+            card.temporary_costs
+                .iter()
+                .fold(own, |cost, temporary| temporary.apply(cost)),
+        )
+    }
+
+    /// A card's own energy cost, before anything put on the card or said
+    /// about it. Less than nothing is a card that cannot be played.
+    fn own_energy_cost(&self, card: &CardInstance) -> Option<i32> {
+        let definition = self.content.card(&card.fingerprint.model_id)?;
+        Some(card_energy_cost(
+            definition,
+            &card.fingerprint,
+            self.content.card_enchantment(&card.fingerprint),
+        ))
     }
 
     #[allow(
@@ -15411,8 +15451,10 @@ impl Simulator {
             // local modifier nor a listener moves it, so a power that makes
             // every card cost more leaves it at nothing. An unplayable card's
             // cost is likewise left where it is, before any modifier and
-            // before the clamp.
-            if card.costs_x || base < 0 {
+            // before the clamp. Unplayable is the card's own cost being less
+            // than nothing; costs added on the card that take it below
+            // nothing are clamped like any other.
+            if card.costs_x || self.own_energy_cost(card)? < 0 {
                 return Some((card.id, base));
             }
             let card_type = self.content.card_type_of(&card.fingerprint)?;
@@ -15504,16 +15546,10 @@ impl Simulator {
                     }
                 }
             });
-            // A cost added for this turn and one added until the card is played
-            // both stand over whatever the listeners made of the cost, and the
-            // whole of it is clamped at nothing. The build applies both close to
-            // the card, ahead of the global pass; nothing covered has a listener
-            // that moves a cost either of them is standing on.
-            Some((
-                card.id,
-                (modified + card.cost_this_turn + card.cost_this_combat + card.cost_until_played)
-                    .max(0),
-            ))
+            // The costs put on the card itself, added amounts included, were
+            // read in order ahead of the listeners; only the whole is clamped
+            // at nothing.
+            Some((card.id, modified.max(0)))
         })
         .collect();
         // The star cost is the same question asked of a different pool, and it
@@ -18915,12 +18951,11 @@ impl Simulator {
             // about every card: a card a scarf is about to make free still
             // costs something of its own.
             CardFilter::CostsEnergyNow => {
-                self.local_energy_cost(card).is_some_and(|cost| {
-                    cost + card.cost_this_turn + card.cost_this_combat + card.cost_until_played > 0
-                }) && self
-                    .content
-                    .card(&card.fingerprint.model_id)
-                    .is_some_and(|definition| !definition.costs_x)
+                self.local_energy_cost(card).is_some_and(|cost| cost > 0)
+                    && self
+                        .content
+                        .card(&card.fingerprint.model_id)
+                        .is_some_and(|definition| !definition.costs_x)
             }
             CardFilter::NotSlyOfType(card_type) => {
                 !self.card_is_sly(card)
@@ -26227,7 +26262,7 @@ impl Simulator {
         if cards.is_empty() || self.state.combat.is_none() {
             return Ok(());
         }
-        let upgrades: Vec<(CardInstanceId, u8, i32)> = self
+        let upgrades: Vec<(CardInstanceId, u8, i32, i32)> = self
             .combat()?
             .player
             .piles
@@ -26239,6 +26274,11 @@ impl Simulator {
                 (card.fingerprint.upgrade_level == 0).then_some((
                     card.id,
                     1,
+                    card_energy_cost(
+                        definition,
+                        &card.fingerprint,
+                        self.content.card_enchantment(&card.fingerprint),
+                    ),
                     upgrade.energy_cost.unwrap_or(definition.energy_cost),
                 ))
             })
@@ -26252,11 +26292,23 @@ impl Simulator {
             &mut piles.play,
         ] {
             for card in pile.iter_mut() {
-                if let Some((_, level, energy_cost)) =
-                    upgrades.iter().find(|(id, _, _)| *id == card.id)
+                if let Some((_, level, old_cost, energy_cost)) =
+                    upgrades.iter().find(|(id, _, _, _)| *id == card.id)
                 {
                     card.fingerprint.upgrade_level = *level;
                     card.energy_cost = *energy_cost;
+                    // An upgrade that makes the card cheaper brings every cost
+                    // set on the card down to the new cost where it stood
+                    // above it, so a cost rolled at two for a card that now
+                    // costs nothing is nothing too. Added amounts are left as
+                    // they are.
+                    if *energy_cost < *old_cost {
+                        for temporary in &mut card.temporary_costs {
+                            if !temporary.relative && temporary.cost > *energy_cost {
+                                temporary.cost = (*energy_cost).max(0);
+                            }
+                        }
+                    }
                 }
             }
         }
