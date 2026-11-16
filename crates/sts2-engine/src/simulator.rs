@@ -7933,9 +7933,7 @@ impl Simulator {
                 // space, or because a relic turns potions away — and the rest
                 // of the purchase is skipped: nothing is paid and the offer
                 // stays on the shelf.
-                if !self.state.run_player.potions.iter().any(Option::is_none)
-                    || self.a_relic_refuses_potions()
-                {
+                if self.belt_turns_potions_away() {
                     return Ok(());
                 }
                 Command::Potion(PotionCmd::TryToProcure(crate::PotionOrigin::Model(potion)))
@@ -27115,6 +27113,20 @@ impl Simulator {
         )
     }
 
+    /// Whether a potion procured now would be turned away: the belt has no
+    /// free slot, or a relic refuses every potion. Buying a potion then is a
+    /// click that does nothing, so the shelf does not offer it.
+    #[must_use]
+    pub fn belt_turns_potions_away(&self) -> bool {
+        !self.state.run_player.potions.iter().any(Option::is_none) || self.a_relic_refuses_potions()
+    }
+
+    /// Whether an offer can be bought for an effect: everything on a shelf
+    /// can, except a potion the belt would turn away.
+    fn offer_takes(&self, item: &ShopItem) -> bool {
+        !matches!(item, ShopItem::Potion(_)) || !self.belt_turns_potions_away()
+    }
+
     /// A listener refusing every procure, which one relic does for its owner:
     /// no potion ever reaches the belt.
     fn a_relic_refuses_potions(&self) -> bool {
@@ -29089,7 +29101,11 @@ impl Simulator {
         let mut actions: Vec<Action> = self
             .event_shelf()
             .iter()
-            .filter(|offer| !offer.sold && offer.price <= self.state.run_player.gold)
+            .filter(|offer| {
+                !offer.sold
+                    && self.offer_takes(&offer.item)
+                    && offer.price <= self.state.run_player.gold
+            })
             .map(|offer| Action::BuyShopItem {
                 offer_index: offer.index,
                 fingerprint: offer.item.clone(),
@@ -29145,7 +29161,11 @@ impl Simulator {
             } => {
                 let mut actions: Vec<_> = offers
                     .iter()
-                    .filter(|offer| !offer.sold && offer.price <= self.state.run_player.gold)
+                    .filter(|offer| {
+                        !offer.sold
+                            && self.offer_takes(&offer.item)
+                            && offer.price <= self.state.run_player.gold
+                    })
                     .map(|offer| Action::BuyShopItem {
                         offer_index: offer.index,
                         fingerprint: offer.item.clone(),

@@ -1,10 +1,9 @@
-//! A potion offer the belt has no room for is clickable, and the click does
-//! nothing.
+//! A potion offer the belt would turn away is not offered.
 //!
-//! A purchase gates on stock and gold and then hands off to the item itself,
-//! and a potion entry fails for want of space if the belt has no slot. The
-//! tail of the purchase — the gold, the shelf, the announced sale — is skipped
-//! on that answer.
+//! The game lets the click through and answers it with nothing: the potion
+//! entry fails for want of space, nothing is paid, and the offer stays on the
+//! shelf. A click that changes nothing is no decision, so the shelf leaves the
+//! potion out of the legal actions until the belt has room for it.
 
 use std::collections::BTreeSet;
 
@@ -201,53 +200,39 @@ fn offer_is_sold(simulator: &Simulator) -> bool {
     }
 }
 
-/// The build lets the click through, so the action list carries the offer.
+/// With the belt full, neither shelf offers the potion.
 #[test]
-fn a_full_belt_still_enumerates_an_affordable_potion() {
-    assert!(
-        buy(&merchant(FULL)).is_some(),
-        "the merchant's potion is offered with the belt full"
-    );
-    assert!(
-        buy(&event_shelf(FULL)).is_some(),
-        "and so is the event shelf's"
-    );
+fn a_full_belt_is_not_offered_the_potion() {
+    for simulator in [merchant(FULL), event_shelf(FULL)] {
+        assert!(buy(&simulator).is_none(), "the potion is not offered");
+    }
 }
 
-/// A purchase that fails for want of space is accepted and settles nothing.
+/// The purchase is refused as illegal if it is stepped anyway.
 #[test]
-fn buying_onto_a_full_belt_is_accepted_and_changes_nothing() {
+fn buying_onto_a_full_belt_is_refused() {
     for mut simulator in [merchant(FULL), event_shelf(FULL)] {
-        let before = simulator.state_key().expect("the state keys");
-        let gold_before = simulator.state().run_player.gold;
-        let belt_before = simulator.state().run_player.potions.clone();
+        let action = Action::BuyShopItem {
+            offer_index: 0,
+            fingerprint: ShopItem::Potion(id(POTION)),
+        };
+        assert!(simulator.step(action).is_err(), "the purchase is refused");
+        assert!(!offer_is_sold(&simulator), "and the offer stays");
+    }
+}
 
-        let action = buy(&simulator).expect("the potion is offered");
-        simulator.step(action).expect("the purchase applies");
-
-        assert_eq!(
-            simulator.state().run_player.gold,
-            gold_before,
-            "nothing was paid"
-        );
-        assert_eq!(
-            simulator.state().run_player.potions,
-            belt_before,
-            "and nothing was taken"
-        );
-        assert!(
-            !offer_is_sold(&simulator),
-            "the offer is still on the shelf"
-        );
-        assert_eq!(
-            simulator.state_key().expect("the state keys"),
-            before,
-            "the whole run is where it was"
-        );
-        assert!(
-            buy(&simulator).is_some(),
-            "and the player can make room and click again"
-        );
+/// Making room on the belt puts the potion back among the actions.
+#[test]
+fn making_room_offers_the_potion_again() {
+    for mut simulator in [merchant(FULL), event_shelf(FULL)] {
+        let discard = simulator
+            .legal_actions()
+            .iter()
+            .find(|action| matches!(action, Action::DiscardPotion { .. }))
+            .cloned()
+            .expect("a held potion can be discarded");
+        simulator.step(discard).expect("the discard applies");
+        assert!(buy(&simulator).is_some(), "the potion is offered again");
     }
 }
 
@@ -272,5 +257,37 @@ fn a_free_slot_takes_the_potion_and_pays_for_it() {
         );
         assert!(offer_is_sold(&simulator), "the slot is cleared");
         assert!(buy(&simulator).is_none(), "and nothing is left to buy");
+    }
+}
+
+/// A recording still carries the click the game let through. Replay accepts
+/// it as a record that applies nothing, and the run stays where it was.
+#[test]
+fn a_recorded_click_onto_a_full_belt_replays_as_nothing() {
+    for simulator in [merchant(FULL), event_shelf(FULL)] {
+        let before = simulator.state_key().expect("the state keys");
+        let mut adapter = sts2_replay::ReplayAdapter::new(simulator);
+        let click = sts2_replay::Record {
+            sequence: 1,
+            kind: "shop.purchase".to_owned(),
+            payload: serde_json::json!({
+                "actor": "p0",
+                "data": {
+                    "cost": PRICE,
+                    "entry_group": "potion",
+                    "entry_index": 0,
+                    "entry_type": "potion",
+                    "ignore_cost": false,
+                    "inventory_index": 0,
+                    "model_id": POTION,
+                },
+            }),
+        };
+        adapter.accept(&click).expect("the click is accepted");
+        assert_eq!(
+            adapter.simulator().state_key().expect("the state keys"),
+            before,
+            "and nothing changed"
+        );
     }
 }

@@ -5232,37 +5232,27 @@ fn the_two_relics_that_move_a_merchants_prices_chain_multiplicatively() {
     );
 }
 
-/// A potion bought while a sozu turns potions away is not bought at all: the
-/// purchase fails before anything is paid, and the potion stays on the shelf.
+/// A sozu turns every potion away, so a shelf does not offer one even with
+/// room on the belt.
 #[test]
-fn a_sozu_keeps_a_potion_on_the_shelf_and_the_gold_in_the_purse() {
-    let mut simulator = run_at_a_shop(&["RELIC.SOZU"], vec![shelf(0, 10)]);
-    let gold = simulator.state().run_player.gold;
-    let belt = simulator.state().run_player.potions.clone();
-    let buy = simulator
-        .legal_actions()
-        .iter()
-        .find(|action| matches!(action, Action::BuyShopItem { .. }))
-        .cloned()
-        .expect("the potion is affordable");
-    simulator.step(buy).expect("the click applies");
-    assert_eq!(simulator.state().run_player.gold, gold, "nothing was paid");
-    assert_eq!(
-        simulator.state().run_player.potions,
-        belt,
-        "and no potion was taken"
+fn a_sozu_is_not_offered_a_shelf_potion() {
+    let simulator = run_at_a_shop(&["RELIC.SOZU"], vec![shelf(0, 10)]);
+    assert!(
+        simulator
+            .state()
+            .run_player
+            .potions
+            .iter()
+            .any(Option::is_none),
+        "the belt has room"
     );
-    match simulator
-        .state()
-        .run
-        .as_ref()
-        .and_then(|run| run.active_room.as_ref())
-    {
-        Some(sts2_engine::ActiveRoom::Shop { offers, .. }) => {
-            assert!(!offers[0].sold, "the potion is still on the shelf");
-        }
-        _ => panic!("the run is still in the shop"),
-    }
+    assert!(
+        !simulator
+            .legal_actions()
+            .iter()
+            .any(|action| matches!(action, Action::BuyShopItem { .. })),
+        "and the potion is not offered"
+    );
 }
 
 /// The card-removal entry is a merchant entry too, so the same price hooks

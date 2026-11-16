@@ -371,18 +371,17 @@ impl ReplayAdapter {
             // A purchase the game made for nothing on a lord's parasol's
             // behalf is the engine's own next owed step rather than a choice
             // off the legal list, and so is the removal the parasol forces.
-            "shop.purchase" => Some(
-                record
-                    .payload
-                    .pointer("/data/ignore_cost")
-                    .and_then(Value::as_bool)
-                    .filter(|ignored| *ignored)
-                    .and_then(|_| {
-                        let index = integer(record, "/data/inventory_index").ok()? as usize;
-                        self.simulator.automatic_purchase(index)
-                    })
-                    .map_or_else(|| self.shop_purchase(record), Ok)?,
-            ),
+            "shop.purchase" => record
+                .payload
+                .pointer("/data/ignore_cost")
+                .and_then(Value::as_bool)
+                .filter(|ignored| *ignored)
+                .and_then(|_| {
+                    let index = integer(record, "/data/inventory_index").ok()? as usize;
+                    self.simulator.automatic_purchase(index)
+                })
+                .map(Some)
+                .map_or_else(|| self.player_purchase(record), Ok)?,
             "shop.remove_card" => Some(
                 record
                     .payload
@@ -1193,6 +1192,18 @@ impl ReplayAdapter {
             choice_id: *choice_id,
             cards,
         })
+    }
+
+    /// The player buying off a shelf. A potion the belt would turn away is a
+    /// click the game answers with nothing: no gold, no potion, the offer
+    /// stays. The simulator does not offer that purchase, so the record
+    /// applies no action.
+    fn player_purchase(&self, record: &Record) -> Result<Option<Action>, AdapterError> {
+        let buys_a_potion = model_id(record, "/data/model_id")?.category() == "POTION";
+        if buys_a_potion && self.simulator.belt_turns_potions_away() {
+            return Ok(None);
+        }
+        self.shop_purchase(record).map(Some)
     }
 
     fn shop_purchase(&self, record: &Record) -> Result<Action, AdapterError> {
