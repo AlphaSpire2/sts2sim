@@ -1,9 +1,12 @@
-//! A potion offer the belt would turn away is not offered.
+//! A potion click that would do nothing is not offered.
 //!
-//! The game lets the click through and answers it with nothing: the potion
-//! entry fails for want of space, nothing is paid, and the offer stays on the
-//! shelf. A click that changes nothing is no decision, so the shelf leaves the
-//! potion out of the legal actions until the belt has room for it.
+//! The game lets the click through and answers it with nothing: a shelf's
+//! potion entry fails for want of space, nothing is paid, and the offer stays
+//! on the shelf; a potion reward with no slot to go to stays on the screen. A
+//! click that changes nothing is no decision, so neither is among the legal
+//! actions until the belt has room for the potion. A relic that refuses every
+//! potion fails a purchase the same way, but a reward claimed under it is
+//! taken and the potion lost, so that claim is still offered.
 
 use std::collections::BTreeSet;
 
@@ -288,6 +291,129 @@ fn a_recorded_click_onto_a_full_belt_replays_as_nothing() {
             adapter.simulator().state_key().expect("the state keys"),
             before,
             "and nothing changed"
+        );
+    }
+}
+
+/// A reward screen with one potion line, standing over the merchant, with the
+/// belt filled by the models named.
+fn reward_screen(held: &[&str]) -> Simulator {
+    reward_screen_with(held, &[])
+}
+
+/// The same, holding the relics named.
+fn reward_screen_with(held: &[&str], relics: &[&str]) -> Simulator {
+    let mut state = merchant(held).state().clone();
+    state.run_player.relics.extend(
+        relics
+            .iter()
+            .map(|relic| sts2_engine::RelicInstance::new(id(relic))),
+    );
+    state.run.as_mut().expect("a run").reward_set = Some(sts2_engine::RewardSet {
+        id: sts2_core::RewardSetId::from(1),
+        player_slot: String::new(),
+        rewards: vec![sts2_engine::RewardItem {
+            index: 0,
+            fingerprint: sts2_engine::RewardFingerprint::of("potion").with_model(id(POTION)),
+            selected: false,
+            passed_over: false,
+            opened: false,
+        }],
+        disallow_skipping: false,
+    });
+    let simulator = Simulator::from_generated_state(state, sts2_content::standard_registry())
+        .expect("the screen stands");
+    assert!(
+        matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::Rewards { .. }
+        ),
+        "the reward screen is the decision"
+    );
+    simulator
+}
+
+fn claim(simulator: &Simulator) -> Option<Action> {
+    simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::ClaimReward { .. }))
+        .cloned()
+}
+
+/// With the belt full the potion line stays on the screen but is not offered;
+/// with a slot free it is.
+#[test]
+fn a_potion_reward_is_offered_only_with_room_on_the_belt() {
+    assert!(
+        claim(&reward_screen(FULL)).is_none(),
+        "not over a full belt"
+    );
+    assert!(
+        claim(&reward_screen(&[POTION, POTION])).is_some(),
+        "but with a slot free"
+    );
+}
+
+/// Making room on the belt puts the potion line back among the actions.
+#[test]
+fn making_room_offers_the_potion_reward_again() {
+    let mut simulator = reward_screen(FULL);
+    let discard = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::DiscardPotion { .. }))
+        .cloned()
+        .expect("a held potion can be discarded");
+    simulator.step(discard).expect("the discard applies");
+    assert!(claim(&simulator).is_some(), "the potion is offered again");
+}
+
+/// A recorded claim onto a full belt replays as a record that applies
+/// nothing.
+#[test]
+fn a_recorded_claim_onto_a_full_belt_replays_as_nothing() {
+    let simulator = reward_screen(FULL);
+    let before = simulator.state_key().expect("the state keys");
+    let mut adapter = sts2_replay::ReplayAdapter::new(simulator);
+    let click = sts2_replay::Record {
+        sequence: 1,
+        kind: "reward.claim".to_owned(),
+        payload: serde_json::json!({
+            "actor": "p0",
+            "data": {
+                "set_id": 1,
+                "reward_index": 0,
+                "reward": { "reward_type": "potion", "model_id": POTION },
+            },
+        }),
+    };
+    adapter.accept(&click).expect("the click is accepted");
+    assert_eq!(
+        adapter.simulator().state_key().expect("the state keys"),
+        before,
+        "and nothing changed"
+    );
+}
+
+/// A relic that refuses every potion turns a reward's potion away before the
+/// belt is looked at, and the game takes the line all the same: the claim is
+/// offered, full belt or not, and taking it loses the potion.
+#[test]
+fn a_sozu_claim_is_offered_and_takes_the_line() {
+    for held in [&[POTION, POTION][..], FULL] {
+        let mut simulator = reward_screen_with(held, &["RELIC.SOZU"]);
+        let belt = simulator.state().run_player.potions.clone();
+        let action = claim(&simulator).expect("the claim is offered");
+        simulator.step(action).expect("the claim applies");
+        assert_eq!(
+            simulator.state().run_player.potions,
+            belt,
+            "no potion reaches the belt"
+        );
+        assert!(
+            claim(&simulator).is_none(),
+            "and the line is taken off the screen"
         );
     }
 }

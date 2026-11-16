@@ -22168,7 +22168,7 @@ impl Simulator {
                     {
                         held.wax = true;
                     }
-                } else if self.state.run_player.potions.iter().any(Option::is_none) {
+                } else if !self.belt_is_too_full_for_a_potion() {
                     self.run_out_of_combat(&Command::Potion(PotionCmd::TryToProcure(
                         crate::PotionOrigin::Model(model_id),
                     )))?;
@@ -22176,9 +22176,9 @@ impl Simulator {
                     // A potion reward refuses to be taken where the procure
                     // failed for a full belt, and a reward that refuses is not
                     // taken: it is still on the table, and the player can make
-                    // room and click it again. Every other failure — a relic
-                    // that turns potions away — still counts the reward as
-                    // taken.
+                    // room and click it again. A relic that turns potions away
+                    // is asked before the belt is, and its refusal still
+                    // counts the reward as taken, whatever the belt holds.
                     return Ok(());
                 }
             }
@@ -27115,10 +27115,22 @@ impl Simulator {
 
     /// Whether a potion procured now would be turned away: the belt has no
     /// free slot, or a relic refuses every potion. Buying a potion then is a
-    /// click that does nothing, so the shelf does not offer it.
+    /// click that does nothing, so a shelf does not offer it.
     #[must_use]
     pub fn belt_turns_potions_away(&self) -> bool {
         !self.state.run_player.potions.iter().any(Option::is_none) || self.a_relic_refuses_potions()
+    }
+
+    /// Whether a potion would be turned away for want of space alone: no relic
+    /// refuses it first, and the belt has no free slot. Claiming a potion
+    /// reward then is a click that does nothing and leaves the line on the
+    /// screen, so the screen does not offer it. A relic's refusal is
+    /// different: the claim goes through, the line is taken, and the potion
+    /// is lost.
+    #[must_use]
+    pub fn belt_is_too_full_for_a_potion(&self) -> bool {
+        !self.a_relic_refuses_potions()
+            && !self.state.run_player.potions.iter().any(Option::is_none)
     }
 
     /// Whether an offer can be bought for an effect: everything on a shelf
@@ -28803,13 +28815,22 @@ impl Simulator {
                 let set = self
                     .current_reward_set()?
                     .expect("decision and state agree");
+                let too_full_for_a_potion = self.belt_is_too_full_for_a_potion();
                 let mut actions: Vec<_> = set
                     .rewards
                     .iter()
                     // A reward answered by an alternative — thrown to a
                     // sacrifice — is answered for good: passed over, and not
-                    // on the screen to be opened again.
-                    .filter(|reward| !reward.selected && !reward.passed_over)
+                    // on the screen to be opened again. A potion with no slot
+                    // to go to stays on the screen, but claiming it changes
+                    // nothing, so it is not offered until there is room for
+                    // it.
+                    .filter(|reward| {
+                        !reward.selected
+                            && !reward.passed_over
+                            && (!too_full_for_a_potion
+                                || reward.fingerprint.reward_type != "potion")
+                    })
                     .map(|reward| Action::ClaimReward {
                         set_id: *set_id,
                         reward_index: reward.index,

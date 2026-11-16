@@ -427,7 +427,7 @@ impl ReplayAdapter {
                 Some(self.find_action(record, |action| matches!(action, Action::AdvanceAct))?)
             }
 
-            "reward.claim" => Some(self.reward_claim(record)?),
+            "reward.claim" => self.player_claim(record)?,
             // The player dismissing a rewards screen and leaving what is on it.
             // A screen with nothing left to answer has already gone by the time
             // the build sends this, and then there is nothing to dismiss.
@@ -1269,6 +1269,21 @@ impl ReplayAdapter {
         }
         self.find_action(record, |action| matches!(action, Action::Proceed))
             .map(Some)
+    }
+
+    /// A potion line with no slot to go to is a click the game answers with
+    /// nothing: the potion stays on the screen and the belt is unchanged. The
+    /// simulator does not offer that claim, so the record applies no action.
+    fn player_claim(&self, record: &Record) -> Result<Option<Action>, AdapterError> {
+        let claims_a_potion = record
+            .payload
+            .pointer("/data/reward/reward_type")
+            .and_then(Value::as_str)
+            == Some("potion");
+        if claims_a_potion && self.simulator.belt_is_too_full_for_a_potion() {
+            return Ok(None);
+        }
+        self.reward_claim(record).map(Some)
     }
 
     fn reward_claim(&self, record: &Record) -> Result<Action, AdapterError> {

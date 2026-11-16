@@ -1207,16 +1207,17 @@ its own. The in-combat form additionally drops the potions whose
 drops them from that roll alone. The three rarity lists a reward and a shop
 index into are derived from the same pool rather than written down beside it.
 
-A full belt does not stop a potion reward being offered. Selecting the reward
-where there is no room simply fails, so the reward is on the screen, can be
-clicked, and quietly does nothing: it is not taken, the belt is unchanged, and
-the screen stays open. A merchant's shelf and an event's are different. The
-game answers a click there the same way — the purchase fails before any gold is
-spent, and the offer stands — but a click that changes nothing is no decision,
-so a shelf leaves out a potion the belt would turn away, for want of space or
-because a relic refuses every potion, until there is room for it. Replay
-accepts a recorded click of that kind as a record that applies nothing. Making
-room is a separate action — the
+A potion click that would do nothing is not offered. A merchant's or an
+event's shelf fails a potion purchase before any gold is spent when the belt
+has no free slot or a relic refuses every potion, so the offer stands. A
+potion reward with no slot to go to stays on the screen with the belt
+unchanged. A click that changes nothing is no decision, so neither the shelf
+entry nor the reward line is among the legal actions until there is room for
+the potion; the reward line stays on the screen meanwhile. A relic's refusal
+is different for a reward: the refusal is checked before the belt, and the
+line is taken with the potion lost, so that claim is still offered. Replay
+accepts a recorded click that did nothing as a record that applies nothing.
+Making room is a separate action — the
 belt slot is emptied and nothing the potion does runs — and it is available in
 every decision the run offers except the terminal, which is where the game's own
 belt sits.
