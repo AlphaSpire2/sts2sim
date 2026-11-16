@@ -2249,6 +2249,43 @@ fn a_gorge_lays_its_commons_out_on_a_rewards_grid() {
     assert_eq!((choice.minimum, choice.maximum), (2, 2));
 }
 
+/// The gorge's commons were made for a reward, so what changes a reward's
+/// cards changes them: a toxic egg lays every skill on the grid out upgraded,
+/// and leaves the rest as they are.
+#[test]
+fn a_gorge_lays_its_skills_out_upgraded_for_a_toxic_egg() {
+    let mut gorged = Visit::new("EVENT.ROOM_FULL_OF_CHEESE")
+        .relics(&["RELIC.TOXIC_EGG"])
+        .enter();
+    choose(
+        &mut gorged,
+        "ROOM_FULL_OF_CHEESE.pages.INITIAL.options.GORGE",
+    );
+    let choice = gorged
+        .state()
+        .run
+        .as_ref()
+        .and_then(|run| run.suspended_choice.as_ref())
+        .expect("the grid is standing");
+    let registry = sts2_content::standard_registry();
+    let mut skills = 0;
+    for candidate in &choice.candidates {
+        let definition = registry
+            .card(&candidate.fingerprint.model_id)
+            .expect("the card is registered");
+        let upgraded =
+            definition.card_type == sts2_engine::CardType::Skill && definition.upgrade.is_some();
+        skills += usize::from(upgraded);
+        assert_eq!(
+            candidate.fingerprint.upgrade_level,
+            u8::from(upgraded),
+            "{} is upgraded exactly when it is a skill",
+            candidate.fingerprint.model_id
+        );
+    }
+    assert!(skills > 0, "the grid holds a skill to upgrade");
+}
+
 /// A card taken off that grid joins the deck the way any other card does, so
 /// what answers a card joining the deck answers for it: a book of five rings
 /// counts both cheeses.
@@ -2680,6 +2717,53 @@ fn a_brain_leechs_rip_is_one_cheaper_with_a_tungsten_rod() {
         .enter();
     choose(&mut rodded, rip);
     assert_eq!(rodded.state().run_player.current_hp, 61 - 4);
+}
+
+/// The rip's three colorless cards are a card reward, so a silver crucible
+/// upgrades them as it would any other.
+#[test]
+fn a_brain_leechs_rip_is_upgraded_by_a_silver_crucible() {
+    let mut simulator = Visit::new("EVENT.BRAIN_LEECH")
+        .hp(61, 80)
+        .relics(&["RELIC.SILVER_CRUCIBLE"])
+        .enter();
+    choose(&mut simulator, "BRAIN_LEECH.pages.INITIAL.options.RIP");
+    let rewards = simulator
+        .state()
+        .run
+        .as_ref()
+        .and_then(|run| run.reward_set.as_ref())
+        .expect("the card reward is on the table");
+    let cards = &rewards.rewards[0].fingerprint.offered_cards;
+    assert_eq!(cards.len(), 3);
+    assert!(
+        cards.iter().all(|card| card.upgrade_level == 1),
+        "every card is upgraded: {cards:?}"
+    );
+}
+
+/// The bridge's hold and the baths' dip are an event's HP cost like the rip's,
+/// so a tungsten rod takes one off each of them too.
+#[test]
+fn a_tungsten_rod_takes_one_off_the_bridge_and_the_baths() {
+    let mut bridge = Visit::new("EVENT.SLIPPERY_BRIDGE")
+        .hp(80, 80)
+        .relics(&["RELIC.TUNGSTEN_ROD"])
+        .deck(&["CARD.BASH", "CARD.ANGER", "CARD.CLASH", "CARD.THRASH"])
+        .enter();
+    choose(
+        &mut bridge,
+        "SLIPPERY_BRIDGE.pages.INITIAL.options.HOLD_ON_0",
+    );
+    assert_eq!(bridge.state().run_player.current_hp, 80 - 2);
+
+    let mut baths = Visit::new("EVENT.ABYSSAL_BATHS")
+        .hp(80, 80)
+        .relics(&["RELIC.TUNGSTEN_ROD"])
+        .enter();
+    choose(&mut baths, "ABYSSAL_BATHS.pages.INITIAL.options.IMMERSE");
+    assert_eq!(baths.state().run_player.max_hp, 82);
+    assert_eq!(baths.state().run_player.current_hp, 82 - 2);
 }
 
 #[test]

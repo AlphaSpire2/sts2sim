@@ -326,6 +326,9 @@ pub fn brain_leech() -> EventDefinition {
             option(
                 "BRAIN_LEECH.pages.INITIAL.options.RIP",
                 "Rip",
+                // The three colorless cards are a card reward like any other,
+                // so what answers a card reward — a silver crucible's
+                // upgrades — answers for them.
                 vec![
                     EventEffect::LoseHp(EventAmount::Fixed(5)),
                     EventEffect::OfferCreatedCardRewards {
@@ -339,8 +342,8 @@ pub fn brain_leech() -> EventDefinition {
                             count: 3,
                             flags: sts2_engine::CardCreationFlags {
                                 no_upgrade_roll: true,
+                                is_card_reward: true,
                                 no_card_pool_modifications: true,
-                                ..sts2_engine::CardCreationFlags::default()
                             },
                         }],
                     },

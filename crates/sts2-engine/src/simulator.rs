@@ -6833,10 +6833,7 @@ impl Simulator {
             // hold costs, so the hold behind it is `cost - 3` and the page that
             // follows charges one more.
             EventEffect::HoldOnToTheBridge { cost } => {
-                self.state.run_player.current_hp = (self.state.run_player.current_hp - cost).max(0);
-                if self.state.run_player.current_hp == 0 {
-                    self.state.terminal = Some(RunResult::Defeat);
-                }
+                self.lose_hp_to_an_event(cost)?;
                 self.roll_the_bridges_next_card()?;
                 let page = slippery_bridge_page(cost - 2, self.rolled_bridge_card());
                 self.set_event_page(page);
@@ -6847,11 +6844,8 @@ impl Simulator {
                 self.state.run_player.max_hp += 2;
                 self.state.run_player.current_hp =
                     (self.state.run_player.current_hp + 2).min(self.state.run_player.max_hp);
-                self.state.run_player.current_hp =
-                    (self.state.run_player.current_hp - damage).max(0);
-                if self.state.run_player.current_hp == 0 {
-                    self.state.terminal = Some(RunResult::Defeat);
-                } else {
+                self.lose_hp_to_an_event(damage)?;
+                if self.state.run_player.current_hp > 0 {
                     self.set_event_page(abyssal_baths_page(damage + 1));
                     finish_room = false;
                 }
@@ -6891,36 +6885,7 @@ impl Simulator {
                 self.set_event_page(options);
                 finish_room = false;
             }
-            EventEffect::LoseHp(amount) => {
-                // What an event takes is dealt as unblockable, unpowered
-                // damage: no block and no power stands in its way, but the
-                // listeners on HP being lost still answer for it — a tungsten
-                // rod takes one off. Outside a combat the player has no
-                // creature for the damage to land on, so those listeners are
-                // asked over the run's own owner and the run's HP takes it.
-                let owner = CreatureCombatId::from(0);
-                let props = ValueProps::UNBLOCKABLE;
-                let before_osty = self.modify_hp_lost(
-                    HpLossPhase::BeforeOsty,
-                    None,
-                    owner,
-                    amount.value().max(0),
-                    props,
-                    None,
-                )?;
-                let lost = self.modify_hp_lost(
-                    HpLossPhase::AfterOsty,
-                    None,
-                    owner,
-                    before_osty,
-                    props,
-                    None,
-                )?;
-                self.state.run_player.current_hp = (self.state.run_player.current_hp - lost).max(0);
-                if self.state.run_player.current_hp == 0 {
-                    self.state.terminal = Some(RunResult::Defeat);
-                }
-            }
+            EventEffect::LoseHp(amount) => self.lose_hp_to_an_event(amount.value())?,
             // The cost comes off the maximum, and then the deck is upgraded —
             // one upgradable card rolled on the event's own stream, or on the
             // last decipher every one of them, which reads nothing.
@@ -7063,9 +7028,19 @@ impl Simulator {
             }
             // The grid a gorge lays out is a rewards grid, not a plain one:
             // the cards on it were made for a reward and what is taken off it
-            // goes into the deck.
+            // goes into the deck. Being made for a reward, they go through the
+            // pass that lets a listener change the offer — a toxic egg upgrades
+            // the skills on it — though the grid is not a card reward.
             EventEffect::ChooseGeneratedCards { count, picks, pool } => {
                 let offered = self.generate_uniform_cards(count, &pool)?;
+                let pools = self.named_pools(&crate::CardPoolRef::OwnCharacter)?;
+                let offered = self.modify_card_reward_options(RewardOptions {
+                    cards: offered,
+                    pools,
+                    odds: crate::RarityOdds::Uniform,
+                    from_an_encounter: false,
+                    is_card_reward: false,
+                })?;
                 let id = self.allocate_choice_id()?;
                 let run = self.state.run.as_mut().expect("event implies run");
                 run.suspended_choice = Some(SuspendedChoice {
@@ -20847,6 +20822,37 @@ impl Simulator {
             ));
         }
         result
+    }
+
+    /// HP an event takes outside a fight. It is dealt as unblockable, unpowered
+    /// damage: no block and no power stands in its way, but the listeners on HP
+    /// being lost still answer for it — a tungsten rod takes one off. Outside a
+    /// combat the player has no creature for the damage to land on, so those
+    /// listeners are asked over the run's own owner and the run's HP takes it.
+    fn lose_hp_to_an_event(&mut self, amount: i32) -> Result<(), EngineError> {
+        let owner = CreatureCombatId::from(0);
+        let props = ValueProps::UNBLOCKABLE;
+        let before_osty = self.modify_hp_lost(
+            HpLossPhase::BeforeOsty,
+            None,
+            owner,
+            amount.max(0),
+            props,
+            None,
+        )?;
+        let lost = self.modify_hp_lost(
+            HpLossPhase::AfterOsty,
+            None,
+            owner,
+            before_osty,
+            props,
+            None,
+        )?;
+        self.state.run_player.current_hp = (self.state.run_player.current_hp - lost).max(0);
+        if self.state.run_player.current_hp == 0 {
+            self.state.terminal = Some(RunResult::Defeat);
+        }
+        Ok(())
     }
 
     /// The most cards a hand can hold.
