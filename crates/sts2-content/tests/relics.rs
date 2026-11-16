@@ -8876,3 +8876,122 @@ fn a_lords_parasols_purchases_are_all_made_before_the_next_step_lands() {
     assert_eq!(simulator.state().run_player.gold, gold);
     assert_eq!(simulator.state().run_player.deck.len(), deck);
 }
+
+/// A fairy in a bottle that saves its owner is a potion used like any other,
+/// so what answers a potion being used answers for it: a reptile trinket pays
+/// its strength.
+#[test]
+fn a_fairy_that_saves_its_owner_counts_as_a_potion_used() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(1, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .relics(&[id("RELIC.REPTILE_TRINKET")])
+        .potions(vec![Some(id("POTION.FAIRY_IN_A_BOTTLE"))])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .card(PileName::Hand, 0, card("CARD.BLOODLETTING", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.BLOODLETTING");
+    assert!(
+        player(&simulator).current_hp > 0,
+        "the fairy saved the player"
+    );
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.REPTILE_TRINKET_POWER"),
+        3,
+        "the trinket answered the fairy"
+    );
+}
+
+/// A fight a listener wins on the back of a play is over before the card is
+/// put down: a kusarigama's hit after the third attack finishes the dummy, and
+/// the strike that set it off stays in the play pile.
+#[test]
+fn a_listener_that_wins_the_fight_leaves_the_card_in_play() {
+    let mut chain = sts2_engine::RelicInstance::new(id("RELIC.KUSARIGAMA"));
+    chain.counter = 2;
+    let mut simulator =
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
+            .player_hp(80, 80)
+            .energy(9, 9)
+            .turn(1, 1)
+            .relic_instances(vec![chain])
+            .rng_counter(RunStream::MonsterAi, 0)
+            .rng_counter(RunStream::CombatTargets, 0)
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 8, 39, "SHRINKER_MOVE")
+            .card(PileName::Hand, 0, card("CARD.STRIKE_IRONCLAD", 0), 0)
+            .build(sts2_content::standard_registry())
+            .expect("the scenario builds");
+    play(&mut simulator, "CARD.STRIKE_IRONCLAD");
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is held");
+    assert!(combat.has_ended, "the kusarigama's hit won the fight");
+    assert_eq!(
+        combat.player.piles.play.len(),
+        1,
+        "the strike is still in the play pile"
+    );
+}
+
+/// Each pass of an automatic play reads the card as it stands: a strike a
+/// havoc plays twice under one-two punch is upgraded by a razor tooth after the
+/// first pass, and the second pass strikes as the upgraded card.
+#[test]
+fn an_auto_played_cards_second_pass_reads_the_card_as_it_stands() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .relics(&[id("RELIC.RAZOR_TOOTH")])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "SHRINKER_MOVE")
+        .power(
+            0,
+            id("POWER.ONE_TWO_PUNCH_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.HAVOC", 0), 0)
+        .card(PileName::Draw, 1, card("CARD.STRIKE_IRONCLAD", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.HAVOC");
+    assert_eq!(
+        999 - creature(&simulator, 1).current_hp,
+        6 + 9,
+        "six from the strike, then nine from it upgraded"
+    );
+}
+
+/// A player who goes down at the start of their turn ends the run there: the
+/// crimson mantle's cost kills them, and the pendulum behind it never counts
+/// the turn.
+#[test]
+fn the_turn_start_stops_where_the_player_falls() {
+    let mut pendulum = sts2_engine::RelicInstance::new(id("RELIC.PENDULUM"));
+    pendulum.counter = 2;
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(1, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .relic_instances(vec![pendulum])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .card(PileName::Hand, 0, card("CARD.CRIMSON_MANTLE", 0), 0)
+        .card(PileName::Draw, 1, card("CARD.DEFEND_IRONCLAD", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.CRIMSON_MANTLE");
+    end_turn(&mut simulator);
+    assert_eq!(
+        simulator.state().terminal,
+        Some(sts2_engine::RunResult::Defeat)
+    );
+    assert_eq!(relic_counter(&simulator, "RELIC.PENDULUM"), 2);
+}

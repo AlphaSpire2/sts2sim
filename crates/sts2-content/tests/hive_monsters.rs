@@ -560,3 +560,40 @@ fn an_expose_against_a_tunneler_with_no_block_stuns_nothing() {
         "the expose still leaves it open"
     );
 }
+
+/// A hopper's theft passes over an imbued card while anything else is there to
+/// take: an imbued uncommon stands in none of the rarity groups, so the plain
+/// common is what it takes.
+#[test]
+fn a_hopper_passes_over_an_imbued_card() {
+    let mut imbued = card("CARD.TAUNT");
+    imbued.enchantment = Some(sts2_engine::EnchantmentFingerprint::new(
+        id("ENCHANTMENT.IMBUED"),
+        1,
+    ));
+    let mut scenario = ScenarioBuilder::new("THIEFTEST", id("ENCOUNTER.THIEVING_HOPPER_WEAK"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatCardGeneration, 0)
+        .enemy(1, id("MONSTER.THIEVING_HOPPER"), 79, 79, "THIEVERY_MOVE")
+        .card(PileName::Discard, 0, imbued, 1)
+        .card(PileName::Discard, 1, card("CARD.POMMEL_STRIKE"), 1);
+    for slot in 2..8 {
+        scenario = scenario.card(PileName::Draw, slot, card("CARD.STRIKE_IRONCLAD"), 1);
+    }
+    let mut simulator = scenario
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    let held = |model: &str| {
+        combat(&simulator)
+            .player
+            .piles
+            .all_cards()
+            .any(|card| card.fingerprint.model_id == id(model))
+    };
+    assert!(!held("CARD.POMMEL_STRIKE"), "the plain common was taken");
+    assert!(held("CARD.TAUNT"), "the imbued one was left");
+}

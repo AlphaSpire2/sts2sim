@@ -520,7 +520,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "sts2-cli"
-version = "0.11.12"
+version = "0.11.13"
 dependencies = [
  "clap",
  "clap_complete",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "sts2-content"
-version = "0.11.12"
+version = "0.11.13"
 dependencies = [
  "criterion",
  "flate2",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "sts2-core"
-version = "0.11.12"
+version = "0.11.13"
 dependencies = [
  "serde",
  "serde_json",
@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "sts2-engine"
-version = "0.11.12"
+version = "0.11.13"
 dependencies = [
  "rustc-hash",
  "serde",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "sts2-replay"
-version = "0.11.12"
+version = "0.11.13"
 dependencies = [
  "flate2",
  "serde",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "sts2-rng"
-version = "0.11.12"
+version = "0.11.13"
 dependencies = [
  "serde",
  "serde_json",

@@ -2083,20 +2083,14 @@ pub(crate) fn with_damage_var(
 /// One attack whose hit count is two against a target carrying Vulnerable and
 /// one against anything else.
 fn dismantle(damage: i32) -> Vec<Command> {
-    vec![
-        Command::When {
-            otherwise: Vec::new(),
-            condition: Condition::TargetHasPower(id("POWER.VULNERABLE_POWER")),
-            then: vec![multi_attack(Amount::Fixed(damage), Amount::Fixed(2))],
-        },
-        Command::When {
-            otherwise: Vec::new(),
-            condition: Condition::Not(Box::new(Condition::TargetHasPower(id(
-                "POWER.VULNERABLE_POWER",
-            )))),
-            then: vec![multi_attack(Amount::Fixed(damage), Amount::Fixed(1))],
-        },
-    ]
+    // The hit count is settled once, before the first hit: a target that loses
+    // its vulnerability to the first hits — a giant that dies and comes back
+    // without it — does not earn a hit of the other count on top.
+    vec![Command::When {
+        otherwise: vec![multi_attack(Amount::Fixed(damage), Amount::Fixed(1))],
+        condition: Condition::TargetHasPower(id("POWER.VULNERABLE_POWER")),
+        then: vec![multi_attack(Amount::Fixed(damage), Amount::Fixed(2))],
+    }]
 }
 
 /// Works as much vulnerability onto the target as it already carries, asked of

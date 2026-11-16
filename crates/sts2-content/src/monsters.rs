@@ -652,7 +652,7 @@ fn thievery() -> Command {
             piles: vec![PileName::Draw, PileName::Discard],
             priorities: vec![
                 vec![CardRarity::Uncommon],
-                vec![CardRarity::Common, CardRarity::Rare],
+                vec![CardRarity::Common, CardRarity::Rare, CardRarity::Event],
                 vec![CardRarity::Basic],
             ],
         },

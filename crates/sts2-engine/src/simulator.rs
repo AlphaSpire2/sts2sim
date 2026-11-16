@@ -52,6 +52,10 @@ static DIE_FOR_YOU_POWER: LazyLock<ModelId> =
 static SOVEREIGN_BLADE: LazyLock<ModelId> =
     LazyLock::new(|| "CARD.SOVEREIGN_BLADE".parse().expect("static model ID"));
 
+/// The enchantment a thief passes over until nothing else is left to take.
+static IMBUED_ENCHANTMENT: LazyLock<ModelId> =
+    LazyLock::new(|| "ENCHANTMENT.IMBUED".parse().expect("static model ID"));
+
 use crate::{
     Action, ActiveRoom, AgentObservation, Amount, CardCmd, CardDefinition, CardFilter,
     CardFingerprint, CardHandle, CardInstance, CardOrigin, CardPileCmd, CardSelectCmd,
@@ -9619,7 +9623,15 @@ impl Simulator {
             }
             let effect = self.combat_mut()?.queue.pop_front();
             let ended = if let Some(effect) = effect {
-                self.apply_effect(effect, events)?
+                // A fight is won the moment its last enemy goes down, whatever
+                // struck the blow: a listener answering a play — a kusarigama's
+                // hit — wins it as surely as the card's body, and what the play
+                // still owes runs as it does over an ending fight.
+                let ended = self.apply_effect(effect, events)?;
+                ended
+                    || (!self.suspended()
+                        && self.combat().is_ok_and(|combat| combat.in_progress)
+                        && self.combat_is_won()?)
             } else {
                 // The win check is asked once the action that was running has
                 // finished, whoever landed the blow and wherever it landed. A
@@ -13483,6 +13495,7 @@ impl Simulator {
         let mut step = step;
         for index in 0..play_count {
             let plays_left = play_count - index;
+            let (card, commands) = self.card_as_this_pass_reads_it(&card, &commands);
             if step == crate::AutoPlayStep::Body {
                 // The play is announced whether the player chose the card or
                 // not, so a card auto-played at an enemy turns its owner to face
@@ -13550,6 +13563,30 @@ impl Simulator {
             step = crate::AutoPlayStep::Body;
         }
         Ok(self.finish_auto_play(card_id, destination, outer_play_was_chosen)? || won)
+    }
+
+    /// The card and its body as a pass of an automatic play reads them: as the
+    /// card stands when the pass begins, so a play that upgraded it on the pass
+    /// before — a razor tooth — runs the upgraded body on the next. A card no
+    /// longer in the fight keeps what the play started with.
+    fn card_as_this_pass_reads_it(
+        &self,
+        card: &CardInstance,
+        commands: &[Command],
+    ) -> (CardInstance, Vec<Command>) {
+        let current = self.combat().ok().and_then(|combat| {
+            combat
+                .player
+                .piles
+                .all_cards()
+                .find(|held| held.id == card.id)
+                .cloned()
+        });
+        (
+            current.unwrap_or_else(|| card.clone()),
+            self.card_body_at_its_level(card.id)
+                .unwrap_or_else(|| commands.to_vec()),
+        )
     }
 
     /// The last of an auto-play: the card is put down where the play sends it,
@@ -18801,7 +18838,9 @@ impl Simulator {
 
     /// A thief prefers what a deck can least afford to lose: the first rarity
     /// group that has anything in it, rolled on the combat card-generation
-    /// stream.
+    /// stream. An imbued card is in none of the rarity groups; it falls to the
+    /// group after them, beside the ancient cards, and only where every group
+    /// is empty is anything the deck owns taken.
     fn select_stolen_card(
         &mut self,
         piles: &[PileName],
@@ -18821,13 +18860,36 @@ impl Simulator {
                 .card(&card.fingerprint.model_id)
                 .map(|definition| definition.rarity)
         };
+        let imbued = |card: &CardInstance| {
+            card.fingerprint
+                .enchantment
+                .as_ref()
+                .is_some_and(|enchantment| enchantment.model_id == *IMBUED_ENCHANTMENT)
+        };
+        let in_group = |card: &CardInstance, group: &[crate::CardRarity]| {
+            !imbued(card) && rarity_of(card).is_some_and(|rarity| group.contains(&rarity))
+        };
+        let last_resort = |card: &CardInstance| {
+            imbued(card) || rarity_of(card) == Some(crate::CardRarity::Ancient)
+        };
+        let groups = priorities
+            .iter()
+            .map(|group| {
+                owned
+                    .iter()
+                    .filter(|card| in_group(card, group))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .chain(std::iter::once(
+                owned
+                    .iter()
+                    .filter(|card| last_resort(card))
+                    .cloned()
+                    .collect(),
+            ));
         let mut candidates: Vec<CardInstance> = owned.clone();
-        for group in priorities {
-            let preferred: Vec<CardInstance> = owned
-                .iter()
-                .filter(|card| rarity_of(card).is_some_and(|rarity| group.contains(&rarity)))
-                .cloned()
-                .collect();
+        for preferred in groups {
             if !preferred.is_empty() {
                 candidates = preferred;
                 break;
@@ -19370,8 +19432,14 @@ impl Simulator {
             .cloned()
             .ok_or_else(|| unsupported_content(model_id))?;
         self.state.run_player.potions[slot] = None;
+        // A potion that uses itself is still a potion used: the before and
+        // after passes run around its body, inline, as for any other, and the
+        // hand is looked at for being empty once it is done.
+        self.announce_play_target(crate::HookEvent::BeforePotionUsed, target_id)?;
         let context = CommandContext::by(target_id).at(target_id);
         self.run_commands(&definition.effects, &context, events)?;
+        self.dispatch_hooks(&[crate::HookEvent::AfterPotionUsed], &HookContext::none())?;
+        self.check_for_empty_hand()?;
         self.emit(
             "combat.use_potion",
             BTreeMap::from([("potion".to_owned(), json!(model_id.to_string()))]),
@@ -24965,6 +25033,11 @@ impl Simulator {
     ) -> Result<(), EngineError> {
         let registry = Arc::clone(&self.content);
         while pass.next < pass.listeners.len() {
+            // A player who went down ended the run where they fell: the
+            // listeners behind the one that killed them are not reached.
+            if self.pending_loss {
+                break;
+            }
             let listener = pass.listeners[pass.next].clone();
             pass.next += 1;
             if pass.event == crate::HookEvent::AfterDeath

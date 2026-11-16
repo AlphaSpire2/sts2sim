@@ -2348,3 +2348,37 @@ fn an_unsettling_lamp_doubles_a_mangle_once_and_not_the_strength_it_lends() {
         "and the strength that mangle lends is the doubled amount, not twice it"
     );
 }
+
+/// Dismantle settles how many times it hits before the first hit lands. Its
+/// second hit on a vulnerable waterfall giant kills it, the giant comes back
+/// about to blow with no vulnerability left, and no third hit follows.
+#[test]
+fn dismantle_settles_its_hits_before_the_first_one_lands() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.WATERFALL_GIANT_BOSS"))
+        .player_hp(80, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.WATERFALL_GIANT"), 20, 250, "PRESSURIZE_MOVE")
+        .power(
+            1,
+            id("POWER.STEAM_ERUPTION_POWER"),
+            10,
+            sts2_engine::PowerType::Buff,
+        )
+        .power(
+            1,
+            id("POWER.VULNERABLE_POWER"),
+            1,
+            sts2_engine::PowerType::Debuff,
+        )
+        .card(PileName::Hand, 0, card("CARD.DISMANTLE", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.DISMANTLE");
+    assert_eq!(
+        creature(&simulator, 1).current_hp,
+        999_999_999,
+        "the giant came back after the second hit, and nothing struck it again"
+    );
+}
