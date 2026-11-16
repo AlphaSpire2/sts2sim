@@ -9800,17 +9800,22 @@ impl Simulator {
             return Ok(());
         }
         let was_left_in_play = piles.play.iter().any(|card| card.id == card_id);
-        self.clear_costs_spent_by_a_play(card_id)?;
         // The result pile is only where the card goes if the play left it in the
         // play pile at all. A body that put the card somewhere itself — a
         // Shining Strike back on top of the draw pile — has already said where
-        // it lives, and the play does not take it back. Its post-play cost
-        // cleanup above still runs.
-        if !was_left_in_play {
-            self.refresh_card_costs();
-            return Ok(());
+        // it lives, and the play does not take it back; its post-play cost
+        // cleanup still runs.
+        //
+        // The card is put down before that cleanup: what reacts to it landing —
+        // burning sticks copying a skill that burns up — sees it still carrying
+        // the costs that stood until it was played, and a copy made there keeps
+        // them.
+        if was_left_in_play {
+            self.put_down_played_card(card_id, destination)?;
         }
-        self.put_down_played_card(card_id, destination)
+        self.clear_costs_spent_by_a_play(card_id)?;
+        self.refresh_card_costs();
+        Ok(())
     }
 
     /// The costs a play spends: those standing on the card only until it was

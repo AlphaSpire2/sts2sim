@@ -679,6 +679,46 @@ fn burning_sticks_copy_a_burnt_skill_and_leave_a_burnt_attack() {
     );
 }
 
+/// A skill made free until it was played, burnt up by its own play, is
+/// copied by burning sticks while it is still free: the card lands in the
+/// exhaust pile before the play spends that cost, so the copy keeps it.
+#[test]
+fn burning_sticks_copy_a_free_skill_before_its_play_spends_the_cost() {
+    let mut simulator = fight(
+        &["RELIC.BURNING_STICKS"],
+        &[("CARD.BULLET_TIME", 0), ("CARD.IMPERVIOUS", 0)],
+    );
+    play(&mut simulator, "CARD.BULLET_TIME");
+    play(&mut simulator, "CARD.IMPERVIOUS");
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing");
+    let copy = combat
+        .player
+        .piles
+        .hand
+        .iter()
+        .find(|card| card.fingerprint.model_id == id("CARD.IMPERVIOUS"))
+        .expect("the burning sticks copied the impervious back");
+    assert_eq!(copy.energy_cost, 0, "the copy is still free");
+    let burnt = combat
+        .player
+        .piles
+        .exhaust
+        .iter()
+        .find(|card| card.fingerprint.model_id == id("CARD.IMPERVIOUS"))
+        .expect("the played impervious burnt up");
+    assert!(
+        burnt
+            .temporary_costs
+            .iter()
+            .all(|cost| !cost.clears_when_played),
+        "the play still spent the free cost on the card it played"
+    );
+}
+
 /// A copy of a card that was played has not been played itself. A music box
 /// copies the turn's first attack into the hand once it is played, and the
 /// copy carries none of the original's plays.
