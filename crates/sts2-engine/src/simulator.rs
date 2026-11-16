@@ -20757,6 +20757,7 @@ impl Simulator {
     /// shuffled together, which is what a body that asks for a shuffle outright
     /// gets. `shuffle_if_necessary` is the guarded form the draw runs itself.
     fn shuffle_whole_draw_pile(&mut self) -> Result<(), EngineError> {
+        let standing = self.combat()?.player.piles.clone();
         let mut draw = {
             let combat = self.combat_mut()?;
             let mut cards = std::mem::take(&mut combat.player.piles.discard);
@@ -20772,10 +20773,7 @@ impl Simulator {
         // The shuffle-order pass runs over the order the shuffle settled on,
         // told that this is not the fight's opening shuffle, and the
         // after-shuffle pass follows it.
-        self.dispatch_hooks(
-            &[crate::HookEvent::ModifyShuffleOrder],
-            &HookContext::none(),
-        )?;
+        self.dispatch_shuffle_order_pass(&standing)?;
         // The after-shuffle pass is the last thing a shuffle does, once every
         // card is standing in the draw pile.
         self.dispatch_hooks(&[crate::HookEvent::AfterShuffle], &HookContext::none())
@@ -20791,6 +20789,7 @@ impl Simulator {
         if self.combat()?.player.piles.discard.is_empty() {
             return Ok(false);
         }
+        let standing = self.combat()?.player.piles.clone();
         let mut draw = {
             let combat = self.combat_mut()?;
             std::mem::take(&mut combat.player.piles.discard)
@@ -20801,16 +20800,48 @@ impl Simulator {
             .stream_mut(RunStream::Shuffle)
             .shuffle(&mut draw);
         self.combat_mut()?.player.piles.draw = draw;
-        self.dispatch_hooks(
-            &[crate::HookEvent::ModifyShuffleOrder],
-            &HookContext::none(),
-        )?;
+        self.dispatch_shuffle_order_pass(&standing)?;
         self.dispatch_hooks(&[crate::HookEvent::AfterShuffle], &HookContext::none())?;
         // A listener on the shuffle may have taken back what the shuffle put
         // down — a Stratagem with as many stacks as the pile has cards empties
         // it again — so the answer is read off the pile as the listeners left
         // it, the way the build's draw asks again after its shuffle.
         Ok(!self.combat()?.player.piles.draw.is_empty())
+    }
+
+    /// The shuffle-order pass. The build reorders the shuffled list while the
+    /// cards still stand in the piles they were shuffled out of, so its
+    /// listeners are walked in those piles' order rather than in the order the
+    /// shuffle dealt: of several cards that each put themselves on top, the
+    /// last one in the old discard pile ends on top.
+    fn dispatch_shuffle_order_pass(&mut self, standing: &crate::Piles) -> Result<(), EngineError> {
+        let event = crate::HookEvent::ModifyShuffleOrder;
+        let outer_bank = self.hook_screens_owed.replace(Vec::new());
+        let result = self
+            .hook_listeners_among(event, Some(standing))
+            .and_then(|listeners| {
+                self.dispatch_hook_pass(SuspendedHookPass {
+                    event,
+                    listeners,
+                    next: 0,
+                    context: HookContext::none(),
+                })
+            })
+            .and_then(|()| {
+                if event.joins_deferred_bodies() {
+                    self.open_owed_hook_screens()
+                } else {
+                    Ok(())
+                }
+            });
+        let bank = std::mem::replace(&mut self.hook_screens_owed, outer_bank);
+        if result.is_ok() && bank.is_some_and(|bank| !bank.is_empty()) {
+            return Err(EngineError::new(ErrorCode::InternalInvariant).with_detail(
+                "hook_screens",
+                "a dispatch returned with screens still owed",
+            ));
+        }
+        result
     }
 
     /// The most cards a hand can hold.
@@ -22602,11 +22633,13 @@ impl Simulator {
         self.state.next_card_instance_id += 1;
         // A clone is marked with what it was copied from, and cloning clears
         // the link to the deck, so a clone belongs to the fight rather than to
-        // the deck however its original stood.
+        // the deck however its original stood. The plays its original made are
+        // not its own: a clone has never been played.
         let copy = CardInstance {
             id,
             clone_of: Some(card_id),
             deck_version: None,
+            last_played_turn: None,
             ..source
         };
         let pile = self.pile_a_card_can_join(pile)?;
@@ -25047,6 +25080,16 @@ impl Simulator {
             // the room is entered and taken down as the room is left, whether or
             // not the fight itself is still in progress.
             crate::HookCondition::InACombatRoom => self.state.combat.is_some(),
+            crate::HookCondition::OwnersTurnIsUnderWay => {
+                self.state.combat.as_ref().is_some_and(|combat| {
+                    matches!(
+                        combat.player.phase,
+                        crate::PlayerTurnPhase::AutoPrePlay
+                            | crate::PlayerTurnPhase::Play
+                            | crate::PlayerTurnPhase::AutoPostPlay
+                    )
+                })
+            }
             crate::HookCondition::InAMerchantRoom => matches!(
                 self.state
                     .run
@@ -25843,6 +25886,16 @@ impl Simulator {
         reason = "the listener order is one block per source, in the build's own order"
     )]
     fn hook_listeners(&self, event: HookEvent) -> Result<Vec<Listener>, EngineError> {
+        self.hook_listeners_among(event, None)
+    }
+
+    /// The same walk, with the player's cards read from `piles` where it is
+    /// given rather than from where they stand now.
+    fn hook_listeners_among(
+        &self,
+        event: HookEvent,
+        piles: Option<&crate::Piles>,
+    ) -> Result<Vec<Listener>, EngineError> {
         // A combat-scope pass over a fight that is over or ending, and not still
         // starting, reaches nobody at all. Whether the fight is ending is worked
         // out fresh as the walk begins: the last primary enemy being down is
@@ -25943,32 +25996,11 @@ impl Simulator {
                 power_instance: None,
                 model_id: orb.model_id.clone(),
             }));
-            for pile in [
-                PileName::Hand,
-                PileName::Draw,
-                PileName::Discard,
-                PileName::Exhaust,
-                PileName::Play,
-            ] {
-                // The card, and then right behind it its enchantment where the
-                // card carries one.
-                for card in pile_of(&combat.player.piles, pile) {
-                    listeners.push(Listener {
-                        owner: creature.id,
-                        source: ListenerSource::CombatCard(card.id),
-                        power_instance: None,
-                        model_id: card.fingerprint.model_id.clone(),
-                    });
-                    if let Some(enchantment) = &card.fingerprint.enchantment {
-                        listeners.push(Listener {
-                            owner: creature.id,
-                            source: ListenerSource::CombatCardEnchantment(card.id),
-                            power_instance: None,
-                            model_id: enchantment.model_id.clone(),
-                        });
-                    }
-                }
-            }
+            push_card_listeners(
+                &mut listeners,
+                creature.id,
+                piles.unwrap_or(&combat.player.piles),
+            );
         }
         Ok(listeners)
     }
@@ -29773,6 +29805,39 @@ const fn shuffle_stream_of(stream: crate::ShuffleStream) -> RunStream {
         crate::ShuffleStream::CombatCardSelection => RunStream::CombatCardSelection,
         crate::ShuffleStream::Niche => RunStream::Niche,
         crate::ShuffleStream::Shuffle | crate::ShuffleStream::Event => RunStream::Shuffle,
+    }
+}
+
+/// The player's cards as listeners, pile by pile in the build's order: each
+/// card, and right behind it its enchantment where the card carries one.
+fn push_card_listeners(
+    listeners: &mut Vec<Listener>,
+    owner: CreatureCombatId,
+    piles: &crate::Piles,
+) {
+    for pile in [
+        PileName::Hand,
+        PileName::Draw,
+        PileName::Discard,
+        PileName::Exhaust,
+        PileName::Play,
+    ] {
+        for card in pile_of(piles, pile) {
+            listeners.push(Listener {
+                owner,
+                source: ListenerSource::CombatCard(card.id),
+                power_instance: None,
+                model_id: card.fingerprint.model_id.clone(),
+            });
+            if let Some(enchantment) = &card.fingerprint.enchantment {
+                listeners.push(Listener {
+                    owner,
+                    source: ListenerSource::CombatCardEnchantment(card.id),
+                    power_instance: None,
+                    model_id: enchantment.model_id.clone(),
+                });
+            }
+        }
     }
 }
 

@@ -639,6 +639,102 @@ fn a_brilliant_scarf_counts_a_chosen_play_that_auto_plays_a_card() {
     assert_eq!(defend, 0, "the next card is the fifth, and free");
 }
 
+/// Burning sticks copy a skill that burns up and nothing else. A true grit
+/// burning a strike leaves the sticks unspent; burning a defend, they copy
+/// it into the hand.
+#[test]
+fn burning_sticks_copy_a_burnt_skill_and_leave_a_burnt_attack() {
+    let held = |simulator: &Simulator, model_id: &str| {
+        simulator
+            .state()
+            .combat
+            .as_ref()
+            .expect("the fight is standing")
+            .player
+            .piles
+            .hand
+            .iter()
+            .filter(|card| card.fingerprint.model_id == id(model_id))
+            .count()
+    };
+    let mut attack = fight(
+        &["RELIC.BURNING_STICKS"],
+        &[("CARD.TRUE_GRIT", 0), ("CARD.STRIKE_IRONCLAD", 0)],
+    );
+    play(&mut attack, "CARD.TRUE_GRIT");
+    assert_eq!(
+        held(&attack, "CARD.STRIKE_IRONCLAD"),
+        0,
+        "no copy of the strike"
+    );
+    let mut skill = fight(
+        &["RELIC.BURNING_STICKS"],
+        &[("CARD.TRUE_GRIT", 0), ("CARD.DEFEND_IRONCLAD", 0)],
+    );
+    play(&mut skill, "CARD.TRUE_GRIT");
+    assert_eq!(
+        held(&skill, "CARD.DEFEND_IRONCLAD"),
+        1,
+        "the defend is copied back"
+    );
+}
+
+/// A copy of a card that was played has not been played itself. A music box
+/// copies the turn's first attack into the hand once it is played, and the
+/// copy carries none of the original's plays.
+#[test]
+fn a_copy_of_a_played_card_has_not_been_played() {
+    let mut simulator = fight(&["RELIC.MUSIC_BOX"], &[("CARD.THRUMMING_HATCHET", 0)]);
+    play(&mut simulator, "CARD.THRUMMING_HATCHET");
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing");
+    let copy = combat
+        .player
+        .piles
+        .hand
+        .iter()
+        .find(|card| card.clone_of.is_some())
+        .expect("the music box copied the hatchet into the hand");
+    assert_eq!(copy.last_played_turn, None);
+}
+
+/// An unceasing top deals nothing for a hand emptied while the turn is being
+/// set up. A hellraiser plays the strike the opening draw deals, leaving the
+/// hand empty for a moment, and the draw still deals five cards in all.
+#[test]
+fn an_unceasing_top_deals_nothing_while_the_opening_hand_is_drawn() {
+    let mut scenario = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .relics(&[id("RELIC.UNCEASING_TOP")])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "SHRINKER_MOVE")
+        .power(
+            0,
+            id("POWER.HELLRAISER_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Draw, 0, card("CARD.STRIKE_IRONCLAD", 0), 1);
+    for slot in 1..8 {
+        scenario = scenario.card(PileName::Draw, slot, card("CARD.DEFEND_IRONCLAD", 0), 1);
+    }
+    let mut simulator = scenario
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    assert_eq!(
+        hand_size(&simulator),
+        4,
+        "the strike was dealt and played, and four defends were dealt behind it"
+    );
+}
+
 /// A vambrace doubles the first block a card works up in a fight and is spent
 /// for the play that did it.
 #[test]

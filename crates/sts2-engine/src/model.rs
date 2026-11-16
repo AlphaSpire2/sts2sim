@@ -1980,6 +1980,11 @@ pub enum HookCondition {
     /// fight is in progress, so a relic that works strength in as the fight is
     /// walked into sees the room but not a fight in progress.
     InACombatRoom,
+    /// The player's turn is past its setup and not yet ended: the
+    /// start-of-turn auto-plays, the play itself, or the end-of-turn
+    /// auto-plays. The opening draw happens before it and the hand flush
+    /// after it.
+    OwnersTurnIsUnderWay,
     /// The card the pass is about landed in the run deck, which is what a
     /// relic that answers for the deck growing asks.
     CardJoinedTheDeck,

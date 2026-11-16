@@ -720,6 +720,42 @@ fn perfect_fit_puts_its_card_on_top_after_a_shuffle() {
     );
 }
 
+/// Two cards that each put themselves on top after a shuffle are taken in
+/// the order they stood in the discard pile, so the one further back in it
+/// is moved last and ends on top: it is dealt first.
+#[test]
+fn perfect_fits_go_on_top_in_the_order_they_stood_in_the_discard_pile() {
+    let mut scenario = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::Shuffle, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE");
+    for index in 0..8u64 {
+        let fingerprint = match index {
+            2 => enchanted("CARD.STRIKE_IRONCLAD", "ENCHANTMENT.PERFECT_FIT", 0),
+            6 => enchanted("CARD.BASH", "ENCHANTMENT.PERFECT_FIT", 0),
+            _ => card("CARD.DEFEND_IRONCLAD", 0),
+        };
+        scenario = scenario.card(PileName::Discard, index, fingerprint, 1);
+    }
+    let mut simulator = scenario
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    let hand = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("in a fight")
+        .player
+        .piles
+        .hand;
+    assert_eq!(hand[0].fingerprint.model_id, id("CARD.BASH"));
+    assert_eq!(hand[1].fingerprint.model_id, id("CARD.STRIKE_IRONCLAD"));
+}
+
 #[test]
 fn clone_and_the_deprecated_enchantment_do_nothing_of_their_own() {
     for enchantment in ["ENCHANTMENT.CLONE", "ENCHANTMENT.DEPRECATED_ENCHANTMENT"] {

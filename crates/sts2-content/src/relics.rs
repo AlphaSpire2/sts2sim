@@ -2388,7 +2388,7 @@ fn belt_buckle() -> RelicDefinition {
 }
 
 /// Burning sticks copy the first skill of each fight that burns up back into
-/// their owner's hand.
+/// their owner's hand. Any other card burning up leaves them unspent.
 fn burning_sticks() -> RelicDefinition {
     RelicDefinition {
         hooks: vec![
@@ -2401,21 +2401,25 @@ fn burning_sticks() -> RelicDefinition {
                     condition: Condition::Not(Box::new(Condition::ListeningRelicIsLatched)),
                     then: vec![Command::Select {
                         cards: sts2_engine::CardSelector::Announced,
-                        then: vec![
-                            Command::CardPile(CardPileCmd::AddGeneratedToCombat {
-                                enchantment: None,
-                                card: CardOrigin::CloneOfChosen,
-                                grown_by: Amount::Fixed(0),
-                                count: Amount::Fixed(1),
-                                pile: sts2_engine::PileName::Hand,
-                                upgraded: false,
-                                ethereal: false,
-                                retain: false,
-                                temporary_cost: None,
-                                position: sts2_engine::DrawPilePosition::Bottom,
-                            }),
-                            latch(true),
-                        ],
+                        then: vec![Command::When {
+                            otherwise: Vec::new(),
+                            condition: Condition::ChosenCardIsOfType(sts2_engine::CardType::Skill),
+                            then: vec![
+                                Command::CardPile(CardPileCmd::AddGeneratedToCombat {
+                                    enchantment: None,
+                                    card: CardOrigin::CloneOfChosen,
+                                    grown_by: Amount::Fixed(0),
+                                    count: Amount::Fixed(1),
+                                    pile: sts2_engine::PileName::Hand,
+                                    upgraded: false,
+                                    ethereal: false,
+                                    retain: false,
+                                    temporary_cost: None,
+                                    position: sts2_engine::DrawPilePosition::Bottom,
+                                }),
+                                latch(true),
+                            ],
+                        }],
                     }],
                 }],
             )
@@ -2766,12 +2770,15 @@ fn rare_relics() -> Vec<RelicDefinition> {
             restocks_merchant_entries: true,
             ..obtained_only("RELIC.THE_COURIER", RelicRarity::Rare)
         }),
-        // An unceasing top deals a card whenever its owner's hand runs out.
+        // An unceasing top deals a card whenever its owner's hand runs out
+        // while their turn is under way. A hand emptied during the turn's setup
+        // — a card the opening draw auto-plays — or after the turn has ended
+        // deals nothing.
         RelicDefinition {
-            hooks: vec![ModifierHook::every_turn(
-                HookEvent::AfterHandEmptied,
-                vec![draw(1)],
-            )],
+            hooks: vec![
+                ModifierHook::every_turn(HookEvent::AfterHandEmptied, vec![draw(1)])
+                    .when(HookCondition::OwnersTurnIsUnderWay),
+            ],
             ..obtained_only("RELIC.UNCEASING_TOP", RelicRarity::Rare)
         },
         // An unsettling lamp doubles every lasting debuff the first card of a
