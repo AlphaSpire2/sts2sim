@@ -611,8 +611,8 @@ fn regret() -> CardDefinition {
 #[allow(clippy::too_many_lines, reason = "one entry per token")]
 pub(crate) fn token_cards() -> Vec<CardDefinition> {
     vec![
-        // Fuel is a point of energy and a card, and burns for having been
-        // played.
+        // Fuel is a point of energy (two upgraded), and burns for having
+        // been played.
         rarity(
             upgrading(
                 exhausting(card(
@@ -620,9 +620,9 @@ pub(crate) fn token_cards() -> Vec<CardDefinition> {
                     CardType::Skill,
                     TargetType::SelfTarget,
                     0,
-                    vec![energy(1), draw(1)],
+                    vec![energy(1)],
                 )),
-                vec![energy(1), draw(2)],
+                vec![energy(2)],
             ),
             CardRarity::Token,
         ),
@@ -665,9 +665,9 @@ pub(crate) fn token_cards() -> Vec<CardDefinition> {
                         CardType::Skill,
                         TargetType::SelfTarget,
                         0,
-                        vec![block(8)],
+                        vec![block(7)],
                     )),
-                    vec![block(11)],
+                    vec![block(10)],
                 ),
                 &[CardTag::Minion],
             ),
@@ -1082,9 +1082,9 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                         CardType::Attack,
                         TargetType::AnyEnemy,
                         1,
-                        maul(1),
+                        maul(2),
                     ),
-                    maul(2),
+                    maul(3),
                 ),
                 5,
                 6,
@@ -1170,9 +1170,9 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                     CardType::Skill,
                     TargetType::SelfTarget,
                     3,
-                    relax(15, 2, 2),
+                    relax(16, 2, 2),
                 )),
-                relax(17, 3, 3),
+                relax(18, 3, 3),
             ),
             CardRarity::Ancient,
         ),
@@ -1268,7 +1268,7 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                     "CARD.WHISTLE",
                     CardType::Attack,
                     TargetType::AnyEnemy,
-                    3,
+                    2,
                     vec![attack(33), stun_target()],
                 )),
                 vec![attack(44), stun_target()],
@@ -1288,14 +1288,14 @@ fn stun_target() -> Command {
     })
 }
 
-/// Brightest Flame, played: energy, then cards, then a point of maximum HP.
+/// Brightest Flame, played: energy, then cards, then two points of maximum HP.
 fn brightest_flame(energy_gained: i32, cards: i32) -> Vec<Command> {
     vec![
         energy(energy_gained),
         draw(cards),
         Command::Creature(CreatureCmd::LoseMaxHp {
             target: CreatureSelector::Owner,
-            amount: Amount::Fixed(1),
+            amount: Amount::Fixed(2),
         }),
     ]
 }
@@ -2061,10 +2061,10 @@ pub(crate) fn offered_colorless_cards() -> Vec<CardDefinition> {
                 "CARD.REND",
                 CardType::Attack,
                 TargetType::AnyEnemy,
-                2,
-                vec![rend(15, 5)],
+                1,
+                vec![rend(10, 5)],
             ),
-            vec![rend(18, 8)],
+            vec![rend(12, 8)],
         ),
         // A salvo swings and keeps the hand for a turn.
         upgrading(

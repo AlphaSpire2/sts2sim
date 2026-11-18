@@ -260,7 +260,7 @@ fn the_plain_powers_lay_down_what_they_say() {
         ("CARD.ACCELERANT", "POWER.ACCELERANT_POWER", 1, 2),
         ("CARD.ACCURACY", "POWER.ACCURACY_POWER", 4, 6),
         ("CARD.AFTERIMAGE", "POWER.AFTERIMAGE_POWER", 1, 1),
-        ("CARD.ANTICIPATE", "POWER.ANTICIPATE_POWER", 2, 3),
+        ("CARD.ANTICIPATE", "POWER.ANTICIPATE_POWER", 2, 4),
         ("CARD.BURST", "POWER.BURST_POWER", 1, 2),
         ("CARD.CORROSIVE_WAVE", "POWER.CORROSIVE_WAVE_POWER", 2, 3),
         ("CARD.ENVENOM", "POWER.ENVENOM_POWER", 1, 2),
@@ -280,7 +280,7 @@ fn the_plain_powers_lay_down_what_they_say() {
             1,
             1,
         ),
-        ("CARD.WELL_LAID_PLANS", "POWER.WELL_LAID_PLANS_POWER", 1, 2),
+        ("CARD.WELL_LAID_PLANS", "POWER.WELL_LAID_PLANS_POWER", 1, 1),
     ] {
         for (upgrade, stacks) in [(0, base), (1, upgraded)] {
             let mut simulator = fight(&[(model_id, upgrade)]);
@@ -318,7 +318,7 @@ fn the_plain_debuffs_land_where_they_are_aimed() {
 /// The cards that sweep the whole enemy side.
 #[test]
 fn the_sweeps_land_on_everything() {
-    for (model_id, base, upgraded) in [("CARD.FLICK_FLACK", 6, 8), ("CARD.DAGGER_SPRAY", 8, 12)] {
+    for (model_id, base, upgraded) in [("CARD.FLICK_FLACK", 7, 9), ("CARD.DAGGER_SPRAY", 8, 12)] {
         for (upgrade, damage) in [(0, base), (1, upgraded)] {
             let mut simulator = crowd(&[(model_id, upgrade)]);
             play(&mut simulator, model_id);
@@ -333,6 +333,7 @@ fn the_sweeps_land_on_everything() {
 fn the_sweeping_powers_land_on_everything() {
     for (model_id, power, base, upgraded) in [
         ("CARD.HAZE", "POWER.POISON_POWER", 4, 6),
+        ("CARD.HAZE", "POWER.WEAK_POWER", 1, 2),
         ("CARD.PIERCING_WAIL", "POWER.PIERCING_WAIL_POWER", 6, 8),
         ("CARD.SCARE", "POWER.WEAK_POWER", 1, 1),
     ] {
@@ -480,36 +481,26 @@ fn escape_plan_pays_block_only_for_a_skill() {
     }
 }
 
-/// Expertise draws the hand back up to its number, and nothing at all when the
-/// hand already holds that many.
+/// Expertise draws, and what it drew is kept in hand through the end of the
+/// turn while the rest of the hand goes down.
 #[test]
-fn expertise_fills_the_hand_and_no_further() {
-    let mut simulator = fight_with_draw(
-        &[("CARD.EXPERTISE", 0), ("CARD.SLICE", 0)],
-        &[
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-        ],
-    );
-    play(&mut simulator, "CARD.EXPERTISE");
-    // The hand held one card once the expertise left it, so five come up.
-    assert_eq!(pile(&simulator, PileName::Hand).len(), 6);
-
-    let hand: Vec<(&str, u8)> = std::iter::once(("CARD.EXPERTISE", 0))
-        .chain(std::iter::repeat_n(("CARD.SLICE", 0), 7))
-        .collect();
-    let mut simulator = fight_with_draw(&hand, &[("CARD.DEFLECT", 0)]);
-    play(&mut simulator, "CARD.EXPERTISE");
-    assert_eq!(
-        pile(&simulator, PileName::Hand).len(),
-        7,
-        "nothing is drawn"
-    );
+fn expertise_draws_and_keeps_what_it_drew() {
+    for (upgrade, drawn) in [(0, 2), (1, 3)] {
+        let draw: Vec<(&str, u8)> = std::iter::repeat_n(("CARD.DEFLECT", 0), drawn)
+            .chain(std::iter::repeat_n(("CARD.SLICE", 0), 5))
+            .collect();
+        let mut simulator =
+            fight_with_draw(&[("CARD.EXPERTISE", upgrade), ("CARD.SLICE", 0)], &draw);
+        play(&mut simulator, "CARD.EXPERTISE");
+        let hand = pile(&simulator, PileName::Hand);
+        assert_eq!(hand.len(), 1 + drawn, "at level {upgrade}");
+        end_turn(&mut simulator);
+        let kept = pile(&simulator, PileName::Hand)
+            .iter()
+            .filter(|card| *card == "CARD.DEFLECT")
+            .count();
+        assert_eq!(kept, drawn, "the drawn cards were kept at level {upgrade}");
+    }
 }
 
 /// Prepared draws and puts back as many as it drew.
@@ -863,14 +854,14 @@ fn bubble_bubble_only_adds_to_poison_already_there() {
     }
 }
 
-/// Tracking stacks two the first time and one every time after it.
+/// Tracking stacks fifty every time it is played.
 #[test]
-fn tracking_stacks_two_and_then_one() {
+fn tracking_stacks_fifty_each_time() {
     let mut simulator = fight(&[("CARD.TRACKING", 0), ("CARD.TRACKING", 0)]);
     play(&mut simulator, "CARD.TRACKING");
-    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 2);
+    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 50);
     play(&mut simulator, "CARD.TRACKING");
-    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 3);
+    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 100);
 }
 
 /// A dodge and roll owes next turn exactly what its block came to.

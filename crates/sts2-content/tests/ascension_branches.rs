@@ -86,7 +86,7 @@ fn the_earlier_monsters_roll_their_ascended_sizes() {
         ("MONSTER.LEAF_SLIME_M", (32, 35), (33, 36)),
         ("MONSTER.TWIG_SLIME_M", (26, 28), (27, 29)),
         ("MONSTER.THIEVING_HOPPER", (79, 79), (84, 84)),
-        ("MONSTER.EXOSKELETON", (24, 28), (25, 29)),
+        ("MONSTER.EXOSKELETON", (24, 28), (26, 30)),
         ("MONSTER.HUNTER_KILLER", (121, 121), (126, 126)),
         ("MONSTER.CHOMPER", (60, 64), (63, 67)),
         ("MONSTER.BOWLBUG_SILK", (40, 43), (41, 44)),

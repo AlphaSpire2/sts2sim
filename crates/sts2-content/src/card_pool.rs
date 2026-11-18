@@ -71,7 +71,7 @@ pub(crate) const IRONCLAD_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         "CARD.EXPECT_A_FIGHT",
         CardType::Skill,
         CardRarity::Uncommon,
-        2,
+        3,
     ),
     ("CARD.FEED", CardType::Attack, CardRarity::Rare, 1),
     (
@@ -254,7 +254,7 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
     ("CARD.FOOTWORK", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.GRAND_FINALE", CardType::Attack, CardRarity::Rare, 0),
     ("CARD.HAND_TRICK", CardType::Skill, CardRarity::Uncommon, 1),
-    ("CARD.HAZE", CardType::Skill, CardRarity::Uncommon, 3),
+    ("CARD.HAZE", CardType::Skill, CardRarity::Uncommon, 2),
     (
         "CARD.HIDDEN_DAGGERS",
         CardType::Skill,
@@ -344,12 +344,7 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         CardRarity::Uncommon,
         2,
     ),
-    (
-        "CARD.WELL_LAID_PLANS",
-        CardType::Power,
-        CardRarity::Uncommon,
-        1,
-    ),
+    ("CARD.WELL_LAID_PLANS", CardType::Power, CardRarity::Rare, 2),
 ];
 
 pub(crate) const NECROBINDER_POOL: [(&str, CardType, CardRarity, i32); 80] = [
@@ -968,7 +963,7 @@ pub(crate) const COLORLESS_POOL: [(&str, CardType, CardRarity, i32); 53] = [
     ("CARD.PROLONG", CardType::Skill, CardRarity::Uncommon, 0),
     ("CARD.PROWESS", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.PURITY", CardType::Skill, CardRarity::Uncommon, 0),
-    ("CARD.REND", CardType::Attack, CardRarity::Rare, 2),
+    ("CARD.REND", CardType::Attack, CardRarity::Rare, 1),
     (
         "CARD.RESTLESSNESS",
         CardType::Skill,
@@ -1123,20 +1118,24 @@ const VISUAL_POOL_OVERRIDES: [(&str, &str); 10] = [
 
 /// The cards a generation effect in combat is never allowed to hand out.
 /// Everything else is fair game for an effect that rolls against a pool.
-const NEVER_GENERATED_IN_COMBAT: [&str; 14] = [
+const NEVER_GENERATED_IN_COMBAT: [&str; 18] = [
     "CARD.ALCHEMIZE",
+    "CARD.ASCENDERS_BANE",
     "CARD.DISINTEGRATION",
+    "CARD.EIDOLON",
     "CARD.FEED",
     "CARD.FRANTIC_ESCAPE",
     "CARD.HAND_OF_GREED",
     "CARD.HIDDEN_GEM",
     "CARD.MIND_ROT",
     "CARD.NEOWS_FURY",
+    "CARD.NIGHTMARE",
     "CARD.NOT_YET",
     "CARD.ROYALTIES",
     "CARD.SLOTH",
     "CARD.SOOT",
     "CARD.THE_HUNT",
+    "CARD.TRANSFIGURE",
     "CARD.WASTE_AWAY",
 ];
 

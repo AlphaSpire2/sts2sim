@@ -291,8 +291,9 @@ fn no_escape_is_worth_more_for_the_doom_already_there() {
 }
 
 /// Time's up swings for exactly the Doom its target is carrying, and for
-/// nothing at all against a target carrying none. Its upgrade moves a keyword
-/// rather than a number: the card is kept through the flush.
+/// nothing at all against a target carrying none, and goes to the discard pile
+/// like any other card. Its upgrade moves a keyword rather than a number: the
+/// card is kept through the flush.
 #[test]
 fn times_up_is_worth_exactly_the_doom_it_finds() {
     for upgrade in [0, 1] {
@@ -303,7 +304,8 @@ fn times_up_is_worth_exactly_the_doom_it_finds() {
             Some(39),
             "no Doom is no damage, at level {upgrade}"
         );
-        assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.TIMES_UP"]);
+        assert_eq!(pile(&simulator, PileName::Discard), ["CARD.TIMES_UP"]);
+        assert_eq!(pile(&simulator, PileName::Exhaust), Vec::<String>::new());
 
         let mut simulator = built(scenario(&[39], &[("CARD.TIMES_UP", upgrade)], &[]).power(
             1,
@@ -356,8 +358,8 @@ fn the_plain_powers_lay_down_what_they_say() {
         ("CARD.COUNTDOWN", "POWER.COUNTDOWN_POWER", 6, 9),
         ("CARD.DANSE_MACABRE", "POWER.DANSE_MACABRE_POWER", 4, 6),
         ("CARD.DEVOUR_LIFE", "POWER.DEVOUR_LIFE_POWER", 1, 2),
-        ("CARD.HAUNT", "POWER.HAUNT_POWER", 6, 8),
-        ("CARD.SHROUD", "POWER.SHROUD_POWER", 2, 3),
+        ("CARD.HAUNT", "POWER.HAUNT_POWER", 7, 9),
+        ("CARD.SHROUD", "POWER.SHROUD_POWER", 3, 4),
         ("CARD.SPIRIT_OF_ASH", "POWER.SPIRIT_OF_ASH_POWER", 4, 5),
     ] {
         for (upgrade, stacks) in [(0, base), (1, upgraded)] {
@@ -425,11 +427,11 @@ fn pull_from_below_lands_once_per_ethereal_play() {
     }
 }
 
-/// A soul storm is worth nine, and two more for every Soul that has burned up
+/// A soul storm is worth nine, and four more for every Soul that has burned up
 /// this fight. The upgrade raises what a Soul is worth rather than the nine.
 #[test]
 fn soul_storm_grows_with_the_souls_that_burned() {
-    for (upgrade, per) in [(0, 2), (1, 3)] {
+    for (upgrade, per) in [(0, 4), (1, 6)] {
         let mut simulator = fight(&[("CARD.SOUL_STORM", upgrade)]);
         play(&mut simulator, "CARD.SOUL_STORM");
         assert_eq!(
@@ -596,12 +598,12 @@ fn squeeze_counts_every_other_card_that_swings_the_pet() {
     }
 }
 
-/// A sacrifice puts the pet down and stands its owner behind twice what the pet
-/// was worth. The block is worked out from the pet's maximum before the kill,
+/// A sacrifice puts the pet down and stands its owner behind three times what
+/// the pet was worth. The block is worked out from the pet's maximum before the kill,
 /// because after it there is nothing left to read. Its upgrade makes it free
 /// rather than bigger.
 #[test]
-fn sacrifice_puts_the_pet_down_for_twice_its_size() {
+fn sacrifice_puts_the_pet_down_for_three_times_its_size() {
     for (bodyguard, summoned) in [(0, 5), (1, 7)] {
         for (upgrade, cost) in [(0, 1), (1, 0)] {
             let mut simulator =
@@ -611,7 +613,7 @@ fn sacrifice_puts_the_pet_down_for_twice_its_size() {
             play(&mut simulator, "CARD.SACRIFICE");
             assert_eq!(
                 player(&simulator).block,
-                2 * summoned,
+                3 * summoned,
                 "a pet of {summoned} at level {upgrade}"
             );
             assert_eq!(
@@ -1289,13 +1291,13 @@ fn the_scythe_grows_on_the_deck_card_as_well_as_the_copy() {
         deck.properties
             .get("CurrentDamage")
             .and_then(serde_json::Value::as_i64),
-        Some(17)
+        Some(18)
     );
     assert_eq!(
         deck.properties
             .get("IncreasedDamage")
             .and_then(serde_json::Value::as_i64),
-        Some(4)
+        Some(5)
     );
 }
 

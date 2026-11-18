@@ -795,8 +795,8 @@ fn exoskeleton_at(ascension: u8) -> MonsterDefinition {
     joins_with(
         monster(
             "MONSTER.EXOSKELETON",
-            asc(AscensionLevel::ToughEnemies, 25, 24),
-            asc(AscensionLevel::ToughEnemies, 29, 28),
+            asc(AscensionLevel::ToughEnemies, 26, 24),
+            asc(AscensionLevel::ToughEnemies, 30, 28),
             "SKITTER_MOVE",
             vec![
                 multi_attack(
@@ -1174,8 +1174,8 @@ fn fabricator_at(ascension: u8) -> MonsterDefinition {
 /// uppercut, and every replacement boots up first, harder each time.
 fn axebot_at(ascension: u8) -> MonsterDefinition {
     let asc = branch_at(ascension);
-    let uppercut = asc(AscensionLevel::DeadlyEnemies, 14, 12);
-    let one_two = asc(AscensionLevel::DeadlyEnemies, 10, 9);
+    let uppercut = asc(AscensionLevel::DeadlyEnemies, 18, 14);
+    let one_two = asc(AscensionLevel::DeadlyEnemies, 11, 10);
     let strength_gain = asc(AscensionLevel::DeadlyEnemies, 4, 3);
     joins_with(
         monster(
@@ -2484,7 +2484,7 @@ fn flail_knight_at(ascension: u8) -> MonsterDefinition {
 /// with until it is holding three of it, and works strength in either way.
 fn entomancer_at(ascension: u8) -> MonsterDefinition {
     let asc = branch_at(ascension);
-    let hp = asc(AscensionLevel::ToughEnemies, 155, 145);
+    let hp = asc(AscensionLevel::ToughEnemies, 165, 145);
     joins_with(
         monster(
             "MONSTER.ENTOMANCER",
@@ -2495,11 +2495,15 @@ fn entomancer_at(ascension: u8) -> MonsterDefinition {
                 MonsterState::Move(MonsterMove {
                     state_id: "PHEROMONE_SPIT_MOVE".to_owned(),
                     intent: Intent::new("PHEROMONE_SPIT_MOVE", vec![MoveIntent::of("buff")]),
+                    // A hive that is gone counts as a full one.
                     commands: vec![Command::When {
-                        condition: Condition::OwnerPowerBelow {
-                            power: id("POWER.PERSONAL_HIVE_POWER"),
-                            amount: 3,
-                        },
+                        condition: Condition::All(vec![
+                            Condition::OwnerHasPower(id("POWER.PERSONAL_HIVE_POWER")),
+                            Condition::OwnerPowerBelow {
+                                power: id("POWER.PERSONAL_HIVE_POWER"),
+                                amount: 3,
+                            },
+                        ]),
                         then: vec![
                             self_power("POWER.PERSONAL_HIVE_POWER", 1),
                             self_power("POWER.STRENGTH_POWER", 1),
@@ -2534,7 +2538,7 @@ fn entomancer_at(ascension: u8) -> MonsterDefinition {
 fn aeonglass_at(ascension: u8) -> MonsterDefinition {
     let asc = branch_at(ascension);
     let hp = asc(AscensionLevel::ToughEnemies, 535, 512);
-    let ebb = asc(AscensionLevel::DeadlyEnemies, 32, 26);
+    let ebb = asc(AscensionLevel::DeadlyEnemies, 26, 22);
     let lasers = asc(AscensionLevel::DeadlyEnemies, 12, 11);
     let wither_amount = asc(AscensionLevel::DeadlyEnemies, 2, 1);
     joins_with(
@@ -3208,7 +3212,10 @@ fn globe_head_at(ascension: u8) -> MonsterDefinition {
                 }),
             ],
         ),
-        vec![self_power("POWER.GALVANIC_POWER", 6)],
+        vec![self_power(
+            "POWER.GALVANIC_POWER",
+            asc(AscensionLevel::DeadlyEnemies, 8, 6),
+        )],
     )
 }
 
@@ -3426,16 +3433,16 @@ fn torch_head_amalgam_at(ascension: u8) -> MonsterDefinition {
             "MONSTER.TORCH_HEAD_AMALGAM",
             asc(AscensionLevel::ToughEnemies, 211, 199),
             asc(AscensionLevel::ToughEnemies, 211, 199),
-            "TACKLE_MOVE",
+            "STRONG_TACKLE_MOVE",
             vec![
                 attack(
-                    "TACKLE_MOVE",
-                    asc(AscensionLevel::DeadlyEnemies, 19, 18),
+                    "STRONG_TACKLE_MOVE",
+                    asc(AscensionLevel::DeadlyEnemies, 32, 26),
                     "TACKLE_2_MOVE",
                 ),
                 attack(
                     "TACKLE_2_MOVE",
-                    asc(AscensionLevel::DeadlyEnemies, 19, 18),
+                    asc(AscensionLevel::DeadlyEnemies, 22, 18),
                     "BEAM_MOVE",
                 ),
                 multi_attack(
@@ -3446,12 +3453,12 @@ fn torch_head_amalgam_at(ascension: u8) -> MonsterDefinition {
                 ),
                 attack(
                     "TACKLE_3_MOVE",
-                    asc(AscensionLevel::DeadlyEnemies, 15, 14),
+                    asc(AscensionLevel::DeadlyEnemies, 16, 14),
                     "TACKLE_4_MOVE",
                 ),
                 attack(
                     "TACKLE_4_MOVE",
-                    asc(AscensionLevel::DeadlyEnemies, 15, 14),
+                    asc(AscensionLevel::DeadlyEnemies, 16, 14),
                     "BEAM_MOVE",
                 ),
             ],
@@ -3820,7 +3827,13 @@ fn louse_progenitor_at(ascension: u8) -> MonsterDefinition {
                         "CURL_AND_GROW_MOVE",
                         vec![MoveIntent::of("defend"), MoveIntent::of("buff")],
                     ),
-                    commands: vec![guard(curl_block), self_power("POWER.STRENGTH_POWER", 5)],
+                    commands: vec![
+                        guard(curl_block),
+                        self_power(
+                            "POWER.STRENGTH_POWER",
+                            asc(AscensionLevel::DeadlyEnemies, 7, 5),
+                        ),
+                    ],
                     follow_up: "POUNCE_MOVE".to_owned(),
                 }),
                 attack(
@@ -4200,14 +4213,16 @@ fn fossil_stalker_at(ascension: u8) -> MonsterDefinition {
 }
 
 /// The mecha knight: one charge, and then it works round the flamethrower that
-/// fills the hand with burns, the wind-up it guards and grows behind, and the
-/// cleave the wind-up was for. It stands up behind three artifact.
+/// scorches its target and fills the hand with burns, the wind-up it guards and
+/// grows behind, and the cleave the wind-up was for. It stands up behind three
+/// artifact.
 ///
 /// Whether it is wound up is a mark the wind-up raises and the cleave lowers,
 /// and nothing but the animation ever answers to it.
 fn mecha_knight_at(ascension: u8) -> MonsterDefinition {
     let asc = branch_at(ascension);
     let hp = asc(AscensionLevel::ToughEnemies, 320, 300);
+    let flamethrower = asc(AscensionLevel::DeadlyEnemies, 12, 8);
     joins_with(
         monster(
             "MONSTER.MECHA_KNIGHT",
@@ -4222,8 +4237,17 @@ fn mecha_knight_at(ascension: u8) -> MonsterDefinition {
                 ),
                 MonsterState::Move(MonsterMove {
                     state_id: "FLAMETHROWER_MOVE".to_owned(),
-                    intent: Intent::new("FLAMETHROWER_MOVE", vec![MoveIntent::of("status_card")]),
-                    commands: vec![conjure("CARD.BURN", 4, PileName::Hand)],
+                    intent: Intent::new(
+                        "FLAMETHROWER_MOVE",
+                        vec![
+                            MoveIntent::attack(flamethrower, 1),
+                            MoveIntent::of("status_card"),
+                        ],
+                    ),
+                    commands: vec![
+                        strike(flamethrower, 1),
+                        conjure("CARD.BURN", 4, PileName::Hand),
+                    ],
                     follow_up: "WINDUP_MOVE".to_owned(),
                 }),
                 MonsterState::Move(MonsterMove {
@@ -4615,7 +4639,7 @@ fn soul_fysh_at(ascension: u8) -> MonsterDefinition {
             }),
             attack(
                 "DE_GAS_MOVE",
-                asc(AscensionLevel::DeadlyEnemies, 17, 16),
+                asc(AscensionLevel::DeadlyEnemies, 18, 16),
                 "GAZE_MOVE",
             ),
             MonsterState::Move(MonsterMove {

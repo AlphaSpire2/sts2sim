@@ -285,7 +285,7 @@ fn the_doom_cards() -> Vec<CardDefinition> {
             vec![doom(no_escape_amount(15))],
         ),
         // Time's up is worth exactly what the target's Doom is.
-        exhausting(retain_when_upgraded(upgrading(
+        retain_when_upgraded(upgrading(
             card(
                 "CARD.TIMES_UP",
                 CardType::Attack,
@@ -300,7 +300,7 @@ fn the_doom_cards() -> Vec<CardDefinition> {
                 Amount::counting(Count::TargetPower(id("POWER.DOOM_POWER"))),
                 Amount::Fixed(1),
             )],
-        ))),
+        )),
         // A blight strike is a blow and as much Doom as the blow came to.
         striking(upgrading(
             card(
@@ -342,9 +342,9 @@ fn the_doom_cards() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 1,
-                vec![buff("POWER.SHROUD_POWER", 2)],
+                vec![buff("POWER.SHROUD_POWER", 3)],
             ),
-            vec![buff("POWER.SHROUD_POWER", 3)],
+            vec![buff("POWER.SHROUD_POWER", 4)],
         ),
         // A danse macabre pays block before every card worth two or more.
         upgrading(
@@ -386,9 +386,9 @@ fn the_doom_cards() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 1,
-                vec![buff("POWER.HAUNT_POWER", 6)],
+                vec![buff("POWER.HAUNT_POWER", 7)],
             ),
-            vec![buff("POWER.HAUNT_POWER", 8)],
+            vec![buff("POWER.HAUNT_POWER", 9)],
         ),
     ]
 }
@@ -430,8 +430,8 @@ fn blight_strike(damage: i32) -> Command {
 #[allow(clippy::too_many_lines, reason = "one entry per card")]
 fn the_rest_of_the_pet() -> Vec<CardDefinition> {
     vec![
-        // A sacrifice puts the pet down and stands behind twice what it was
-        // worth. The block is worked out before the kill, because after it
+        // A sacrifice puts the pet down and stands behind three times what it
+        // was worth. The block is worked out before the kill, because after it
         // there is nothing to read.
         retaining(upgrading_cost(
             card(
@@ -442,7 +442,7 @@ fn the_rest_of_the_pet() -> Vec<CardDefinition> {
                 vec![Command::WithAmount {
                     amount: Amount::Scaled {
                         base: 0,
-                        per: 2,
+                        per: 3,
                         count: Count::PetMaxHp,
                     },
                     then: vec![Command::When {
@@ -664,9 +664,9 @@ fn the_scythe() -> CardDefinition {
             CardType::Attack,
             TargetType::AnyEnemy,
             2,
-            body(4),
+            body(5),
         ),
-        body(5),
+        body(7),
     ));
     definition.saved_properties = vec![
         sts2_engine::SavedCardProperty::of("CurrentDamage", 13),
@@ -1009,9 +1009,9 @@ fn the_cards_that_wait() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 1,
-                vec![soul_storm(9, 2)],
+                vec![soul_storm(9, 4)],
             ),
-            vec![soul_storm(9, 3)],
+            vec![soul_storm(9, 6)],
         ),
         // The scythe grows every time it is played and keeps the growth on the
         // deck's own card.
@@ -1579,12 +1579,12 @@ fn the_plain_attacks() -> Vec<CardDefinition> {
                 TargetType::AnyEnemy,
                 1,
                 vec![
-                    attack(9),
+                    attack(10),
                     souls(1, PileName::Draw, DrawPilePosition::Random, false),
                 ],
             ),
             vec![
-                attack(11),
+                attack(13),
                 souls(1, PileName::Draw, DrawPilePosition::Random, true),
             ],
         ),

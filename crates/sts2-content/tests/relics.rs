@@ -3303,7 +3303,7 @@ fn the_two_rolled_transform_relics_differ_only_in_the_upgrade() {
 fn the_ancients_that_are_only_what_they_hand_over() {
     for (relic, gold, max_hp, added) in [
         ("RELIC.GOLDEN_PEARL", 150, 0, &[][..]),
-        ("RELIC.SIGNET_RING", 999, 0, &[]),
+        ("RELIC.SIGNET_RING", 888, 0, &[]),
         ("RELIC.NUTRITIOUS_OYSTER", 0, 11, &[]),
         ("RELIC.JEWELRY_BOX", 0, 0, &["CARD.APOTHEOSIS"]),
         ("RELIC.NEOWS_TORMENT", 0, 0, &["CARD.NEOWS_FURY"]),
@@ -3312,10 +3312,10 @@ fn the_ancients_that_are_only_what_they_hand_over() {
         ("RELIC.PAELS_HORN", 0, 0, &["CARD.RELAX", "CARD.RELAX"]),
         ("RELIC.BLOOD_SOAKED_ROSE", 0, 0, &["CARD.ENTHRALLED"]),
         (
-            "RELIC.DISTINGUISHED_CAPE",
+            "RELIC.SERE_TALON",
             0,
             -9,
-            &["CARD.APPARITION", "CARD.APPARITION", "CARD.APPARITION"],
+            &["CARD.WISH", "CARD.WISH", "CARD.WISH"],
         ),
     ] {
         let mut simulator = run_holding_with_treasure(&[], relic);
@@ -3976,12 +3976,12 @@ fn the_ancients_that_answer_a_turn_opening() {
     assert_eq!(energy(&cocoa), opening, "and nothing on the turns after it");
 }
 
-/// A seal of gold buys an energy for five gold as every turn opens, and stops
+/// A seal of gold buys an energy for three gold as every turn opens, and stops
 /// when the gold runs out.
 #[test]
-fn a_seal_of_gold_spends_five_a_turn() {
+fn a_seal_of_gold_spends_three_a_turn() {
     let mut state = run_holding(&["RELIC.SEAL_OF_GOLD"]).state().clone();
-    state.run_player.gold = 7;
+    state.run_player.gold = 5;
     let mut simulator = Simulator::from_generated_state(state, sts2_content::standard_registry())
         .expect("the run rebuilds");
     walk_to(&mut simulator, 3);
@@ -3989,7 +3989,7 @@ fn a_seal_of_gold_spends_five_a_turn() {
     assert_eq!(energy(&simulator), energy(&plain) + 1);
     assert_eq!(simulator.state().run_player.gold, 2);
     end_turn(&mut simulator);
-    // Two gold is not five, so the second turn buys nothing.
+    // Two gold is not three, so the second turn buys nothing.
     assert_eq!(energy(&simulator), energy(&plain));
     assert_eq!(simulator.state().run_player.gold, 2);
 }
@@ -4643,49 +4643,43 @@ fn a_fiddle_draws_two_more_and_refuses_the_rest() {
     assert_eq!(hand_size(&plain_draw), 3);
 }
 
-/// A diamond diadem halves what reaches its owner after a turn it played no
-/// more than two cards in.
+/// A diamond diadem pays twenty block and a blur on the first turn of the
+/// fight, and nothing on the turns after it.
 #[test]
-fn a_diamond_diadem_answers_a_quiet_turn() {
-    let mut plain = fight_from_run(&[]);
+fn a_diamond_diadem_pays_block_and_a_blur_on_the_first_turn() {
     let mut simulator = fight_from_run(&["RELIC.DIAMOND_DIADEM"]);
-    // The beetle's first move is a debuff; its bite comes on the turn after.
-    end_turn(&mut plain);
+    assert_eq!(creature(&simulator, 0).block, 20);
+    assert_eq!(power_amount(&simulator, 0, "POWER.BLUR_POWER"), 1);
     end_turn(&mut simulator);
-    let (plain_hp, quiet_hp) = (run_hp(&plain), run_hp(&simulator));
-    end_turn(&mut plain);
-    end_turn(&mut simulator);
-    let plain_lost = plain_hp - run_hp(&plain);
-    let halved = quiet_hp - run_hp(&simulator);
-    assert!(plain_lost > 0);
-    assert_eq!(halved, plain_lost / 2, "the blow was halved");
-    assert_eq!(
-        power_amount(&simulator, 0, "POWER.DIAMOND_DIADEM_POWER"),
-        0,
-        "and the power is gone once the enemy's turn has ended"
-    );
-    // A busy turn never earns it: three cards played is one too many.
-    let mut busy = fight_tough(
-        &["RELIC.DIAMOND_DIADEM"],
-        &[
-            ("CARD.DEFEND_IRONCLAD", 0),
-            ("CARD.DEFEND_IRONCLAD", 0),
-            ("CARD.DEFEND_IRONCLAD", 0),
-        ],
-    );
-    for _ in 0..3 {
-        play(&mut busy, "CARD.DEFEND_IRONCLAD");
-    }
-    assert_eq!(relic_counter(&busy, "RELIC.DIAMOND_DIADEM"), 3);
+    assert_eq!(power_amount(&simulator, 0, "POWER.BLUR_POWER"), 0);
 }
 
-/// Toasty mittens burn the first card of the draw pile and pay a strength for
-/// it before every hand draw.
+/// Toasty mittens ask for one card of the hand once the turn's hand is drawn,
+/// burn it, and pay a strength for it.
 #[test]
-fn toasty_mittens_burn_a_card_for_a_strength() {
-    let simulator = fight_from_run(&["RELIC.TOASTY_MITTENS"]);
+fn toasty_mittens_burn_a_card_of_the_hand_for_a_strength() {
+    let mut simulator = fight_from_run(&["RELIC.TOASTY_MITTENS"]);
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        minimum,
+        maximum,
+        candidates,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("the mittens put a screen up: {:?}", simulator.decision());
+    };
+    assert_eq!((minimum, maximum), (1, 1));
+    let chosen = candidates[0].clone();
+    simulator
+        .step(Action::ChooseCards {
+            choice_id,
+            cards: vec![chosen.clone()],
+        })
+        .expect("the choice applies");
     let combat = simulator.state().combat.as_ref().expect("a fight");
     assert_eq!(combat.player.piles.exhaust.len(), 1);
+    assert_eq!(combat.player.piles.exhaust[0].id, chosen.card_id);
     assert_eq!(power_amount(&simulator, 0, "POWER.STRENGTH_POWER"), 1);
 }
 
@@ -4762,7 +4756,7 @@ fn the_ancient_pool_is_registered_whole() {
         );
     }
     // The two whose uses run out say so against the count they keep.
-    for (model_id, uses) in [("RELIC.WINGED_BOOTS", 3), ("RELIC.TOY_BOX", 12)] {
+    for (model_id, uses) in [("RELIC.WINGED_BOOTS", 3), ("RELIC.TOY_BOX", 15)] {
         let definition = registry.relic(&id(model_id)).expect("the relic is content");
         let mut instance = sts2_engine::RelicInstance::new(id(model_id));
         instance.counter = uses - 1;
@@ -6698,12 +6692,12 @@ fn a_lizard_tail_turns_one_death_away() {
     assert!(!latched(&fairied), "and the tail keeps its use");
 }
 
-/// A sere talon charges two curses and hands over three wishes. The curses come
-/// off the curse pool's own cards that a modifier may generate, ordered by model
-/// ID, drawn on the run's niche stream without replacement.
+/// A distinguished cape charges two curses and hands over three apparitions.
+/// The curses come off the curse pool's own cards that a modifier may generate,
+/// ordered by model ID, drawn on the run's niche stream without replacement.
 #[test]
-fn a_sere_talon_charges_two_curses_for_three_wishes() {
-    let mut simulator = run_holding_with_treasure(&[], "RELIC.SERE_TALON");
+fn a_distinguished_cape_charges_two_curses_for_three_apparitions() {
+    let mut simulator = run_holding_with_treasure(&[], "RELIC.DISTINGUISHED_CAPE");
     let deck_before = simulator.state().run_player.deck.len();
     let niche_before = niche_counter(&simulator);
     take_from_the_chest(&mut simulator);
@@ -6735,7 +6729,11 @@ fn a_sere_talon_charges_two_curses_for_three_wishes() {
     assert_ne!(joined[0], joined[1], "and the draw is without replacement");
     assert_eq!(
         joined[2..],
-        [id("CARD.WISH"), id("CARD.WISH"), id("CARD.WISH")]
+        [
+            id("CARD.APPARITION"),
+            id("CARD.APPARITION"),
+            id("CARD.APPARITION")
+        ]
     );
     assert_eq!(
         niche_counter(&simulator) - niche_before,
@@ -6744,10 +6742,10 @@ fn a_sere_talon_charges_two_curses_for_three_wishes() {
     );
 }
 
-/// A toy box hands over four relics off the front of its owner's own bag, each
+/// A toy box hands over five relics off the front of its owner's own bag, each
 /// marked wax, and melts one of them again at the end of every third fight.
 #[test]
-fn a_toy_box_hands_over_four_wax_relics_and_takes_them_back() {
+fn a_toy_box_hands_over_five_wax_relics_and_takes_them_back() {
     let mut state = run_holding_full(&[], "RELIC.TOY_BOX", 1, None, Vec::new())
         .state()
         .clone();
@@ -6758,16 +6756,16 @@ fn a_toy_box_hands_over_four_wax_relics_and_takes_them_back() {
         .expect("the run builds");
     take_from_the_chest(&mut simulator);
     let offered = offered_rewards(&simulator);
-    assert_eq!(offered.len(), 4);
+    assert_eq!(offered.len(), 5);
     assert!(
         offered
             .iter()
             .all(|reward| reward.reward_type == "relic" && reward.relic_is_wax),
-        "four relics, each already waxed"
+        "five relics, each already waxed"
     );
 
     // Taking them puts them in the inventory carrying the wax.
-    for _ in 0..4 {
+    for _ in 0..5 {
         let claim = simulator
             .legal_actions()
             .iter()
@@ -6784,7 +6782,7 @@ fn a_toy_box_hands_over_four_wax_relics_and_takes_them_back() {
         .filter(|relic| relic.wax)
         .map(|relic| relic.model_id.clone())
         .collect();
-    assert_eq!(waxed.len(), 4);
+    assert_eq!(waxed.len(), 5);
 
     // Every third fight melts the first of them that is still standing.
     let mut state = simulator.state().clone();
@@ -8067,7 +8065,7 @@ fn an_emotion_chip_fires_the_orbs_after_a_hit() {
 
 /// The two starters. A divine right pays three stars as its owner walks into a
 /// fight — the combat state is built before the room announces itself, so the
-/// pool it lands in is the fresh one — and a divine destiny pays six on the
+/// pool it lands in is the fresh one — and a divine destiny pays seven on the
 /// first turn of every fight instead.
 #[test]
 fn the_regents_starters_pay_stars_where_they_say() {
@@ -8075,11 +8073,11 @@ fn the_regents_starters_pay_stars_where_they_say() {
     assert_eq!(stars_held(&simulator), 3, "three as the room opened");
 
     let mut simulator = regent_fight_from_run(&["RELIC.DIVINE_DESTINY"]);
-    assert_eq!(stars_held(&simulator), 6, "six as the first turn opened");
+    assert_eq!(stars_held(&simulator), 7, "seven as the first turn opened");
     end_turn(&mut simulator);
     assert_eq!(
         stars_held(&simulator),
-        6,
+        7,
         "and the first turn is the only one it pays for"
     );
 }
@@ -8154,13 +8152,19 @@ fn orange_dough_deals_two_colorless_cards_on_the_opening_turn() {
     assert_eq!(doughy, plain + 2);
 }
 
-/// A regalite pays two block for every card its owner has conjured into the
-/// fight.
+/// A regalite pays four block the first time in a turn its owner conjures a
+/// card into the fight, and nothing for the cards after it.
 #[test]
-fn a_regalite_pays_block_for_every_card_conjured() {
-    let mut simulator = regent_fight(&["RELIC.REGALITE"], &[("CARD.COLLISION_COURSE", 0)], 0);
+fn a_regalite_pays_block_for_the_first_card_conjured_each_turn() {
+    let mut simulator = regent_fight(
+        &["RELIC.REGALITE"],
+        &[("CARD.COLLISION_COURSE", 0), ("CARD.COLLISION_COURSE", 0)],
+        0,
+    );
     play(&mut simulator, "CARD.COLLISION_COURSE");
-    assert_eq!(player(&simulator).block, 2);
+    assert_eq!(player(&simulator).block, 4);
+    play(&mut simulator, "CARD.COLLISION_COURSE");
+    assert_eq!(player(&simulator).block, 4, "once a turn");
 }
 
 /// A vitruvian minion doubles what a minion card deals and what it works up.

@@ -201,7 +201,7 @@ fn imbued() -> EnchantmentDefinition {
     }
 }
 
-/// Inky: one more damage, and one Weak on whatever the play reached.
+/// Inky: one Weak on whatever the play reached.
 ///
 /// The debuff goes on the play's own target unless the card aims at the whole
 /// enemy side, in which case it goes on every enemy that can be hit.
@@ -216,10 +216,6 @@ fn inky() -> EnchantmentDefinition {
         })
     };
     EnchantmentDefinition {
-        value_hooks: vec![powered(
-            HookEvent::EnchantDamageAdditive,
-            vec![Command::Modify(ModifierCmd::Add(Amount::Fixed(1)))],
-        )],
         on_play: vec![
             Command::When {
                 otherwise: Vec::new(),
@@ -404,12 +400,14 @@ fn sown() -> EnchantmentDefinition {
         on_play: vec![Command::When {
             otherwise: Vec::new(),
             condition: Condition::ListeningEnchantmentIsNormal,
+            // Spent before it pays, so a play its payout sets off cannot
+            // reach it again.
             then: vec![
-                Command::Player(PlayerCmd::GainEnergy(amount())),
                 Command::Card(CardCmd::SetEnchantmentStatus {
                     cards: own_card(),
                     status: EnchantmentStatus::Disabled,
                 }),
+                Command::Player(PlayerCmd::GainEnergy(amount())),
             ],
         }],
         ..enchantment("ENCHANTMENT.SOWN", EnchantRestriction::Any)
@@ -445,12 +443,14 @@ fn swift() -> EnchantmentDefinition {
         on_play: vec![Command::When {
             otherwise: Vec::new(),
             condition: Condition::ListeningEnchantmentIsNormal,
+            // Spent before it draws, so a play the draw sets off cannot reach
+            // it again.
             then: vec![
-                Command::CardPile(CardPileCmd::Draw { count: amount() }),
                 Command::Card(CardCmd::SetEnchantmentStatus {
                     cards: own_card(),
                     status: EnchantmentStatus::Disabled,
                 }),
+                Command::CardPile(CardPileCmd::Draw { count: amount() }),
             ],
         }],
         ..enchantment("ENCHANTMENT.SWIFT", EnchantRestriction::Any)

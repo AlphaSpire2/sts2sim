@@ -14,8 +14,8 @@ use sts2_engine::{
     TemporaryPower, ValueProps,
 };
 use sts2_engine::{
-    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
-    ChoiceScope, ChoiceSemantics,
+    ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
+    ChoiceSemantics,
 };
 
 use crate::id;
@@ -2440,7 +2440,7 @@ fn unmovable_power() -> PowerDefinition {
 
 /// Juggling counts the attacks its owner has played this turn — starting from
 /// what the history already holds when it lands — and hands back copies of the
-/// third one.
+/// third one as that one is played, before its own body runs.
 fn juggling_power() -> PowerDefinition {
     PowerDefinition {
         hooks: vec![
@@ -2452,7 +2452,7 @@ fn juggling_power() -> PowerDefinition {
                 })],
             ),
             ModifierHook::every_turn(
-                HookEvent::AfterCardPlayed,
+                HookEvent::BeforeCardPlayed,
                 vec![
                     Command::Power(PowerCmd::ModifyCounter {
                         power: PowerRef::listening(),
@@ -2836,25 +2836,6 @@ pub fn item_powers() -> Vec<PowerDefinition> {
                 })],
             )],
             ..single("POWER.CONFUSED_POWER", PowerType::Debuff)
-        },
-        // A diamond diadem halves what reaches its owner, and comes off at the
-        // end of the enemy's turn.
-        PowerDefinition {
-            hooks: vec![
-                modifies(
-                    HookEvent::ModifyDamageMultiplicative,
-                    HookCondition::OwnerTakesPoweredDamage,
-                    vec![Command::Modify(ModifierCmd::Scale(Amount::Fixed(50)))],
-                ),
-                ModifierHook::every_turn(
-                    HookEvent::AfterSideTurnEnd,
-                    vec![Command::Power(PowerCmd::Remove {
-                        power: PowerRef::listening(),
-                    })],
-                )
-                .when(HookCondition::EnemySideTurn),
-            ],
-            ..single("POWER.DIAMOND_DIADEM_POWER", PowerType::Buff)
         },
         // Clarity is a bigger hand for each of the next few turns, one stack
         // spent per turn it paid for.
@@ -3896,7 +3877,8 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
             ],
             ..counter("POWER.TOOLS_OF_THE_TRADE_POWER", PowerType::Buff)
         },
-        // Tracking multiplies what its owner's cards deal to anything shaken.
+        // Tracking raises what its owner's cards deal to anything weakened by
+        // its own amount in percent: fifty is half as much again.
         PowerDefinition {
             hooks: vec![modifies(
                 HookEvent::ModifyDamageMultiplicative,
@@ -3905,46 +3887,18 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
                     otherwise: Vec::new(),
                     condition: Condition::TargetHasPower(id("POWER.WEAK_POWER")),
                     then: vec![Command::Modify(ModifierCmd::Scale(Amount::per(
-                        0,
                         100,
+                        1,
                         Count::ListeningPowerAmount,
                     )))],
                 }],
             )],
             ..counter("POWER.TRACKING_POWER", PowerType::Buff)
         },
-        // Well laid plans keeps back as many cards of the hand as it is worth.
-        // It asks on `BeforeFlushLate` — deliberately the late pass, so that
-        // the player sees what every other before-flush effect has done to the
-        // hand before choosing what to keep. Every listener on that pass gets
-        // to act before any of them finishes, so the engine banks the screen
-        // and opens it once the whole before-flush pass has run and before the
-        // hand goes down.
+        // Well-laid plans keep the whole hand where it is at every turn's end.
         PowerDefinition {
-            hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::BeforeFlushLate,
-                    vec![Command::CardSelect(CardSelectCmd::FromHand {
-                        semantics: ChoiceSemantics::known(vec![
-                            ChoiceOp::new(ChoiceOperationKind::GrantKeyword, ChoiceScope::Combat)
-                                .keyword(sts2_engine::CardKeyword::Retain)
-                                .lasting(ChoiceDuration::Turn),
-                        ]),
-                        prefs: SelectorPrefs::unbounded_range(),
-                        maximum: Some(stacks()),
-                        exact_count: None,
-                        filter: CardFilter::NotRetainingThisTurn,
-                        then: vec![Command::Card(CardCmd::ApplySingleTurnKeyword {
-                            cards: CardSelector::Chosen,
-                            keyword: sts2_engine::CardKeyword::Retain,
-                        })],
-                    })],
-                )
-                // Only a hand that is about to be discarded is asked; a hand
-                // a pyramid keeps up is not.
-                .when(HookCondition::TheHandWouldFlush),
-            ],
-            ..counter("POWER.WELL_LAID_PLANS_POWER", PowerType::Buff)
+            keeps_hand: true,
+            ..single("POWER.WELL_LAID_PLANS_POWER", PowerType::Buff)
         },
         // A wraith form costs its owner dexterity every turn, for good: it
         // never takes itself off.
@@ -4014,11 +3968,20 @@ pub fn defect_powers() -> Vec<PowerDefinition> {
             )],
             ..counter("POWER.FOCUS_POWER", PowerType::Buff)
         },
-        // The three temporary-Focus wrappers: each lends Focus as it lands
+        // The three temporary-Focus buffs: each lends Focus as it lands
         // and gives it back at the end of a turn its owner took part in.
         temporary_focus("POWER.FOCUSED_STRIKE_POWER"),
         temporary_focus("POWER.HOTFIX_POWER"),
         temporary_focus("POWER.SYNCHRONIZE_POWER"),
+        // A hyperbeam's focus down takes Focus for the turn instead, and
+        // gives it back at the end of a turn its owner took part in.
+        PowerDefinition {
+            temporary: Some(TemporaryPower {
+                internally_applied_power: id("POWER.FOCUS_POWER"),
+                positive: false,
+            }),
+            ..counter("POWER.HYPERBEAM_FOCUS_DOWN_POWER", PowerType::Debuff)
+        },
         // A lightning rod channels one orb as the energy is reset rather than
         // as the turn opens, so what an orb evoked to make room pays out is not
         // lost to the reset or to the block clear. One stack goes with it.
@@ -4795,21 +4758,39 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
             ],
             ..counter("POWER.ORBIT_POWER", PowerType::Buff)
         },
-        // A pale blue dot deals its owner more cards, but only on a turn that
-        // follows one they played at least five on.
+        // A pale blue dot promises its owner more cards next turn the first
+        // time in a turn that five of their plays have finished; the latch
+        // keeps it to once a turn and comes off as their turn ends.
         PowerDefinition {
-            hooks: vec![modifies(
-                HookEvent::ModifyHandDraw,
-                HookCondition::Always,
-                vec![Command::When {
-                    otherwise: Vec::new(),
-                    condition: Condition::CountAtLeast {
-                        count: Count::OwnerCardPlaysLastTurn,
-                        at_least: 5,
-                    },
-                    then: vec![Command::Modify(ModifierCmd::Add(stacks()))],
-                }],
-            )],
+            hooks: vec![
+                ModifierHook::every_turn(
+                    HookEvent::AfterCardPlayed,
+                    vec![Command::When {
+                        otherwise: Vec::new(),
+                        condition: Condition::All(vec![
+                            Condition::Not(Box::new(Condition::ListeningPowerIsLatched)),
+                            Condition::CountAtLeast {
+                                count: Count::OwnerCardPlaysFinishedThisTurn,
+                                at_least: 5,
+                            },
+                        ]),
+                        then: vec![
+                            Command::Power(PowerCmd::SetLatch(true)),
+                            applied_to(
+                                "POWER.DRAW_CARDS_NEXT_TURN_POWER",
+                                CreatureSelector::Owner,
+                                stacks(),
+                            ),
+                        ],
+                    }],
+                )
+                .when(HookCondition::OwnerPlayedTheCard),
+                ModifierHook::every_turn(
+                    HookEvent::AfterSideTurnEnd,
+                    vec![Command::Power(PowerCmd::SetLatch(false))],
+                )
+                .when(HookCondition::OwnerIsParticipant),
+            ],
             ..counter("POWER.PALE_BLUE_DOT_POWER", PowerType::Buff)
         },
         // A parry has no body at all: the Sovereign Blade reads the amount off

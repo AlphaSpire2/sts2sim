@@ -412,34 +412,26 @@ fn tools_of_the_trade_draw_one_more_and_take_one_back() {
     assert_eq!(hand(&simulator).len(), 5);
 }
 
-/// Well laid plans ask which cards to keep back on the late half of the
-/// before-flush pass, where every listener gets to act before any of them
-/// finishes. The engine banks the screen a deferred body asks for and opens it
-/// once the whole pass has run, so ending the turn puts the
-/// retain pick to the player before the hand goes down — see
-/// `a_deferred_pass_still_asks.rs` for the discipline itself.
+/// Well laid plans keep the whole hand through the end of the turn, without
+/// asking anything.
 #[test]
-fn well_laid_plans_ask_on_the_way_out_of_the_turn() {
+fn well_laid_plans_keep_the_whole_hand() {
     let mut simulator = Fight {
-        hand: &[("CARD.WELL_LAID_PLANS", 0), ("CARD.SLICE", 0)],
+        hand: &[
+            ("CARD.WELL_LAID_PLANS", 0),
+            ("CARD.SLICE", 0),
+            ("CARD.DEFLECT", 0),
+        ],
         ..Fight::default()
     }
     .build();
     play(&mut simulator, "CARD.WELL_LAID_PLANS");
     end_turn(&mut simulator);
-    let kept = simulator
-        .legal_actions()
-        .iter()
-        .find(|action| {
-            matches!(action, Action::ChooseCards { cards, .. }
-                if cards.len() == 1 && cards[0].fingerprint.model_id == id("CARD.SLICE"))
-        })
-        .cloned()
-        .expect("the retain pick offers the slice");
-    simulator.step(kept).expect("keeping it applies");
+    let held = hand(&simulator);
     assert!(
-        hand(&simulator).iter().any(|card| card == "CARD.SLICE"),
-        "the kept slice survived the flush into the next turn"
+        held.iter().any(|card| card == "CARD.SLICE")
+            && held.iter().any(|card| card == "CARD.DEFLECT"),
+        "the whole hand survived the flush into the next turn: {held:?}"
     );
 }
 
@@ -570,8 +562,8 @@ fn phantom_blades_pay_for_the_first_shiv_of_a_turn() {
     );
 }
 
-/// Tracking multiplies what its owner's cards deal to anything shaken, and
-/// leaves everything else where it was.
+/// Tracking raises what its owner's cards deal to anything weakened by its
+/// amount in percent, and leaves everything else where it was.
 #[test]
 fn tracking_multiplies_what_lands_on_the_weakened() {
     let mut simulator = Fight {
@@ -591,7 +583,11 @@ fn tracking_multiplies_what_lands_on_the_weakened() {
     .build();
     play(&mut simulator, "CARD.TRACKING");
     play(&mut simulator, "CARD.SLICE");
-    assert_eq!(creature(&simulator, 1).current_hp, 39 - 12, "twice over");
+    assert_eq!(
+        creature(&simulator, 1).current_hp,
+        39 - 9,
+        "half as much again"
+    );
 }
 
 /// Flanking makes everyone but the player who worked it hit its holder harder.

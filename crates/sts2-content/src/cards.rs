@@ -368,7 +368,7 @@ pub(crate) fn choosing_from_hand(
 
 /// A pick of exactly one card of the hand and the burn that follows it: the
 /// card is taken without a screen when there is only one to take.
-fn exhaust_one_of_hand() -> Command {
+pub(crate) fn exhaust_one_of_hand() -> Command {
     choosing_from_hand(
         sts2_engine::SelectorPrefs::exactly(1),
         ChoiceSemantics::known(vec![
@@ -450,9 +450,9 @@ fn pool_attacks() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 3,
-                vec![attack(15), debuff("POWER.MANGLE_POWER", 10)],
+                vec![attack(20), debuff("POWER.MANGLE_POWER", 10)],
             ),
-            vec![attack(20), debuff("POWER.MANGLE_POWER", 15)],
+            vec![attack(26), debuff("POWER.MANGLE_POWER", 15)],
         ),
         // A setup strike leaves its owner stronger for the turn.
         striking(upgrading(
@@ -461,9 +461,9 @@ fn pool_attacks() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 1,
-                vec![attack(7), buff("POWER.SETUP_STRIKE_POWER", 2)],
+                vec![attack(7), buff("POWER.SETUP_STRIKE_POWER", 3)],
             ),
-            vec![attack(9), buff("POWER.SETUP_STRIKE_POWER", 3)],
+            vec![attack(9), buff("POWER.SETUP_STRIKE_POWER", 4)],
         )),
         // A pact's end asks what has burned up: three cards in the exhaust pile
         // and it lands, fewer and it does nothing at all.
@@ -473,9 +473,9 @@ fn pool_attacks() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AllEnemies,
                 0,
-                pacts_end(17),
+                pacts_end(18),
             ),
-            pacts_end(23),
+            pacts_end(24),
         ),
     ]
 }
@@ -675,9 +675,9 @@ fn pool_skills() -> Vec<CardDefinition> {
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                vec![block(5), buff("POWER.COLOSSUS_POWER", 1)],
+                vec![block(4), buff("POWER.COLOSSUS_POWER", 1)],
             ),
-            vec![block(8), buff("POWER.COLOSSUS_POWER", 1)],
+            vec![block(7), buff("POWER.COLOSSUS_POWER", 1)],
         ),
         // A barrier of block that burns whoever swings through it.
         upgrading(
@@ -727,9 +727,9 @@ fn pool_powers() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 3,
-                vec![buff("POWER.DEMON_FORM_POWER", 2)],
+                vec![buff("POWER.DEMON_FORM_POWER", 3)],
             ),
-            vec![buff("POWER.DEMON_FORM_POWER", 3)],
+            vec![buff("POWER.DEMON_FORM_POWER", 4)],
         ),
         upgrading(
             card(
@@ -810,10 +810,10 @@ fn pool_remainder() -> Vec<CardDefinition> {
                     1,
                     rampage(5),
                 ),
-                rampage(9),
+                rampage(10),
             ),
-            9,
-            9,
+            10,
+            10,
         ),
         // A stomp costs one less for every attack its owner has already played
         // this turn, and one less again for each one played while it is held.
@@ -1030,25 +1030,17 @@ fn pool_listeners_and_piles() -> Vec<CardDefinition> {
             ),
             vec![second_wind(7)],
         ),
-        // Expecting a fight pays a point of energy for every attack in hand and
-        // then stops the next gain outright.
-        upgrading_cost(
+        // Expecting a fight is block, and more of it for every point of
+        // strength its owner stands with; strength below nothing adds nothing.
+        upgrading(
             card(
                 "CARD.EXPECT_A_FIGHT",
                 CardType::Skill,
                 TargetType::SelfTarget,
-                2,
-                vec![
-                    Command::Player(PlayerCmd::GainEnergy(Amount::counting(
-                        Count::CardsInPileOfType {
-                            pile: PileName::Hand,
-                            card_type: CardType::Attack,
-                        },
-                    ))),
-                    buff("POWER.NO_ENERGY_GAIN_POWER", 1),
-                ],
+                3,
+                vec![expect_a_fight(15, 5)],
             ),
-            1,
+            vec![expect_a_fight(16, 8)],
         ),
         // A battle trance draws deep and stops the well for the turn.
         upgrading(
@@ -1190,9 +1182,9 @@ fn howl_from_beyond() -> CardDefinition {
             CardType::Attack,
             TargetType::AllEnemies,
             3,
-            vec![sweep(16, 1)],
+            vec![sweep(18, 1)],
         ),
-        vec![sweep(21, 1)],
+        vec![sweep(24, 1)],
     );
     definition.hooks.push(sts2_engine::ModifierHook::every_turn(
         sts2_engine::HookEvent::AfterAutoPostPlayPhaseEntered,
@@ -1271,18 +1263,17 @@ fn burning_cards() -> Vec<CardDefinition> {
             ),
             evil_eye(11),
         ),
-        // A forgotten ritual pays nothing at all unless something has already
-        // burned this turn. It burns itself for having been played, which is
-        // after its body has asked.
+        // A forgotten ritual pays its energy outright, and burns itself for
+        // having been played.
         exhausting(upgrading(
             card(
                 "CARD.FORGOTTEN_RITUAL",
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                forgotten_ritual(3),
+                vec![energy(3)],
             ),
-            forgotten_ritual(4),
+            vec![energy(4)],
         )),
         // A drum of battle draws when it is played and pays energy when it
         // burns, however it comes to burn. The energy is its own var, so the
@@ -1304,12 +1295,19 @@ fn evil_eye(block_amount: i32) -> Vec<Command> {
     ]
 }
 
-fn forgotten_ritual(amount: i32) -> Vec<Command> {
-    vec![Command::When {
-        otherwise: Vec::new(),
-        condition: Condition::OwnerExhaustedACardThisTurn,
-        then: vec![energy(amount)],
-    }]
+fn expect_a_fight(base: i32, per_strength: i32) -> Command {
+    Command::Creature(CreatureCmd::GainBlock {
+        target: CreatureSelector::Owner,
+        amount: Amount::Greatest(vec![
+            Amount::Fixed(base),
+            Amount::per(
+                base,
+                per_strength,
+                Count::OwnerPower(id("POWER.STRENGTH_POWER")),
+            ),
+        ]),
+        props: ValueProps::NONE,
+    })
 }
 
 /// Drum of Battle: the draw is what playing it does, and the energy is its own
@@ -1418,9 +1416,9 @@ fn starting_cards() -> Vec<CardDefinition> {
                     CardType::Attack,
                     TargetType::AnyEnemy,
                     1,
-                    vec![attack(16)],
+                    vec![attack(20)],
                 ),
-                vec![attack(20)],
+                vec![attack(24)],
             ),
             sts2_engine::CardRarity::Token,
         ),
@@ -1430,9 +1428,9 @@ fn starting_cards() -> Vec<CardDefinition> {
                 CardType::Skill,
                 TargetType::AnyEnemy,
                 1,
-                vec![block(7), debuff("POWER.VULNERABLE_POWER", 1)],
+                vec![block(6), debuff("POWER.VULNERABLE_POWER", 1)],
             ),
-            vec![block(8), debuff("POWER.VULNERABLE_POWER", 2)],
+            vec![block(7), debuff("POWER.VULNERABLE_POWER", 2)],
         ),
         // The one ancient card the Ironclad's own pool carries that a starter
         // does not become.
@@ -2004,7 +2002,7 @@ fn overgrowth_pickups() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 1,
-                crimson_mantle(8),
+                crimson_mantle(7),
             ),
             crimson_mantle(10),
         ),

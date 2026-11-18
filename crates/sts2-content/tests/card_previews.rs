@@ -303,8 +303,8 @@ fn asking_for_a_face_moves_nothing() {
 
 /// A card that grows its own damage var draws what it stands at, not what it
 /// prints. A Rampage swings whatever its damage var stands at and then grows
-/// that var by its increase, so the copy that has been played once is a nine
-/// that has become a fourteen, and the face is drawn off that same grown
+/// that var by its increase, so the copy that has been played once is a ten
+/// that has become a fifteen, and the face is drawn off that same grown
 /// base.
 #[test]
 fn a_card_that_grows_its_own_damage_draws_what_it_has_grown_to() {
@@ -321,7 +321,7 @@ fn a_card_that_grows_its_own_damage_draws_what_it_has_grown_to() {
         .build(sts2_content::standard_registry())
         .expect("the scenario builds");
     let printed = simulator.agent_observation().hand_previews[0].damage;
-    assert_eq!(printed, Some(9), "a rampage prints nine");
+    assert_eq!(printed, Some(10), "a rampage prints ten");
 
     let played = simulator
         .legal_actions()
@@ -354,8 +354,8 @@ fn a_card_that_grows_its_own_damage_draws_what_it_has_grown_to() {
     );
     assert_eq!(
         faces,
-        vec![9, 14],
-        "nine on the copy that has never been played, fourteen on the one that has"
+        vec![10, 15],
+        "ten on the copy that has never been played, fifteen on the one that has"
     );
 }
 
@@ -366,9 +366,9 @@ fn a_card_that_grows_its_own_damage_draws_what_it_has_grown_to() {
 fn a_number_a_body_buries_is_still_drawn() {
     // A damage var of four, behind a test on the owner's own power.
     assert_eq!(face(&fight(&["CARD.SHIV"], &[], 1).1, 0).0, Some(4));
-    // A damage var of twenty-four, swung by a body that then reads what the
+    // A damage var of twenty-six, swung by a body that then reads what the
     // swing came to.
-    assert_eq!(face(&fight(&["CARD.SUNDER"], &[], 1).1, 0).0, Some(24));
+    assert_eq!(face(&fight(&["CARD.SUNDER"], &[], 1).1, 0).0, Some(26));
     // A damage var of eight, dealt by a body that splashes the overkill.
     assert_eq!(face(&fight(&["CARD.OMNISLICE"], &[], 1).1, 0).0, Some(8));
     // A damage var of ten, inside the loop that buys itself another pass for

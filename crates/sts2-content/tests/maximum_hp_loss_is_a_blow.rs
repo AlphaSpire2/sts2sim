@@ -82,15 +82,15 @@ fn creature(simulator: &Simulator, combat_id: u64) -> &sts2_engine::Creature {
         .expect("the creature is in the fight")
 }
 
-/// A point of maximum HP taken off a creature at full health takes a point of
-/// current HP with it, and the turn remembers having been hurt: a spite thrown
+/// Maximum HP taken off a creature at full health takes as much current HP
+/// with it, and the turn remembers having been hurt: a spite thrown
 /// afterwards lands its whole run of hits.
 #[test]
 fn a_maximum_hp_loss_at_full_health_is_a_blow_the_turn_remembers() {
     let mut simulator = fight(80, &[("CARD.BRIGHTEST_FLAME", 0), ("CARD.SPITE", 0)], &[]);
     play(&mut simulator, "CARD.BRIGHTEST_FLAME");
-    assert_eq!(creature(&simulator, 0).max_hp, 79);
-    assert_eq!(creature(&simulator, 0).current_hp, 79);
+    assert_eq!(creature(&simulator, 0).max_hp, 78);
+    assert_eq!(creature(&simulator, 0).current_hp, 78);
 
     // Two hits of five rather than one, which is what reading the blow out of
     // the turn's damage record buys.
@@ -98,14 +98,14 @@ fn a_maximum_hp_loss_at_full_health_is_a_blow_the_turn_remembers() {
     assert_eq!(creature(&simulator, 1).current_hp, 39 - 10);
 }
 
-/// The same point of maximum HP off a creature already standing below its new
+/// The same maximum HP off a creature already standing below its new
 /// maximum costs no current HP, so nothing was hurt and a spite thrown
 /// afterwards swings once.
 #[test]
 fn a_maximum_hp_loss_that_costs_no_current_hp_is_no_blow_at_all() {
     let mut simulator = fight(50, &[("CARD.BRIGHTEST_FLAME", 0), ("CARD.SPITE", 0)], &[]);
     play(&mut simulator, "CARD.BRIGHTEST_FLAME");
-    assert_eq!(creature(&simulator, 0).max_hp, 79);
+    assert_eq!(creature(&simulator, 0).max_hp, 78);
     assert_eq!(creature(&simulator, 0).current_hp, 50);
 
     play(&mut simulator, "CARD.SPITE");

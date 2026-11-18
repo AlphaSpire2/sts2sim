@@ -407,13 +407,13 @@ fn goopy_burns_the_defend_it_is_on_and_grows_a_block_a_play() {
 }
 
 #[test]
-fn inky_adds_one_damage_and_weakens_what_the_play_reached() {
+fn inky_weakens_what_the_play_reached() {
     let mut simulator = fight(
         &[enchanted("CARD.STRIKE_IRONCLAD", "ENCHANTMENT.INKY", 0)],
         &[],
     );
     play_at_enemy(&mut simulator, "CARD.STRIKE_IRONCLAD");
-    assert_eq!(enemy_hp(&simulator), 32, "seven rather than six");
+    assert_eq!(enemy_hp(&simulator), 33, "the strike's own six");
     let combat = simulator.state().combat.as_ref().expect("in a fight");
     assert!(
         combat.creatures[1]

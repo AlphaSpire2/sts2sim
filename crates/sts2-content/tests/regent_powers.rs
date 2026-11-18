@@ -397,8 +397,8 @@ fn a_tyranny_deals_more_and_burns_as_many() {
     );
 }
 
-/// A pale blue dot deals its owner more cards, but only on a turn that follows
-/// one they played at least five on.
+/// A pale blue dot promises its owner more cards next turn the moment the fifth
+/// of their plays this turn finishes, and only once a turn.
 #[test]
 fn a_pale_blue_dot_only_pays_after_a_busy_turn() {
     let quiet = &[
@@ -449,9 +449,19 @@ fn a_pale_blue_dot_only_pays_after_a_busy_turn() {
         ],
         ..Fight::default()
     });
-    for _ in 0..5 {
+    for _ in 0..4 {
         play(&mut simulator, "CARD.STRIKE_REGENT");
     }
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.DRAW_CARDS_NEXT_TURN_POWER"),
+        0
+    );
+    play(&mut simulator, "CARD.STRIKE_REGENT");
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.DRAW_CARDS_NEXT_TURN_POWER"),
+        2,
+        "the fifth play lays the promise down"
+    );
     end_turn(&mut simulator);
     assert_eq!(hand(&simulator).len(), 7, "five plays buys the two");
 }

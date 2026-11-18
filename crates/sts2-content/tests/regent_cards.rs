@@ -513,8 +513,8 @@ fn a_forge_stands_a_blade_up_once_and_sharpens_it_every_time() {
     play(&mut simulator, "CARD.SOVEREIGN_BLADE");
     assert_eq!(
         hp - hp_of(&simulator, 1),
-        10 + 30 + 9,
-        "ten of its own, thirty from the smith and nine from the refinement"
+        10 + 30 + 8,
+        "ten of its own, thirty from the smith and eight from the refinement"
     );
 }
 
@@ -627,12 +627,12 @@ fn the_cards_that_forge() {
     for (model_id, level, forged) in [
         ("CARD.BULWARK", 0, 10),
         ("CARD.BULWARK", 1, 13),
-        ("CARD.REFINE_BLADE", 0, 9),
-        ("CARD.REFINE_BLADE", 1, 13),
+        ("CARD.REFINE_BLADE", 0, 8),
+        ("CARD.REFINE_BLADE", 1, 12),
         ("CARD.SEEKING_EDGE", 0, 7),
         ("CARD.SEEKING_EDGE", 1, 11),
-        ("CARD.SPOILS_OF_BATTLE", 0, 5),
-        ("CARD.SPOILS_OF_BATTLE", 1, 8),
+        ("CARD.SPOILS_OF_BATTLE", 0, 6),
+        ("CARD.SPOILS_OF_BATTLE", 1, 9),
         ("CARD.THE_SMITH", 0, 30),
         ("CARD.THE_SMITH", 1, 40),
         ("CARD.WROUGHT_IN_WAR", 0, 7),
@@ -732,7 +732,7 @@ fn the_attacks_that_are_one_blow() {
     for (model_id, base, upgraded) in [
         ("CARD.STRIKE_REGENT", 6, 9),
         ("CARD.CELESTIAL_MIGHT", 18, 24),
-        ("CARD.DEVASTATE", 30, 40),
+        ("CARD.DEVASTATE", 35, 45),
         ("CARD.KINGLY_KICK", 27, 35),
         ("CARD.KINGLY_PUNCH", 8, 10),
         ("CARD.BOMBARDMENT", 18, 24),
@@ -774,7 +774,7 @@ fn the_cards_that_are_block() {
 fn the_cards_that_sweep_the_side() {
     for (model_id, base, upgraded) in [
         ("CARD.ASTRAL_PULSE", 12, 16),
-        ("CARD.CRUSH_UNDER", 7, 8),
+        ("CARD.CRUSH_UNDER", 8, 9),
         ("CARD.DYING_STAR", 9, 11),
         ("CARD.METEOR_SHOWER", 14, 21),
         ("CARD.SEVEN_STARS", 49, 49),
@@ -864,8 +864,8 @@ fn the_powers_the_pool_lays_down() {
         ("CARD.SEEKING_EDGE", 0, "POWER.SEEKING_EDGE_POWER", 1),
         ("CARD.SPECTRUM_SHIFT", 0, "POWER.SPECTRUM_SHIFT_POWER", 1),
         ("CARD.SWORD_SAGE", 0, "POWER.SWORD_SAGE_POWER", 1),
-        ("CARD.TERRAFORMING", 0, "POWER.VIGOR_POWER", 6),
-        ("CARD.TERRAFORMING", 1, "POWER.VIGOR_POWER", 8),
+        ("CARD.TERRAFORMING", 0, "POWER.VIGOR_POWER", 7),
+        ("CARD.TERRAFORMING", 1, "POWER.VIGOR_POWER", 10),
         (
             "CARD.THE_SEALED_THRONE",
             0,
@@ -1196,16 +1196,20 @@ fn a_prophesize_draws() {
     }
 }
 
-/// A guiding star is a blow and a draw.
+/// A guiding star is a blow and more cards next turn.
 #[test]
-fn a_guiding_star_draws_behind_its_blow() {
+fn a_guiding_star_promises_cards_behind_its_blow() {
     for (level, damage, drawn) in [(0, 12, 2), (1, 13, 3)] {
         let draw = stack("CARD.STRIKE_REGENT", 3);
         let mut simulator = built(scenario(&[200], &[("CARD.GUIDING_STAR", level)], &draw, 20));
         let hp = hp_of(&simulator, 1);
         play(&mut simulator, "CARD.GUIDING_STAR");
         assert_eq!(hp - hp_of(&simulator, 1), damage, "at level {level}");
-        assert_eq!(pile(&simulator, PileName::Hand).len(), drawn);
+        assert_eq!(pile(&simulator, PileName::Hand), Vec::<String>::new());
+        assert_eq!(
+            power_amount(&simulator, 0, "POWER.DRAW_CARDS_NEXT_TURN_POWER"),
+            drawn
+        );
     }
 }
 
@@ -1510,7 +1514,7 @@ fn a_crush_under_that_kills_its_dampener_saps_as_the_upgraded_card() {
     );
     let hp = hp_of(&simulator, 1);
     play(&mut simulator, "CARD.CRUSH_UNDER");
-    assert_eq!(hp - hp_of(&simulator, 1), 7, "the blow is the plain card's");
+    assert_eq!(hp - hp_of(&simulator, 1), 8, "the blow is the plain card's");
     assert_eq!(
         power_amount(&simulator, 1, "POWER.CRUSH_UNDER_POWER"),
         2,

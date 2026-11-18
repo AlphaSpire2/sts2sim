@@ -6,10 +6,9 @@
 //! its screen on the action queue and the pass runs on.
 //!
 //! The pass banks the screen and the site's join opens it, so the player is
-//! asked exactly where the build asks. Two shapes stand that up: the retain
-//! pick Well-Laid Plans owes at `BeforeFlushLate`, and a screen nested inside
-//! a deferred body — a Stratagem's draw-pile pick reached through a shuffle
-//! the deferred body's own draw caused.
+//! asked exactly where the build asks. A screen nested inside a deferred body
+//! stands that up: a Stratagem's draw-pile pick reached through a shuffle the
+//! deferred body's own draw caused.
 
 use sts2_engine::{
     Action, CardFingerprint, DecisionContext, PileName, PowerType, ScenarioBuilder, Simulator,
@@ -70,116 +69,6 @@ fn assert_clone_resumes_identically(simulator: &Simulator, action: Action) {
         original.state_key().unwrap(),
         copy.state_key().unwrap(),
         "the two copies settle on the same state"
-    );
-}
-
-/// Well-Laid Plans' end-turn retain pick: a screen put up directly by a
-/// deferred body. The build asks on `BeforeFlushLate` — the late pass, so the
-/// player sees every other before-flush effect first — and the join opens
-/// the pick before the hand goes down.
-#[test]
-fn well_laid_plans_asks_its_retain_pick_at_end_of_turn() {
-    let mut simulator = ScenarioBuilder::new("PLANS", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
-        .player_hp(80, 80)
-        .energy(9, 9)
-        .turn(1, 1)
-        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
-        .power(0, id("POWER.WELL_LAID_PLANS_POWER"), 1, PowerType::Buff)
-        .card(PileName::Hand, 0, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Hand, 1, card("CARD.DEFEND_IRONCLAD"), 0)
-        .card(PileName::Hand, 2, card("CARD.STRIKE_IRONCLAD"), 0)
-        // A draw pile deep enough that the next turn's hand comes off it: a
-        // flushed card stays down, so only the retain can keep the defend up.
-        .card(PileName::Draw, 3, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 4, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 5, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 6, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 7, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 8, card("CARD.STRIKE_IRONCLAD"), 0)
-        .build(sts2_content::standard_registry())
-        .expect("the scenario builds");
-    end_turn(&mut simulator);
-
-    let (choice_id, minimum, maximum, candidates) = the_screen(&simulator);
-    assert_eq!((minimum, maximum), (0, 1), "keep up to one card");
-    assert_eq!(candidates.len(), 3, "the whole unretained hand is offered");
-    let defend = candidates
-        .iter()
-        .find(|candidate| candidate.fingerprint.model_id == id("CARD.DEFEND_IRONCLAD"))
-        .cloned()
-        .expect("the defend is on the screen");
-    let keep = Action::ChooseCards {
-        choice_id,
-        cards: vec![defend.clone()],
-    };
-    assert_clone_resumes_identically(&simulator, keep.clone());
-    simulator.step(keep).expect("the pick applies");
-
-    let combat = simulator.state().combat.as_ref().expect("the fight stands");
-    assert_eq!(
-        combat.player.turn, 2,
-        "the handover ran out behind the answer"
-    );
-    assert!(
-        combat
-            .player
-            .piles
-            .hand
-            .iter()
-            .any(|held| held.id == defend.card_id),
-        "the kept card survived the flush into the next turn"
-    );
-    assert!(
-        combat
-            .player
-            .piles
-            .hand
-            .iter()
-            .all(|held| held.id.get() != 0 && held.id.get() != 2),
-        "and the strikes that were not kept went down with the flush"
-    );
-}
-
-/// Answering with nothing keeps nothing: the same screen, backed out of, and
-/// the whole hand goes down with the flush.
-#[test]
-fn well_laid_plans_can_be_answered_with_nothing() {
-    let mut simulator = ScenarioBuilder::new("PLANS", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
-        .player_hp(80, 80)
-        .energy(9, 9)
-        .turn(1, 1)
-        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
-        .power(0, id("POWER.WELL_LAID_PLANS_POWER"), 1, PowerType::Buff)
-        .card(PileName::Hand, 0, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Hand, 1, card("CARD.DEFEND_IRONCLAD"), 0)
-        .card(PileName::Draw, 2, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 3, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 4, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 5, card("CARD.STRIKE_IRONCLAD"), 0)
-        .card(PileName::Draw, 6, card("CARD.STRIKE_IRONCLAD"), 0)
-        .build(sts2_content::standard_registry())
-        .expect("the scenario builds");
-    end_turn(&mut simulator);
-
-    let (choice_id, ..) = the_screen(&simulator);
-    simulator
-        .step(Action::ChooseCards {
-            choice_id,
-            cards: Vec::new(),
-        })
-        .expect("nothing is an answer");
-    let combat = simulator.state().combat.as_ref().expect("the fight stands");
-    assert_eq!(combat.player.turn, 2);
-    let hand_ids: Vec<u64> = combat
-        .player
-        .piles
-        .hand
-        .iter()
-        .map(|held| held.id.get())
-        .collect();
-    assert!(
-        !hand_ids.contains(&0) && !hand_ids.contains(&1),
-        "nothing was kept back from the flush: {hand_ids:?}"
     );
 }
 

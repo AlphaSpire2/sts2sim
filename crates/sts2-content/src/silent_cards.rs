@@ -53,7 +53,7 @@ fn sly(mut definition: CardDefinition) -> CardDefinition {
 /// here has to say it twice.
 ///
 /// An upgrade that takes the Exhaust keyword back off, which is what upgrading
-/// a Scare does.
+/// a Mirage does.
 fn upgrade_drops_exhaust(mut definition: CardDefinition) -> CardDefinition {
     if let Some(upgrade) = definition.upgrade.as_mut() {
         upgrade.drops_exhaust = true;
@@ -216,7 +216,7 @@ fn opening_pool() -> Vec<CardDefinition> {
                 0,
                 vec![buff("POWER.ANTICIPATE_POWER", 2)],
             ),
-            vec![buff("POWER.ANTICIPATE_POWER", 3)],
+            vec![buff("POWER.ANTICIPATE_POWER", 4)],
         ),
         // An assassination opens the fight in hand, burns up, and leaves what
         // it hit open — whether or not the blow left anything standing.
@@ -602,31 +602,29 @@ fn poisons() -> Vec<CardDefinition> {
             ),
             vec![buff("POWER.ENVENOM_POWER", 2)],
         ),
-        sly(upgrading(
+        // A haze poisons and weakens everything.
+        upgrading(
             card(
                 "CARD.HAZE",
                 CardType::Skill,
                 TargetType::AllEnemies,
-                3,
-                vec![poison_everything(4)],
+                2,
+                vec![poison_everything(4), sweeping_power("POWER.WEAK_POWER", 1)],
             ),
-            vec![poison_everything(6)],
-        )),
-        // A mirage is worth every point of poison the other side is carrying.
-        exhausting(upgrading_cost(
+            vec![poison_everything(6), sweeping_power("POWER.WEAK_POWER", 2)],
+        ),
+        // A mirage is worth every point of poison the other side is carrying,
+        // and upgrading stops it burning up.
+        upgrade_drops_exhaust(exhausting(upgrading(
             card(
                 "CARD.MIRAGE",
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                vec![Command::Creature(CreatureCmd::GainBlock {
-                    target: CreatureSelector::Owner,
-                    amount: Amount::counting(Count::LivingOpponentsPower(id("POWER.POISON_POWER"))),
-                    props: ValueProps::NONE,
-                })],
+                vec![mirage()],
             ),
-            0,
-        )),
+            vec![mirage()],
+        ))),
         upgrading(
             card(
                 "CARD.NOXIOUS_FUMES",
@@ -766,17 +764,16 @@ fn the_middle_pool() -> Vec<CardDefinition> {
             ),
             vec![escape_plan(5)],
         ),
-        // Expertise draws the hand back up to six cards, and nothing at all
-        // when it already holds that many.
+        // Expertise draws, and what it draws is kept through the turn's end.
         upgrading(
             card(
                 "CARD.EXPERTISE",
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                vec![expertise(6)],
+                vec![expertise(2)],
             ),
-            vec![expertise(7)],
+            vec![expertise(3)],
         ),
         // Expose takes the block off what it is aimed at, takes an artifact
         // away, and leaves it open.
@@ -841,9 +838,9 @@ fn the_middle_pool() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AllEnemies,
                 1,
-                vec![sweep(6, 1)],
+                vec![sweep(7, 1)],
             ),
-            vec![sweep(8, 1)],
+            vec![sweep(9, 1)],
         )),
         // A scare shakes everything, and upgrading stops it burning up.
         upgrade_drops_exhaust(exhausting(upgrading(
@@ -1227,18 +1224,15 @@ fn the_late_pool() -> Vec<CardDefinition> {
             ),
             0,
         ),
-        // Tracking stacks two the first time and one every time after.
+        // Tracking stacks fifty every time, each fifty half as much again on a
+        // weakened target.
         upgrading_cost(
             card(
                 "CARD.TRACKING",
                 CardType::Power,
                 TargetType::SelfTarget,
                 2,
-                vec![Command::When {
-                    condition: Condition::OwnerLacksPower(id("POWER.TRACKING_POWER")),
-                    then: vec![buff("POWER.TRACKING_POWER", 2)],
-                    otherwise: vec![buff("POWER.TRACKING_POWER", 1)],
-                }],
+                vec![buff("POWER.TRACKING_POWER", 50)],
             ),
             1,
         ),
@@ -1252,15 +1246,16 @@ fn the_late_pool() -> Vec<CardDefinition> {
             ),
             vec![block(9)],
         )),
-        upgrading(
+        // Well-laid plans keep the whole hand at every turn's end.
+        upgrading_cost(
             card(
                 "CARD.WELL_LAID_PLANS",
                 CardType::Power,
                 TargetType::SelfTarget,
-                1,
+                2,
                 vec![buff("POWER.WELL_LAID_PLANS_POWER", 1)],
             ),
-            vec![buff("POWER.WELL_LAID_PLANS_POWER", 2)],
+            1,
         ),
         // A wraith form is the Silent's other ancient: intangibility bought
         // with a dexterity that never stops being paid.
@@ -1323,15 +1318,23 @@ fn escape_plan(amount: i32) -> Command {
     }
 }
 
-/// Expertise, played: cards drawn up to the number it names, counting what the
-/// hand already holds, and nothing at all where the hand already holds that
-/// many.
-fn expertise(up_to: i32) -> Command {
-    Command::CardPile(CardPileCmd::Draw {
-        count: Amount::Greatest(vec![
-            Amount::Fixed(0),
-            Amount::per(up_to, -1, Count::CardsInPile(PileName::Hand)),
-        ]),
+/// Expertise, played: that many cards drawn, each retained this turn.
+fn expertise(count: i32) -> Command {
+    Command::Drawn {
+        count: Amount::Fixed(count),
+        then: vec![Command::Card(CardCmd::ApplySingleTurnKeyword {
+            cards: CardSelector::Chosen,
+            keyword: sts2_engine::CardKeyword::Retain,
+        })],
+    }
+}
+
+/// Mirage, played: block worth all the poison the other side carries.
+fn mirage() -> Command {
+    Command::Creature(CreatureCmd::GainBlock {
+        target: CreatureSelector::Owner,
+        amount: Amount::counting(Count::LivingOpponentsPower(id("POWER.POISON_POWER"))),
+        props: ValueProps::NONE,
     })
 }
 

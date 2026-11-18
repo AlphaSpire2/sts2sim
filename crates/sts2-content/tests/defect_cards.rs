@@ -252,8 +252,8 @@ fn the_pools_plain_attacks_swing_for_what_they_declare() {
         ("CARD.ALL_FOR_ONE", 10, 14),
         ("CARD.ICE_LANCE", 19, 24),
         ("CARD.METEOR_STRIKE", 24, 30),
-        ("CARD.MOMENTUM_STRIKE", 10, 13),
-        ("CARD.SUNDER", 24, 32),
+        ("CARD.MOMENTUM_STRIKE", 11, 15),
+        ("CARD.SUNDER", 26, 34),
         ("CARD.SYNTHESIS", 14, 20),
     ] {
         assert_eq!(damage_dealt(model_id, 0), base, "{model_id}");
@@ -364,7 +364,7 @@ fn a_null_weakens_and_channels_darkness() {
     let mut simulator = holding(&[("CARD.NULL", 0)]);
     play(&mut simulator, "CARD.NULL");
     assert_eq!(39 - creature(&simulator, 1).current_hp, 10);
-    assert_eq!(power_amount(&simulator, 1, "POWER.WEAK_POWER"), 2);
+    assert_eq!(power_amount(&simulator, 1, "POWER.WEAK_POWER"), 1);
     assert_eq!(orbs(&simulator), ["ORB.DARK_ORB"]);
 }
 
@@ -373,7 +373,7 @@ fn a_null_weakens_and_channels_darkness() {
 fn a_refract_hits_twice_and_channels_two_glass_orbs() {
     let mut simulator = holding(&[("CARD.REFRACT", 0)]);
     play(&mut simulator, "CARD.REFRACT");
-    assert_eq!(39 - creature(&simulator, 1).current_hp, 18);
+    assert_eq!(39 - creature(&simulator, 1).current_hp, 20);
     assert_eq!(orbs(&simulator), ["ORB.GLASS_ORB", "ORB.GLASS_ORB"]);
 }
 
@@ -425,7 +425,7 @@ fn rocket_punch_discounts_each_copy_in_every_combat_pile() {
         let mut simulator = scenario.build(sts2_content::standard_registry()).unwrap();
         assert_eq!(rocket_costs(&simulator), [2; 4]);
         play(&mut simulator, "CARD.BOOST_AWAY");
-        assert_eq!(rocket_costs(&simulator), [0; 4]);
+        assert_eq!(rocket_costs(&simulator), [1; 4]);
     }
 }
 
@@ -434,16 +434,16 @@ fn rocket_punchs_discount_survives_the_turn_and_clears_when_played() {
     for upgrade in [0, 1] {
         let mut simulator = holding(&[("CARD.BOOST_AWAY", 0), ("CARD.ROCKET_PUNCH", upgrade)]);
         play(&mut simulator, "CARD.BOOST_AWAY");
-        assert_eq!(rocket_costs(&simulator), [0]);
+        assert_eq!(rocket_costs(&simulator), [1]);
         let discounted = simulator.snapshot();
         end_turn(&mut simulator);
-        assert_eq!(rocket_costs(&simulator), [0]);
+        assert_eq!(rocket_costs(&simulator), [1]);
         let before_play = player(&simulator).energy;
         play(&mut simulator, "CARD.ROCKET_PUNCH");
-        assert_eq!(player(&simulator).energy, before_play);
+        assert_eq!(player(&simulator).energy, before_play - 1);
         assert_eq!(rocket_costs(&simulator), [2]);
         simulator.restore(&discounted).unwrap();
-        assert_eq!(rocket_costs(&simulator), [0]);
+        assert_eq!(rocket_costs(&simulator), [1]);
     }
 }
 
@@ -547,9 +547,10 @@ fn a_sweeping_beam_hits_everything_and_draws() {
     assert_eq!(pile(&simulator, PileName::Hand).len(), 1);
 }
 
-/// A Hyperbeam hits everything and takes three Focus off its owner.
+/// A Hyperbeam hits everything and takes three Focus off its owner for the
+/// turn.
 #[test]
-fn a_hyperbeam_costs_its_owner_focus() {
+fn a_hyperbeam_costs_its_owner_focus_for_the_turn() {
     let mut simulator = scenario(&Fight {
         enemies: &[39, 39],
         powers: &[(0, "POWER.FOCUS_POWER", 4, PowerType::Buff)],
@@ -557,9 +558,19 @@ fn a_hyperbeam_costs_its_owner_focus() {
         ..Fight::default()
     });
     play(&mut simulator, "CARD.HYPERBEAM");
-    assert_eq!(39 - creature(&simulator, 1).current_hp, 28);
-    assert_eq!(39 - creature(&simulator, 2).current_hp, 28);
+    assert_eq!(39 - creature(&simulator, 1).current_hp, 24);
+    assert_eq!(39 - creature(&simulator, 2).current_hp, 24);
     assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 1);
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.HYPERBEAM_FOCUS_DOWN_POWER"),
+        3
+    );
+    end_turn(&mut simulator);
+    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 4);
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.HYPERBEAM_FOCUS_DOWN_POWER"),
+        0
+    );
 }
 
 /// A Helix Drill lands one hit for every point of energy its owner has already
@@ -1040,7 +1051,7 @@ fn a_turbo_pays_energy_and_a_void() {
     assert!(pile(&simulator, PileName::Discard).contains(&"CARD.VOID".to_owned()));
 }
 
-/// A Synchronize works two Focus on for every distinct orb model its owner
+/// A Synchronize works one Focus on for every distinct orb model its owner
 /// holds, and gives it back at the end of the turn.
 #[test]
 fn a_synchronize_lends_focus_for_the_turn() {
@@ -1050,7 +1061,7 @@ fn a_synchronize_lends_focus_for_the_turn() {
         ..Fight::default()
     });
     play(&mut simulator, "CARD.SYNCHRONIZE");
-    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 4);
+    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 2);
     end_turn(&mut simulator);
     assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 0);
 }
@@ -1194,7 +1205,7 @@ fn a_multi_cast_evokes_once_per_energy_spent() {
 #[test]
 fn the_pools_powers_land_for_what_they_declare() {
     for (model_id, power, base, upgraded) in [
-        ("CARD.BIASED_COGNITION", "POWER.FOCUS_POWER", 4, 5),
+        ("CARD.BIASED_COGNITION", "POWER.FOCUS_POWER", 5, 6),
         ("CARD.BUFFER", "POWER.BUFFER_POWER", 1, 2),
         ("CARD.COOLANT", "POWER.COOLANT_POWER", 2, 3),
         ("CARD.CREATIVE_AI", "POWER.CREATIVE_AI_POWER", 1, 1),
@@ -1217,7 +1228,7 @@ fn the_pools_powers_land_for_what_they_declare() {
         ("CARD.SPINNER", "POWER.SPINNER_POWER", 1, 1),
         ("CARD.STORM", "POWER.STORM_POWER", 1, 2),
         ("CARD.SUBROUTINE", "POWER.SUBROUTINE_POWER", 1, 1),
-        ("CARD.THUNDER", "POWER.THUNDER_POWER", 6, 8),
+        ("CARD.THUNDER", "POWER.THUNDER_POWER", 8, 11),
         (
             "CARD.TRASH_TO_TREASURE",
             "POWER.TRASH_TO_TREASURE_POWER",
@@ -1558,14 +1569,14 @@ fn a_buffer_turns_one_blow_away() {
     assert_eq!(power_amount(&simulator, 0, "POWER.BUFFER_POWER"), 0);
 }
 
-/// A Biased Cognition hands four Focus over and takes one back every turn.
+/// A Biased Cognition hands five Focus over and takes one back every turn.
 #[test]
 fn a_biased_cognition_takes_its_focus_back() {
     let mut simulator = holding(&[("CARD.BIASED_COGNITION", 0)]);
     play(&mut simulator, "CARD.BIASED_COGNITION");
-    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 4);
+    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 5);
     end_turn(&mut simulator);
-    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 3);
+    assert_eq!(power_amount(&simulator, 0, "POWER.FOCUS_POWER"), 4);
 }
 
 /// A Thunder swings at whatever a Lightning orb's evoke reached.
@@ -1578,8 +1589,8 @@ fn a_thunder_answers_a_lightning_evoke() {
     });
     play(&mut simulator, "CARD.THUNDER");
     play(&mut simulator, "CARD.DUALCAST");
-    // Two evokes of eight, and six from the power for each of them.
-    assert_eq!(39 - creature(&simulator, 1).current_hp, 28);
+    // Two evokes of eight, and eight from the power for each of them.
+    assert_eq!(39 - creature(&simulator, 1).current_hp, 32);
 }
 
 /// The two multiplayer-only cards are registered for what they are. An
