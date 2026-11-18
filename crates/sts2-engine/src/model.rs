@@ -2179,6 +2179,10 @@ pub struct PowerDefinition {
     /// The whole hand stays where it is at the end of the turn.
     #[serde(default)]
     pub keeps_hand: bool,
+    /// While it stands on the player with stacks left, the player takes
+    /// another turn in place of the enemy's. Its listeners spend it.
+    #[serde(default)]
+    pub grants_an_extra_turn: bool,
     /// What the power does as it comes off, whether it was taken off outright
     /// or fell away at nothing.
     #[serde(default)]
@@ -4203,6 +4207,10 @@ pub struct HookContext {
     pub announced_creature: Option<CreatureCombatId>,
     /// The side whose turn is starting or ending.
     pub side: Option<CombatSide>,
+    /// Only the players of that side take part, not the creatures standing
+    /// beside them: an extra turn is the players' own.
+    #[serde(default)]
+    pub players_only: bool,
     /// What a whole swing settled and who took each of them, which the
     /// after-attack pass hands its listeners.
     ///
@@ -4617,6 +4625,13 @@ pub enum LoopFrame {
         rest: Vec<OrbInstanceId>,
         target: Option<CreatureCombatId>,
         context: crate::CommandContext,
+        /// Whether each orb's passive is counted.
+        #[serde(default)]
+        counted: bool,
+        /// The repeats the first orb of `rest` still owes, when a screen
+        /// stopped it between two of them.
+        #[serde(default)]
+        repeats_left: Option<i32>,
     },
     /// A channel past the evoke it made room with: putting the orb in the
     /// queue and announcing it are what is left, and neither reads anything
@@ -4715,6 +4730,16 @@ impl TurnHandoverStep {
     }
 }
 
+/// A monster's arrival, rolled and not yet brought in.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReservedArrival {
+    pub model_id: ModelId,
+    pub id: CreatureCombatId,
+    pub hp: i32,
+    pub slot: i32,
+    pub slot_name: Option<String>,
+}
+
 /// The points at which the first half of ending a player's turn can stop.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -4731,6 +4756,9 @@ pub enum EndTurnPhaseOneStep {
     /// The rest of the turn end: what the hand does to whoever is still
     /// holding it.
     CardsStillHeld,
+    /// The win check the turn end makes once the orbs and the cards still held
+    /// are done, so a fight they won never reaches the pass before the flush.
+    TurnEndWinCheck,
     /// The pass before the hand is flushed.
     BeforeFlush,
 }
@@ -4742,7 +4770,8 @@ impl EndTurnPhaseOneStep {
             Self::AutoPostPlay => Some(Self::BeforeTurnEnd),
             Self::BeforeTurnEnd => Some(Self::OrbsBeforeTurnEnd),
             Self::OrbsBeforeTurnEnd => Some(Self::CardsStillHeld),
-            Self::CardsStillHeld => Some(Self::BeforeFlush),
+            Self::CardsStillHeld => Some(Self::TurnEndWinCheck),
+            Self::TurnEndWinCheck => Some(Self::BeforeFlush),
             Self::BeforeFlush => None,
         }
     }
@@ -4784,8 +4813,12 @@ pub enum SetupPlayerTurnStep {
     Draw,
     /// The pass that follows the player's turn opening.
     PlayerTurnStart,
-    /// The phase becomes auto-pre-play and the pass that follows it runs.
+    /// The phase becomes auto-pre-play, and a hand the setup left empty is
+    /// announced as emptied. It is a step of its own because what answers the
+    /// announcement may draw, and a draw may ask the player something.
     AutoPrePlay,
+    /// The pass that follows the auto-pre-play phase opening.
+    AutoPrePlayHooks,
     /// The phase becomes `Play` and the player takes control.
     Play,
 }
@@ -4798,7 +4831,8 @@ impl SetupPlayerTurnStep {
             Self::BeforeHandDraw => Some(Self::Draw),
             Self::Draw => Some(Self::PlayerTurnStart),
             Self::PlayerTurnStart => Some(Self::AutoPrePlay),
-            Self::AutoPrePlay => Some(Self::Play),
+            Self::AutoPrePlay => Some(Self::AutoPrePlayHooks),
+            Self::AutoPrePlayHooks => Some(Self::Play),
             Self::Play => None,
         }
     }
@@ -5494,6 +5528,11 @@ pub struct CombatState {
     /// cleared there next time.
     #[serde(default)]
     pub taking_extra_turn: bool,
+    /// Arrivals rolled ahead of being brought in: a monster whose health and
+    /// identifier are settled before another arrival's, and which joins the
+    /// fight after it.
+    #[serde(default)]
+    pub reserved_arrivals: Vec<ReservedArrival>,
     /// Which pass of the play loop the play now running is on. It is cleared
     /// to nothing between plays, so outside a play it reads as the first
     /// pass.

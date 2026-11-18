@@ -597,3 +597,39 @@ fn a_hopper_passes_over_an_imbued_card() {
     assert!(!held("CARD.POMMEL_STRIKE"), "the plain common was taken");
     assert!(held("CARD.TAUNT"), "the imbued one was left");
 }
+
+/// The gremlin merc's surprise rolls the fat gremlin first and brings the
+/// sneaky one in ahead of it: the fat gremlin holds the earlier identifier and
+/// stands second.
+#[test]
+fn the_surprise_rolls_the_fat_gremlin_first_and_brings_it_in_second() {
+    let mut simulator = ScenarioBuilder::new("GREMLINS", id("ENCOUNTER.GREMLIN_MERC_NORMAL"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.GREMLIN_MERC"), 1, 47, "GIMME_MOVE")
+        .power(
+            1,
+            id("POWER.SURPRISE_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.STRIKE_IRONCLAD"), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    strike(&mut simulator);
+    let arrivals: Vec<(String, u64)> = combat(&simulator)
+        .creatures
+        .iter()
+        .filter(|creature| creature.id.get() > 1)
+        .map(|creature| (creature.model_id.to_string(), creature.id.get()))
+        .collect();
+    assert_eq!(
+        arrivals,
+        [
+            ("MONSTER.SNEAKY_GREMLIN".to_owned(), 3),
+            ("MONSTER.FAT_GREMLIN".to_owned(), 2),
+        ]
+    );
+}

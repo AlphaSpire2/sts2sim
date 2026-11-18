@@ -8963,8 +8963,8 @@ fn an_auto_played_cards_second_pass_reads_the_card_as_it_stands() {
 }
 
 /// A player who goes down at the start of their turn ends the run there: the
-/// crimson mantle's cost kills them, and the pendulum behind it never counts
-/// the turn.
+/// crimson mantle's cost kills them once the hand is drawn, and the pendulum
+/// has already counted the turn ahead of the draw.
 #[test]
 fn the_turn_start_stops_where_the_player_falls() {
     let mut pendulum = sts2_engine::RelicInstance::new(id("RELIC.PENDULUM"));
@@ -8986,5 +8986,116 @@ fn the_turn_start_stops_where_the_player_falls() {
         simulator.state().terminal,
         Some(sts2_engine::RunResult::Defeat)
     );
-    assert_eq!(relic_counter(&simulator, "RELIC.PENDULUM"), 2);
+    assert_eq!(relic_counter(&simulator, "RELIC.PENDULUM"), 0);
+}
+
+/// An emotion chip's passives are counted the way a turn trigger's are, so a
+/// gold-plated cable doubles the front orb's both times: six at the turn end
+/// and six more as the chip fires it.
+#[test]
+fn an_emotion_chips_passive_is_doubled_by_gold_plated_cables() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .played_as(id("CHARACTER.DEFECT"))
+        .player_hp(80, 80)
+        .energy(30, 30)
+        .turn(1, 1)
+        .orb_slots(3)
+        .orb(id("ORB.LIGHTNING_ORB"))
+        .relics(&[id("RELIC.EMOTION_CHIP"), id("RELIC.GOLD_PLATED_CABLES")])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "CHOMP_MOVE")
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    assert_eq!(creature(&simulator, 1).current_hp, 999 - 12);
+}
+
+/// A hand the turn start left empty is announced as emptied once the
+/// auto-pre-play phase opens: an unceasing top draws into a hand Mind Rot
+/// drew nothing into.
+#[test]
+fn an_unceasing_top_draws_into_a_turn_that_opened_empty_handed() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .relics(&[id("RELIC.UNCEASING_TOP")])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .power(
+            0,
+            id("POWER.MIND_ROT_POWER"),
+            5,
+            sts2_engine::PowerType::Debuff,
+        )
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .card(PileName::Draw, 0, card("CARD.STRIKE_IRONCLAD", 0), 0)
+        .card(PileName::Draw, 1, card("CARD.DEFEND_IRONCLAD", 0), 0)
+        .card(PileName::Draw, 2, card("CARD.BASH", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    assert_eq!(hand_size(&simulator), 1);
+}
+
+/// A pass of a play that has not begun does not begin once the fight is
+/// over: a duplicated strike that kills with its first pass is counted once.
+#[test]
+fn a_duplicated_play_stops_once_the_fight_is_won() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .relics(&[id("RELIC.NUNCHAKU")])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .power(
+            0,
+            id("POWER.DUPLICATION_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 3, 39, "SHRINKER_MOVE")
+        .card(PileName::Hand, 0, card("CARD.STRIKE_IRONCLAD", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.STRIKE_IRONCLAD");
+    assert_eq!(relic_counter(&simulator, "RELIC.NUNCHAKU"), 1);
+}
+
+/// A pendulum counts the turns before each hand is drawn, and the third hand
+/// is a card bigger.
+#[test]
+fn a_pendulums_third_hand_is_a_card_bigger() {
+    let mut simulator = fight_from_run(&["RELIC.PENDULUM"]);
+    let opening = hand_size(&simulator);
+    assert_eq!(relic_counter(&simulator, "RELIC.PENDULUM"), 1);
+    end_turn(&mut simulator);
+    assert_eq!(hand_size(&simulator), opening);
+    end_turn(&mut simulator);
+    assert_eq!(relic_counter(&simulator, "RELIC.PENDULUM"), 0);
+    assert_eq!(hand_size(&simulator), opening + 1);
+}
+
+/// A pollinous core whose count a fight left at four or more still pays on
+/// the next hand drawn.
+#[test]
+fn a_pollinous_core_left_at_four_pays_on_the_next_hand() {
+    let mut core = sts2_engine::RelicInstance::new(id("RELIC.POLLINOUS_CORE"));
+    core.counter = 4;
+    let mut builder = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(3, 3)
+        .turn(1, 1)
+        .relic_instances(vec![core])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE");
+    for card_id in 0..10 {
+        builder = builder.card(PileName::Draw, card_id, card("CARD.DEFEND_IRONCLAD", 0), 0);
+    }
+    let mut simulator = builder
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    assert_eq!(hand_size(&simulator), 7);
+    assert_eq!(relic_counter(&simulator, "RELIC.POLLINOUS_CORE"), 0);
 }

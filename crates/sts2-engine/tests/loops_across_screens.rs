@@ -151,6 +151,7 @@ fn cards() -> Vec<CardDefinition> {
             vec![Command::Orb(OrbCmd::Passive {
                 orb: sts2_engine::OrbSelector::All,
                 target: None,
+                counted: false,
             })],
         ),
         // A channel into a full queue, whose make-room evoke asks.

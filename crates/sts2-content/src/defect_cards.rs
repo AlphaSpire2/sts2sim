@@ -1002,6 +1002,7 @@ fn fire_every_dark_orb(times: i32) -> Command {
             then: vec![Command::Orb(OrbCmd::Passive {
                 orb: OrbSelector::Bound,
                 target: None,
+                counted: false,
             })],
         }],
     }
@@ -1017,6 +1018,7 @@ fn fire_every_lightning_orb_at_the_target(times: i32) -> Command {
             then: vec![Command::Orb(OrbCmd::Passive {
                 orb: OrbSelector::Bound,
                 target: Some(CreatureSelector::Target),
+                counted: false,
             })],
         }],
     }

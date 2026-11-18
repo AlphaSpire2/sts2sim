@@ -294,6 +294,30 @@ pub enum CreatureCmd {
         #[serde(default)]
         then: Vec<Command>,
     },
+    /// Rolls a monster's arrival without bringing it in: the slot it will
+    /// stand in, its health against the enemies already standing, and its
+    /// identifier. The arrival is held until an
+    /// [`CreatureCmd::AddReserved`] of the same monster brings it in, so an
+    /// arrival made in between neither rolls against its health nor takes its
+    /// identifier.
+    Reserve {
+        monster: ModelId,
+        #[serde(default)]
+        slot: SpawnSlot,
+    },
+    /// Brings in the arrival a [`CreatureCmd::Reserve`] rolled for this
+    /// monster. `prepare` runs once it stands and before its own arrival and
+    /// the creature-added pass are settled; `then` runs after them, as for an
+    /// add. Both run with the caller as owner and the arrival as target.
+    AddReserved {
+        monster: ModelId,
+        #[serde(default)]
+        initial_state: Option<String>,
+        #[serde(default)]
+        prepare: Vec<Command>,
+        #[serde(default)]
+        then: Vec<Command>,
+    },
     /// The same, over a monster rolled out of a list on the monster-AI
     /// stream. The caller's own last roll is taken out of the list first — a
     /// fabricator never rolls the same monster twice running — and what this
@@ -1392,6 +1416,11 @@ pub enum OrbCmd {
         orb: OrbSelector,
         #[serde(default)]
         target: Option<CreatureSelector>,
+        /// The passive is counted the way a turn trigger counts it, so what
+        /// changes an orb's trigger count changes how many times it fires.
+        /// Only an emotion chip asks for it.
+        #[serde(default)]
+        counted: bool,
     },
     /// One of an orb's own two numbers, written by that orb: the evoke
     /// amount a Dark orb grows by its own passive, and the passive amount a
@@ -2735,6 +2764,9 @@ pub enum Count {
 /// A test a model body makes before acting.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Condition {
+    /// The fight is neither over nor ending: no pending loss, a primary enemy
+    /// still standing or something keeping the fight going.
+    CombatIsNotOverOrEnding,
     /// The owner has lost HP this turn.
     OwnerLostHpThisTurn,
     /// A blow block did not stop whole landed on the listener's owner during

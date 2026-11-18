@@ -432,6 +432,7 @@ impl ScenarioBuilder {
                 played_card_energy_spent: 0,
                 played_card_play_index: 0,
                 taking_extra_turn: false,
+                reserved_arrivals: Vec::new(),
                 fatal_kill_this_play: false,
                 encounter_model: self.encounter,
                 round: self.round,

@@ -407,8 +407,9 @@ pub fn defect_relics() -> Vec<RelicDefinition> {
         },
         // An emotion chip fires every orb its owner is holding as their turn
         // opens, where a blow block did not stop whole landed on them since
-        // their last turn began. What it does on taking one is set its own
-        // display state, which is presentation.
+        // their last turn began, each counted the way a turn trigger counts
+        // it. What it does on taking one is set its own display state, which
+        // is presentation.
         RelicDefinition {
             hooks: vec![ModifierHook::every_turn(
                 HookEvent::AfterPlayerTurnStart,
@@ -420,6 +421,7 @@ pub fn defect_relics() -> Vec<RelicDefinition> {
                         then: vec![Command::Orb(sts2_engine::OrbCmd::Passive {
                             orb: sts2_engine::OrbSelector::Bound,
                             target: None,
+                            counted: true,
                         })],
                     }],
                 }],
@@ -1436,7 +1438,7 @@ fn event_relics() -> Vec<RelicDefinition> {
             1,
             vec![
                 ModifierHook::every_turn(
-                    HookEvent::AfterSideTurnStart,
+                    HookEvent::AfterPlayerTurnStart,
                     vec![Command::When {
                         otherwise: Vec::new(),
                         condition: Condition::ListeningRelicCounterAtLeast(1),
@@ -1942,26 +1944,26 @@ fn maw_bank() -> RelicDefinition {
 
 /// A pollinous core swells every fourth turn's hand by two.
 ///
-/// The build counts the turns as each one opens and clears the count from the
-/// pass over whoever changed the draw, which is why the count is cleared where
-/// it is rather than when it is read.
+/// The build counts the turns before each hand is drawn and clears the count
+/// from the pass over whoever changed the draw, which is why the count is
+/// cleared where it is rather than when it is read. A count a fight left at
+/// four or more, ended before its hand was drawn, still pays on the next.
 fn pollinous_core() -> RelicDefinition {
     RelicDefinition {
         counter_property: Some("TurnsSeen".to_owned()),
         counter_kind: Some(sts2_engine::CounterKind::Cycle { wraps_at: 4 }),
         hooks: vec![
             ModifierHook::every_turn(
-                HookEvent::BeforeSideTurnStart,
+                HookEvent::BeforeHandDraw,
                 vec![Command::Relic(RelicCmd::ModifyListeningCounter(
                     Amount::Fixed(1),
                 ))],
-            )
-            .when(HookCondition::OwnerIsParticipant),
+            ),
             ModifierHook::every_turn(
                 HookEvent::ModifyHandDraw,
                 vec![Command::When {
                     otherwise: Vec::new(),
-                    condition: Condition::ListeningRelicCounterIs(4),
+                    condition: Condition::ListeningRelicCounterAtLeast(4),
                     then: vec![
                         Command::Modify(ModifierCmd::Add(Amount::Fixed(2))),
                         Command::Relic(RelicCmd::SetListeningCounter(Amount::Fixed(0))),
@@ -3916,33 +3918,36 @@ fn gorget() -> RelicDefinition {
     }
 }
 
-/// A pendulum counts the turns and pays a card on every third.
+/// A pendulum counts the turns before each hand is drawn, and every third
+/// hand is a card bigger.
 fn pendulum() -> RelicDefinition {
     RelicDefinition {
         counter_property: Some("TurnsSeen".to_owned()),
         counter_kind: Some(sts2_engine::CounterKind::Cycle { wraps_at: 3 }),
-        hooks: vec![ModifierHook::every_turn(
-            HookEvent::AfterPlayerTurnStart,
-            vec![
-                // `TurnsSeen = (TurnsSeen + 1) % 3`, and the draw where it
-                // comes back round to nothing.
-                Command::Relic(RelicCmd::ModifyListeningCounter(Amount::Fixed(1))),
-                Command::When {
-                    otherwise: Vec::new(),
-                    condition: Condition::ListeningRelicCounterIs(3),
-                    then: vec![Command::Relic(RelicCmd::SetListeningCounter(
-                        Amount::Fixed(0),
-                    ))],
-                },
-                Command::When {
+        hooks: vec![
+            ModifierHook::every_turn(
+                HookEvent::BeforeHandDraw,
+                vec![
+                    // `TurnsSeen = (TurnsSeen + 1) % 3`.
+                    Command::Relic(RelicCmd::ModifyListeningCounter(Amount::Fixed(1))),
+                    Command::When {
+                        otherwise: Vec::new(),
+                        condition: Condition::ListeningRelicCounterIs(3),
+                        then: vec![Command::Relic(RelicCmd::SetListeningCounter(
+                            Amount::Fixed(0),
+                        ))],
+                    },
+                ],
+            ),
+            ModifierHook::every_turn(
+                HookEvent::ModifyHandDraw,
+                vec![Command::When {
                     otherwise: Vec::new(),
                     condition: Condition::ListeningRelicCounterIs(0),
-                    then: vec![Command::CardPile(CardPileCmd::Draw {
-                        count: Amount::Fixed(1),
-                    })],
-                },
-            ],
-        )],
+                    then: vec![Command::Modify(ModifierCmd::Add(Amount::Fixed(1)))],
+                }],
+            ),
+        ],
         ..obtained_only("RELIC.PENDULUM", RelicRarity::Common)
     }
 }
@@ -5187,12 +5192,12 @@ fn cost_relics() -> Vec<RelicDefinition> {
             },
             ..obtained_only("RELIC.VELVET_CHOKER", RelicRarity::Ancient)
         },
-        // A fiddle draws two more on every hand draw, on the late pass, and
-        // refuses every other draw its owner's own turn would make.
+        // A fiddle draws two more on every hand draw and refuses every other
+        // draw its owner's own turn would make.
         RelicDefinition {
             stops_draws_on_its_own_side_turn: true,
             hooks: vec![ModifierHook::every_turn(
-                HookEvent::ModifyHandDrawLate,
+                HookEvent::ModifyHandDraw,
                 vec![Command::Modify(ModifierCmd::Add(Amount::Fixed(2)))],
             )],
             ..obtained_only("RELIC.FIDDLE", RelicRarity::Ancient)

@@ -38,6 +38,7 @@ fn power(model_id: &str, power_type: PowerType, stack_type: PowerStackType) -> P
         keeps_block: false,
         stops_draws_outside_hand_draw: false,
         keeps_hand: false,
+        grants_an_extra_turn: false,
         removed_when_applier_dies: false,
         keeps_owners_powers_on_death: false,
         survives_owner_death: false,
@@ -2026,13 +2027,14 @@ fn free_attack_power() -> PowerDefinition {
     }
 }
 
-/// Regeneration heals its owner at the end of every turn it takes part in, and
-/// counts itself down for it.
+/// Regeneration heals its owner as every turn it takes part in begins to end,
+/// ahead of the orbs, the cards still held and Doom, and counts itself down
+/// for it.
 fn regen_power() -> PowerDefinition {
     PowerDefinition {
         hooks: vec![
             ModifierHook::every_turn(
-                HookEvent::AfterSideTurnEnd,
+                HookEvent::BeforeSideTurnEndEarly,
                 vec![
                     Command::Creature(CreatureCmd::Heal {
                         target: CreatureSelector::Owner,
@@ -2045,6 +2047,22 @@ fn regen_power() -> PowerDefinition {
         ],
         ..counter("POWER.REGEN_POWER", PowerType::Buff)
     }
+}
+
+/// Doom's kill: the first doomed creature of its owner's side takes the whole
+/// doomed list down with it, unless the fight is already over or ending.
+fn doom_kill() -> Vec<Command> {
+    vec![Command::When {
+        otherwise: Vec::new(),
+        condition: Condition::All(vec![
+            Condition::CombatIsNotOverOrEnding,
+            Condition::OwnerIsAlive,
+            Condition::OwnerIsTheFirstDoomedOnItsSide,
+        ]),
+        then: vec![Command::Creature(CreatureCmd::DoomKill {
+            target: CreatureSelector::DoomedOnOwnersSide,
+        })],
+    }]
 }
 
 /// A speed potion lends dexterity for the turn, the way flex lends strength.
@@ -4165,6 +4183,7 @@ pub fn defect_powers() -> Vec<PowerDefinition> {
                         then: vec![Command::Orb(sts2_engine::OrbCmd::Passive {
                             orb: sts2_engine::OrbSelector::Front,
                             target: None,
+                            counted: false,
                         })],
                     }],
                 }],
@@ -4411,18 +4430,25 @@ fn gremlin_merc_powers() -> Vec<PowerDefinition> {
             hooks: vec![
                 ModifierHook::every_turn(
                     HookEvent::AfterDeath,
+                    // The fat gremlin is rolled first and carries its heist
+                    // before it joins; the sneaky one is brought in ahead of
+                    // it, rolling its health without the fat one's.
                     vec![
+                        Command::Creature(CreatureCmd::Reserve {
+                            monster: id("MONSTER.FAT_GREMLIN"),
+                            slot: sts2_engine::SpawnSlot::Named("fat".to_owned()),
+                        }),
                         Command::Creature(CreatureCmd::Add {
                             monster: id("MONSTER.SNEAKY_GREMLIN"),
                             slot: sts2_engine::SpawnSlot::Named("sneaky".to_owned()),
                             initial_state: None,
                             then: Vec::new(),
                         }),
-                        Command::Creature(CreatureCmd::Add {
+                        Command::Creature(CreatureCmd::AddReserved {
                             monster: id("MONSTER.FAT_GREMLIN"),
-                            slot: sts2_engine::SpawnSlot::Named("fat".to_owned()),
                             initial_state: None,
-                            then: vec![Command::Power(PowerCmd::Apply {
+                            then: Vec::new(),
+                            prepare: vec![Command::Power(PowerCmd::Apply {
                                 // The heist is aimed at the same purse the
                                 // thievery was, which is what it hands back.
                                 marks: Some(CreatureSelector::AllOpponents),
@@ -5089,23 +5115,24 @@ pub fn necrobinder_powers() -> Vec<PowerDefinition> {
         // Doom is a countdown on somebody else's life: as the side it is on
         // ends its turn, every creature there carrying at least as much of it
         // as it has HP left goes down, and the whole list goes down from the
-        // first of them rather than one at a time.
+        // first of them rather than one at a time. The enemy side's falls
+        // before that side's turn ends; the player's falls once the player's
+        // turn has ended, behind the orbs, the cards still held and the
+        // flush, so a fight those won is already over.
         PowerDefinition {
             hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::BeforeSideTurnEnd,
-                    vec![Command::When {
-                        otherwise: Vec::new(),
-                        condition: Condition::All(vec![
-                            Condition::OwnerIsAlive,
-                            Condition::OwnerIsTheFirstDoomedOnItsSide,
-                        ]),
-                        then: vec![Command::Creature(CreatureCmd::DoomKill {
-                            target: CreatureSelector::DoomedOnOwnersSide,
-                        })],
-                    }],
-                )
-                .when(HookCondition::OwnerIsParticipant),
+                ModifierHook::every_turn(HookEvent::BeforeSideTurnEnd, doom_kill()).when(
+                    HookCondition::All(vec![
+                        HookCondition::OwnerIsParticipant,
+                        HookCondition::EnemySideTurn,
+                    ]),
+                ),
+                ModifierHook::every_turn(HookEvent::AfterSideTurnEnd, doom_kill()).when(
+                    HookCondition::All(vec![
+                        HookCondition::OwnerIsParticipant,
+                        HookCondition::PlayerSideTurn,
+                    ]),
+                ),
             ],
             ..counter("POWER.DOOM_POWER", PowerType::Debuff)
         },

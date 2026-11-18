@@ -774,6 +774,14 @@ impl ContentRegistry {
 pub struct Snapshot(GameState);
 
 /// Constructors for the arguments a dispatch site hands its listeners.
+/// How one call fires the passives of the orbs it names.
+#[derive(Clone, Copy, Debug)]
+struct OrbPassiveRounds {
+    target: Option<CreatureCombatId>,
+    counted: bool,
+    repeats_left: Option<i32>,
+}
+
 trait HookContextExt {
     fn none() -> Self;
     fn side(side: CombatSide) -> Self;
@@ -5456,6 +5464,7 @@ impl Simulator {
             played_card_energy_spent: 0,
             played_card_play_index: 0,
             taking_extra_turn: false,
+            reserved_arrivals: Vec::new(),
             round: 1,
             side: CombatSide::Player,
             player: PlayerCombatState {
@@ -5730,6 +5739,22 @@ impl Simulator {
         initial_state: Option<&str>,
         owner: Option<CreatureCombatId>,
     ) -> Result<Option<CreatureCombatId>, EngineError> {
+        let Some(arrival) = self.reserve_arrival(model_id, slot, owner)? else {
+            return Ok(None);
+        };
+        self.attach_arrival(arrival, initial_state, None).map(Some)
+    }
+
+    /// The first half of bringing a monster in: the slot it stands in, its
+    /// health rolled against the enemies already standing, and the next
+    /// identifier. Nothing is put down yet. A lay that finds no slot to lay
+    /// into rolls nothing.
+    fn reserve_arrival(
+        &mut self,
+        model_id: &ModelId,
+        slot: &crate::SpawnSlot,
+        owner: Option<CreatureCombatId>,
+    ) -> Result<Option<crate::ReservedArrival>, EngineError> {
         let slots = self.encounter_slots();
         let slot_name = match slot {
             crate::SpawnSlot::Unslotted => None,
@@ -5779,7 +5804,37 @@ impl Simulator {
         // arrival never takes a dead creature's id.
         let next_id = self.combat()?.next_creature_id;
         self.combat_mut()?.next_creature_id += 1;
-        let id = CreatureCombatId::from(next_id);
+        Ok(Some(crate::ReservedArrival {
+            model_id: model_id.clone(),
+            id: CreatureCombatId::from(next_id),
+            hp: initial_hp,
+            slot,
+            slot_name,
+        }))
+    }
+
+    /// The second half: the arrival stands in the fight. What `prepare` names
+    /// runs on it once it stands and before its own arrival is settled, with
+    /// the caller as owner and the arrival as target.
+    fn attach_arrival(
+        &mut self,
+        arrival: crate::ReservedArrival,
+        initial_state: Option<&str>,
+        prepare: Option<(&[Command], &CommandContext)>,
+    ) -> Result<CreatureCombatId, EngineError> {
+        let crate::ReservedArrival {
+            model_id,
+            id,
+            hp: initial_hp,
+            slot,
+            slot_name,
+        } = arrival;
+        let model_id = &model_id;
+        let monster = self
+            .content
+            .monster(model_id)
+            .cloned()
+            .ok_or_else(|| unsupported_content(model_id))?;
         let opening = initial_state.map_or_else(|| monster.initial_state.clone(), str::to_owned);
         let logged = monster
             .state(&opening)
@@ -5823,9 +5878,12 @@ impl Simulator {
         if slot >= 0 {
             self.sort_enemies_by_slot()?;
         }
+        let mut joining_events = Vec::new();
+        if let Some((commands, caller)) = prepare {
+            self.run_commands(commands, &caller.clone().at(id), &mut joining_events)?;
+        }
         let player_id = self.combat()?.player.creature_id;
         let context = CommandContext::by(id).at(player_id);
-        let mut joining_events = Vec::new();
         self.run_commands(&monster.on_added, &context, &mut joining_events)?;
         // Record the arrival before later effects can remove the creature.
         // One multi-hit attack can spawn and kill an entire second phase
@@ -5849,7 +5907,7 @@ impl Simulator {
             self.roll_enemy_move(id)?;
         }
         self.refresh_intent_damage()?;
-        Ok(Some(id))
+        Ok(id)
     }
 
     /// The creature standing as this player's pet, alive or down.
@@ -6296,21 +6354,6 @@ impl Simulator {
         Ok(stopped || self.combat_is_over())
     }
 
-    /// One orb's passive, fired outside its turn trigger. A passive asked for
-    /// this way does nothing once the fight is over or ending.
-    fn run_orb_passive(
-        &mut self,
-        orb: sts2_core::OrbInstanceId,
-        target: Option<CreatureCombatId>,
-        context: &CommandContext,
-        events: &mut Vec<SemanticEvent>,
-    ) -> Result<bool, EngineError> {
-        if self.combat_is_over_or_ending() {
-            return Ok(false);
-        }
-        self.fire_orb_passive(orb, target, context, events)
-    }
-
     /// One orb's passive, run as its own turn trigger runs it: nothing short
     /// of the fight being gone stops it, so an orb behind the one whose passive
     /// won the fight still fires.
@@ -6365,6 +6408,23 @@ impl Simulator {
                 return Ok(());
             }
             let orb = frame.orbs[frame.index];
+            // An orb answers one of the two turn triggers and does nothing at
+            // all for the other: an orb that answers the opposite trigger is
+            // walked past without being counted. Every orb the build declares
+            // answers exactly one, and each answers it by counting its triggers
+            // and running its own passive that many times. The walk goes on past
+            // a passive that won the fight, and stops only once the fight is
+            // gone.
+            let answers = self
+                .orb_queue()?
+                .get(orb)
+                .and_then(|held| self.content.orb(&held.model_id))
+                .is_some_and(|definition| definition.turn_trigger == frame.trigger);
+            if !answers {
+                frame.index += 1;
+                frame.triggers_left = None;
+                continue;
+            }
             let triggers = if let Some(left) = frame.triggers_left {
                 left
             } else {
@@ -6379,21 +6439,7 @@ impl Simulator {
                 }
                 left
             };
-            // An orb answers one of the two turn triggers and does nothing at
-            // all for the other, so an orb that answers the opposite trigger is
-            // walked to, counted for, and then does nothing. Every orb the build
-            // declares answers exactly one, and each answers it by running its
-            // own passive. The walk goes on past a passive that won the fight,
-            // and stops only once the fight is gone.
-            let answers = self
-                .orb_queue()?
-                .get(orb)
-                .and_then(|held| self.content.orb(&held.model_id))
-                .is_some_and(|definition| definition.turn_trigger == frame.trigger);
             for remaining in (0..triggers).rev() {
-                if !answers {
-                    break;
-                }
                 let context = CommandContext::default();
                 self.fire_orb_passive(orb, None, &context, events)?;
                 if self.state.combat.is_none() && !self.suspended() {
@@ -6510,7 +6556,11 @@ impl Simulator {
             crate::OrbCmd::EvokeLast { dequeue } => {
                 self.evoke_orb_at(OrbEnd::Back, *dequeue, context, events)
             }
-            crate::OrbCmd::Passive { orb, target } => {
+            crate::OrbCmd::Passive {
+                orb,
+                target,
+                counted,
+            } => {
                 let target = match target {
                     Some(selector) => self
                         .resolve_creatures(selector.clone(), context)?
@@ -6519,7 +6569,12 @@ impl Simulator {
                     None => None,
                 };
                 let orbs = self.select_orbs(orb, context)?;
-                self.run_orb_passive_rounds(&orbs, target, context, events)
+                let rounds = OrbPassiveRounds {
+                    target,
+                    counted: *counted,
+                    repeats_left: None,
+                };
+                self.run_orb_passive_rounds(&orbs, rounds, context, events)
             }
             crate::OrbCmd::SetValue { orb, field, amount } => {
                 let amount = self.resolve_amount(amount, context)?;
@@ -9712,7 +9767,29 @@ impl Simulator {
     fn run_pending_reactions(&mut self) -> Result<(), EngineError> {
         let pending: Vec<Effect> = self.combat()?.queue.iter().cloned().collect();
         let mut events = Vec::new();
+        // A pass of a card's play that has not yet been announced does not
+        // begin once the fight is over: its body, its enchantment and its
+        // after-card-played pass are dropped, up to where the card is put down.
+        let mut unbegun_passes_of: Option<CardInstanceId> = None;
         for effect in pending {
+            match &effect {
+                Effect::AnnounceCardPlay { card_id, .. } => {
+                    unbegun_passes_of = Some(*card_id);
+                }
+                Effect::RunCardBody { card_id, .. }
+                | Effect::RunEnchantmentOnPlay { card_id, .. }
+                    if unbegun_passes_of == Some(*card_id) =>
+                {
+                    continue;
+                }
+                Effect::DispatchModifierHooks(crate::HookEvent::AfterCardPlayed)
+                    if unbegun_passes_of.is_some() =>
+                {
+                    continue;
+                }
+                Effect::MovePlayedCard { .. } => unbegun_passes_of = None,
+                _ => {}
+            }
             match effect {
                 // A command still reads its own dice; what it would hand over
                 // does not arrive, because each command that has an
@@ -10812,7 +10889,16 @@ impl Simulator {
                 rest,
                 target,
                 context,
-            } => self.run_orb_passive_rounds(&rest, target, &context, events),
+                counted,
+                repeats_left,
+            } => {
+                let rounds = OrbPassiveRounds {
+                    target,
+                    counted,
+                    repeats_left,
+                };
+                self.run_orb_passive_rounds(&rest, rounds, &context, events)
+            }
             Loop::Channel { model_id } => self.finish_channel(&model_id, events),
             Loop::AutoPlayCards {
                 rest,
@@ -11040,29 +11126,54 @@ impl Simulator {
 
     /// The passive over the orbs one call fires. The target was resolved before
     /// the pass began, so the frame carries it resolved.
+    ///
+    /// Each orb is asked whether the fight is over or ending once, before its
+    /// passive. A counted passive then fires as many times as the trigger-count
+    /// pass says, without asking again between them; an uncounted one fires
+    /// once.
     fn run_orb_passive_rounds(
         &mut self,
         orbs: &[sts2_core::OrbInstanceId],
-        target: Option<CreatureCombatId>,
+        rounds: OrbPassiveRounds,
         context: &CommandContext,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
         for (index, orb) in orbs.iter().enumerate() {
-            if self.run_orb_passive(*orb, target, context, events)? {
-                return Ok(true);
-            }
-            if self.queue_is_held() {
-                let rest = orbs[index + 1..].to_vec();
-                if !rest.is_empty() {
-                    self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::Loop(
-                        Box::new(crate::LoopFrame::OrbPassive {
-                            rest,
-                            target,
-                            context: context.clone(),
-                        }),
-                    ))))?;
+            let resumed = if index == 0 {
+                rounds.repeats_left
+            } else {
+                None
+            };
+            let repeats = match resumed {
+                Some(left) => left,
+                None if self.combat_is_over_or_ending() => continue,
+                None if rounds.counted => self.modify_orb_trigger_count(*orb)?,
+                None => 1,
+            };
+            for fired in 0..repeats {
+                if self.fire_orb_passive(*orb, rounds.target, context, events)? {
+                    return Ok(true);
                 }
-                return Ok(false);
+                if self.queue_is_held() {
+                    let left = repeats - fired - 1;
+                    let rest = if left > 0 {
+                        orbs[index..].to_vec()
+                    } else {
+                        orbs[index + 1..].to_vec()
+                    };
+                    if !rest.is_empty() {
+                        self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::Loop(
+                            Box::new(crate::LoopFrame::OrbPassive {
+                                rest,
+                                target: rounds.target,
+                                context: context.clone(),
+                                counted: rounds.counted,
+                                repeats_left: (left > 0).then_some(left),
+                            }),
+                        ))))?;
+                    }
+                    return Ok(false);
+                }
             }
         }
         Ok(false)
@@ -11838,6 +11949,42 @@ impl Simulator {
                     // What follows a creature being added, with the caller still
                     // the owner and what it just made the target.
                     let inner = context.clone().at(arrival);
+                    return self.run_commands(then, &inner, events);
+                }
+            }
+            CreatureCmd::Reserve { monster, slot } => {
+                if self.combat_is_ending() {
+                    return Ok(false);
+                }
+                if let Some(arrival) = self.reserve_arrival(monster, slot, context.owner)? {
+                    self.combat_mut()?.reserved_arrivals.push(arrival);
+                }
+            }
+            CreatureCmd::AddReserved {
+                monster,
+                initial_state,
+                prepare,
+                then,
+            } => {
+                let held = self
+                    .combat()?
+                    .reserved_arrivals
+                    .iter()
+                    .position(|arrival| arrival.model_id == *monster);
+                let Some(index) = held else {
+                    return Ok(false);
+                };
+                let arrival = self.combat_mut()?.reserved_arrivals.remove(index);
+                if self.combat_is_ending() {
+                    return Ok(false);
+                }
+                let arrived = self.attach_arrival(
+                    arrival,
+                    initial_state.as_deref(),
+                    Some((prepare, context)),
+                )?;
+                if !then.is_empty() {
+                    let inner = context.clone().at(arrived);
                     return self.run_commands(then, &inner, events);
                 }
             }
@@ -13444,6 +13591,10 @@ impl Simulator {
     /// what is owed is held on a frame of its own rather than queued up front
     /// the way a manual play queues its tail; the frame says how many passes
     /// are left and where in the interrupted one it stopped.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one loop over a pass's body, enchantment and announcement"
+    )]
     fn run_auto_play_body(
         &mut self,
         frame: &crate::AutoPlayFrame,
@@ -13492,6 +13643,11 @@ impl Simulator {
         let mut won = false;
         let mut step = step;
         for index in 0..play_count {
+            // A pass that has not begun does not begin once the fight is over
+            // or ending; one a screen interrupted runs on from where it stood.
+            if step == crate::AutoPlayStep::Body && self.combat_is_over_or_ending() {
+                break;
+            }
             let plays_left = play_count - index;
             let (card, commands) = self.card_as_this_pass_reads_it(&card, &commands);
             if step == crate::AutoPlayStep::Body {
@@ -17495,6 +17651,7 @@ impl Simulator {
         Ok(match condition {
             // Whether the pet is standing at all, which is the whole of the
             // test: it is there, and it is alive.
+            Condition::CombatIsNotOverOrEnding => !self.combat_is_over_or_ending(),
             Condition::PetIsStanding => context
                 .owner
                 .and_then(|owner| self.pet_of(owner))
@@ -19432,12 +19589,16 @@ impl Simulator {
         self.state.run_player.potions[slot] = None;
         // A potion that uses itself is still a potion used: the before and
         // after passes run around its body, inline, as for any other, and the
-        // hand is looked at for being empty once it is done.
+        // hand is looked at for being empty once it is done — unless its owner
+        // is still dead behind it.
         self.announce_play_target(crate::HookEvent::BeforePotionUsed, target_id)?;
         let context = CommandContext::by(target_id).at(target_id);
         self.run_commands(&definition.effects, &context, events)?;
-        self.dispatch_hooks(&[crate::HookEvent::AfterPotionUsed], &HookContext::none())?;
-        self.check_for_empty_hand()?;
+        let player_id = self.combat()?.player.creature_id;
+        if self.creature(player_id)?.alive() {
+            self.dispatch_hooks(&[crate::HookEvent::AfterPotionUsed], &HookContext::none())?;
+            self.check_for_empty_hand()?;
+        }
         self.emit(
             "combat.use_potion",
             BTreeMap::from([("potion".to_owned(), json!(model_id.to_string()))]),
@@ -19744,7 +19905,7 @@ impl Simulator {
     /// stops it where it stands: the build reads the answer off whether the
     /// fight is still in progress, in the guard around the next step, so a fight
     /// won at the end of a turn never reaches the enemy's. The points are the
-    /// two inside phase one, the one the turn start makes before the enemy side
+    /// three inside phase one, the one the turn start makes before the enemy side
     /// acts, the one the enemy turn makes after each enemy, the one the enemy
     /// turn end makes before it switches back, and the one the turn start makes
     /// as the player's own turn opens. Phase two makes none of its own.
@@ -19863,9 +20024,11 @@ impl Simulator {
     /// the before-turn-end listeners, and what the hand does to whoever still
     /// holds it. Nothing has been put down yet.
     ///
-    /// Two of the chain's win checks are here: one right after the
+    /// Three of the chain's win checks are here: one right after the
     /// before-turn-end passes, which is what keeps the hand from acting in a
-    /// fight that is already over, and one as the last thing the phase does.
+    /// fight that is already over, one once the turn end is done, which keeps
+    /// a fight it won from reaching the pass before the flush, and one as the
+    /// last thing the phase does.
     fn end_player_turn_phase_one(
         &mut self,
         from: crate::EndTurnPhaseOneStep,
@@ -19914,6 +20077,7 @@ impl Simulator {
                     }
                     CombatOutcome::Unsettled
                 }
+                Step::TurnEndWinCheck => self.check_win_condition()?,
                 Step::BeforeFlush => {
                     self.dispatch_hooks(
                         &[
@@ -20093,20 +20257,29 @@ impl Simulator {
     }
 
     /// Whether an extra player turn is owed, which the build asks of every
-    /// player just as the player side is about to hand over. The only listener
-    /// that answers it is a relic, and it answers off what it declares rather
-    /// than a body of its own.
+    /// player just as the player side is about to hand over. A relic answers
+    /// off what it declares rather than a body of its own, and a power answers
+    /// yes while it stands on the player with stacks left.
     fn owes_an_extra_player_turn(&self) -> Result<bool, EngineError> {
         let turn = self.combat()?.player.turn;
-        Ok(self.state.run_player.relics.iter().any(|relic| {
-            !relic.melted
-                && !relic.latched
+        let player_id = self.combat()?.player.creature_id;
+        let by_a_power = self.creature(player_id)?.powers.iter().any(|instance| {
+            instance.amount > 0
                 && self
                     .content
-                    .relic(&relic.model_id)
-                    .and_then(|definition| definition.grants_an_extra_turn.as_ref())
-                    .is_some_and(|rule| !self.owner_has_played_a_card_this_turn(turn, rule))
-        }))
+                    .power(&instance.model_id)
+                    .is_some_and(|definition| definition.grants_an_extra_turn)
+        });
+        Ok(by_a_power
+            || self.state.run_player.relics.iter().any(|relic| {
+                !relic.melted
+                    && !relic.latched
+                    && self
+                        .content
+                        .relic(&relic.model_id)
+                        .and_then(|definition| definition.grants_an_extra_turn.as_ref())
+                        .is_some_and(|rule| !self.owner_has_played_a_card_this_turn(turn, rule))
+            }))
     }
 
     /// Whether the player has played a card this turn, as the extra-turn relic
@@ -20448,15 +20621,34 @@ impl Simulator {
     /// turn start to run while the question is still standing; the auto-pre-play
     /// phase is what waits, because it opens by waiting for the setup to
     /// finish.
+    /// Whether a creature takes part in the turn a hook context is about: it
+    /// stands on that side, and on an extra turn it is the player.
+    fn takes_part(
+        &self,
+        creature: CreatureCombatId,
+        context: &HookContext,
+    ) -> Result<bool, EngineError> {
+        Ok(context.side == Some(self.creature(creature)?.side)
+            && (!context.players_only || creature == self.combat()?.player.creature_id))
+    }
+
+    /// The context a side's turn start runs its passes with. An extra turn is
+    /// the players' alone: what stands beside them neither starts a turn nor
+    /// loses its block.
+    fn turn_start_context(&self, side: CombatSide) -> Result<HookContext, EngineError> {
+        Ok(HookContext {
+            players_only: side == CombatSide::Player && self.combat()?.taking_extra_turn,
+            ..HookContext::side(side)
+        })
+    }
+
     fn start_turn(&mut self, events: &mut Vec<SemanticEvent>) -> Result<(), EngineError> {
         let side = self.combat()?.side;
         // Nobody is in a phase while the sides are handing over.
         self.combat_mut()?.player.phase = crate::PlayerTurnPhase::None;
-        self.snapshot_power_amounts(side)?;
-        self.dispatch_hooks(
-            &[crate::HookEvent::BeforeSideTurnStart],
-            &HookContext::side(side),
-        )?;
+        let context = self.turn_start_context(side)?;
+        self.snapshot_power_amounts(&context)?;
+        self.dispatch_hooks(&[crate::HookEvent::BeforeSideTurnStart], &context)?;
         if side == CombatSide::Player {
             {
                 let combat = self.combat_mut()?;
@@ -20496,7 +20688,7 @@ impl Simulator {
                 self.roll_enemy_moves()?;
             }
         }
-        self.clear_block_for_side(side)?;
+        self.clear_block_for_side(&context)?;
         let setup_pending = if side == CombatSide::Player {
             self.run_setup_player_turn(
                 crate::SetupPlayerTurnStep::EnergyReset,
@@ -20558,12 +20750,13 @@ impl Simulator {
         setup_pending: bool,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<(), EngineError> {
+        let context = self.turn_start_context(side)?;
         self.dispatch_hooks(
             &[
                 crate::HookEvent::AfterSideTurnStart,
                 crate::HookEvent::AfterSideTurnStartLate,
             ],
-            &HookContext::side(side),
+            &context,
         )?;
         // The orbs that fire as a turn opens, once for every player starting
         // one, after the side's own listeners and before the auto-pre-play
@@ -20666,6 +20859,9 @@ impl Simulator {
                 )?,
                 Step::AutoPrePlay => {
                     self.combat_mut()?.player.phase = crate::PlayerTurnPhase::AutoPrePlay;
+                    self.check_for_empty_hand()?;
+                }
+                Step::AutoPrePlayHooks => {
                     self.dispatch_hooks(
                         &[
                             crate::HookEvent::AfterAutoPrePlayPhaseEnteredEarly,
@@ -20762,15 +20958,19 @@ impl Simulator {
     /// loop is also the wider of the two: it has no test on it at all, so a
     /// player who kept their block because it is their first turn is announced
     /// anyway.
-    fn clear_block_for_side(&mut self, side: CombatSide) -> Result<(), EngineError> {
+    fn clear_block_for_side(&mut self, context: &HookContext) -> Result<(), EngineError> {
+        let side = context.side.unwrap_or(CombatSide::Player);
         let player_id = self.combat()?.player.creature_id;
         let first_turn = self.combat()?.player.turn <= 1;
         let creatures: Vec<_> = self
             .combat()?
             .creatures
             .iter()
-            .filter(|creature| creature.side == side && creature.alive())
+            .filter(|creature| creature.alive())
             .map(|creature| creature.id)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|id| self.takes_part(*id, context).unwrap_or(false))
             .collect();
         // A player keeps whatever block they walked into the fight with on
         // their first turn. The test is on the creature, not on the side, so
@@ -20803,6 +21003,10 @@ impl Simulator {
     /// shuffled together, which is what a body that asks for a shuffle outright
     /// gets. `shuffle_if_necessary` is the guarded form the draw runs itself.
     fn shuffle_whole_draw_pile(&mut self) -> Result<(), EngineError> {
+        // A fight that is over or ending shuffles nothing.
+        if self.combat_is_over_or_ending() {
+            return Ok(());
+        }
         let standing = self.combat()?.player.piles.clone();
         let mut draw = {
             let combat = self.combat_mut()?;
@@ -20820,9 +21024,30 @@ impl Simulator {
         // told that this is not the fight's opening shuffle, and the
         // after-shuffle pass follows it.
         self.dispatch_shuffle_order_pass(&standing)?;
+        self.announce_shuffled_cards(&standing)?;
         // The after-shuffle pass is the last thing a shuffle does, once every
         // card is standing in the draw pile.
         self.dispatch_hooks(&[crate::HookEvent::AfterShuffle], &HookContext::none())
+    }
+
+    /// The cards a shuffle brought over from the discard pile each change
+    /// piles, announced in the order they now stand in once the whole draw pile
+    /// is down. The cards that were in the draw pile already stay where they
+    /// were and say nothing.
+    fn announce_shuffled_cards(&mut self, standing: &crate::Piles) -> Result<(), EngineError> {
+        let moved: Vec<CardInstanceId> = self
+            .combat()?
+            .player
+            .piles
+            .draw
+            .iter()
+            .filter(|card| standing.discard.iter().any(|before| before.id == card.id))
+            .map(|card| card.id)
+            .collect();
+        for card_id in moved {
+            self.announce_card_changed_piles(card_id, Some(PileName::Discard))?;
+        }
+        Ok(())
     }
 
     /// An empty draw pile takes the discard pile, shuffled. Returns whether the
@@ -20832,7 +21057,7 @@ impl Simulator {
         if !self.combat()?.player.piles.draw.is_empty() {
             return Ok(true);
         }
-        if self.combat()?.player.piles.discard.is_empty() {
+        if self.combat()?.player.piles.discard.is_empty() || self.combat_is_over_or_ending() {
             return Ok(false);
         }
         let standing = self.combat()?.player.piles.clone();
@@ -20847,6 +21072,7 @@ impl Simulator {
             .shuffle(&mut draw);
         self.combat_mut()?.player.piles.draw = draw;
         self.dispatch_shuffle_order_pass(&standing)?;
+        self.announce_shuffled_cards(&standing)?;
         self.dispatch_hooks(&[crate::HookEvent::AfterShuffle], &HookContext::none())?;
         // A listener on the shuffle may have taken back what the shuffle put
         // down — a Stratagem with as many stacks as the pile has cards empties
@@ -23644,6 +23870,10 @@ impl Simulator {
         card: Option<CardInstanceId>,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<i32, EngineError> {
+        // A creature that has died gains nothing, and nothing hears of it.
+        if !self.creature(target)?.alive() {
+            return Ok(0);
+        }
         let amount = self.modify_block(target, amount, props, card)?;
         self.creature_mut(target)?.block += amount.max(0);
         // The block-gain history takes a gain that came to something. Only a
@@ -25179,11 +25409,9 @@ impl Simulator {
                     .and_then(|run| run.active_room.as_ref()),
                 Some(ActiveRoom::Shop { .. })
             ),
-            crate::HookCondition::OwnerIsParticipant => {
-                context.side == Some(self.creature(owner)?.side)
-            }
+            crate::HookCondition::OwnerIsParticipant => self.takes_part(owner, context)?,
             crate::HookCondition::OwnerIsNotParticipant => {
-                context.side.is_some() && context.side != Some(self.creature(owner)?.side)
+                context.side.is_some() && !self.takes_part(owner, context)?
             }
             // The orb belongs to the listener's own owner. Every orb in a fight
             // belongs to the one player here, so what this asks is that the
@@ -28197,9 +28425,18 @@ impl Simulator {
         Ok(())
     }
 
-    fn snapshot_power_amounts(&mut self, side: CombatSide) -> Result<(), EngineError> {
+    fn snapshot_power_amounts(&mut self, context: &HookContext) -> Result<(), EngineError> {
+        let starting: Vec<CreatureCombatId> = self
+            .combat()?
+            .creatures
+            .iter()
+            .map(|creature| creature.id)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|id| self.takes_part(*id, context).unwrap_or(false))
+            .collect();
         for creature in &mut self.combat_mut()?.creatures {
-            if creature.side == side {
+            if starting.contains(&creature.id) {
                 for power in &mut creature.powers {
                     power.amount_on_turn_start = power.amount;
                 }
