@@ -6,7 +6,7 @@ load the game. Given the same run configuration and the same decisions, it aims
 to produce the same legal choices, the same RNG consumption, and the same
 gameplay state as the real build, and to say so out loud when it cannot.
 
-The supported build is `v0.107.1`, commit `59260271`, model hash `3954186980`,
+The supported build is `v0.111.1`, commit `cc1f9462`, model hash `1568834832`,
 as locked in `manifests/compatibility.json`. Anything else fails rather than
 approximating.
 
