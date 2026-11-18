@@ -24873,6 +24873,13 @@ impl Simulator {
         {
             self.combat_mut()?.fatal_kill_this_play = true;
         }
+        // Read while the dead still carry their powers: a minion is no primary
+        // enemy.
+        let primary_enemy_died = newly_dead.iter().any(|id| {
+            self.creature(*id).is_ok_and(|creature| {
+                creature.side == CombatSide::Enemy && !self.is_secondary_enemy(creature)
+            })
+        });
         for id in &reviving {
             if !self.creature(*id)?.death_handled {
                 self.hold_dead_creature(*id)?;
@@ -24968,6 +24975,29 @@ impl Simulator {
                 || reviving.contains(&creature.id)
         });
         self.emit("creature.death", BTreeMap::new(), events);
+        // A primary enemy going down with nothing but minions left beside it
+        // takes them with it, inside its own death, so nothing that runs after
+        // the blow finds one standing. Their deaths settle the same way.
+        if primary_enemy_died {
+            let left: Vec<CreatureCombatId> = self
+                .combat()?
+                .creatures
+                .iter()
+                .filter(|creature| creature.side == CombatSide::Enemy && creature.alive())
+                .map(|creature| creature.id)
+                .collect();
+            let only_minions = !left.is_empty()
+                && left.iter().all(|id| {
+                    self.creature(*id)
+                        .is_ok_and(|creature| self.is_secondary_enemy(creature))
+                });
+            if only_minions {
+                for id in left {
+                    self.creature_mut(id)?.current_hp = 0;
+                }
+                return self.cleanup_dead(events);
+            }
+        }
         self.combat_is_won()
     }
 
