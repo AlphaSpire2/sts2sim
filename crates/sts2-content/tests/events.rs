@@ -3058,3 +3058,71 @@ fn a_crystal_spheres_gold_costs_the_boards_stream_a_read() {
     assert_eq!(offered.rewards[0].fingerprint.gold_amount, 10);
     assert_eq!(event_die(&with_gold) - before, 1, "one read for the gold");
 }
+
+/// Darv offers Ectoplasm and Sozu in the second act only, each as a slot of
+/// its own, and Philosopher's Stone and Velvet Choker from the second act on.
+#[test]
+fn darv_offers_each_act_relic_in_the_acts_it_belongs_to() {
+    const SEEDS: [&str; 40] = [
+        "DARV00000000",
+        "DARV00000001",
+        "DARV00000002",
+        "DARV00000003",
+        "DARV00000004",
+        "DARV00000005",
+        "DARV00000006",
+        "DARV00000007",
+        "DARV00000008",
+        "DARV00000009",
+        "DARV00000010",
+        "DARV00000011",
+        "DARV00000012",
+        "DARV00000013",
+        "DARV00000014",
+        "DARV00000015",
+        "DARV00000016",
+        "DARV00000017",
+        "DARV00000018",
+        "DARV00000019",
+        "DARV00000020",
+        "DARV00000021",
+        "DARV00000022",
+        "DARV00000023",
+        "DARV00000024",
+        "DARV00000025",
+        "DARV00000026",
+        "DARV00000027",
+        "DARV00000028",
+        "DARV00000029",
+        "DARV00000030",
+        "DARV00000031",
+        "DARV00000032",
+        "DARV00000033",
+        "DARV00000034",
+        "DARV00000035",
+        "DARV00000036",
+        "DARV00000037",
+        "DARV00000038",
+        "DARV00000039",
+    ];
+    let offered = |act: usize| -> std::collections::BTreeSet<String> {
+        SEEDS
+            .iter()
+            .flat_map(|seed| option_ids(&Visit::new("EVENT.DARV").seed(seed).act(act).enter()))
+            .collect()
+    };
+    let has = |options: &std::collections::BTreeSet<String>, relic: &str| {
+        options.contains(&format!("DARV.pages.INITIAL.options.{relic}"))
+    };
+    let second = offered(1);
+    for relic in ["ECTOPLASM", "SOZU", "PHILOSOPHERS_STONE", "VELVET_CHOKER"] {
+        assert!(has(&second, relic), "{relic} in the second act");
+    }
+    let third = offered(2);
+    for relic in ["PHILOSOPHERS_STONE", "VELVET_CHOKER"] {
+        assert!(has(&third, relic), "{relic} in the third act");
+    }
+    for relic in ["ECTOPLASM", "SOZU"] {
+        assert!(!has(&third, relic), "{relic} stays in the second act");
+    }
+}

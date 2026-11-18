@@ -1583,7 +1583,7 @@ fn ancients_and_multiplayer() -> Vec<CardDefinition> {
                 1,
                 vec![channel(PLASMA)],
             )))),
-            sts2_engine::CardRarity::Rare,
+            sts2_engine::CardRarity::Uncommon,
         ),
         rarity(
             exhausting(upgrading(

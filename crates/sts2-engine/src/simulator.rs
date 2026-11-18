@@ -4007,10 +4007,7 @@ impl Simulator {
             .ok_or_else(|| EngineError::new(ErrorCode::WrongDecisionContext))?
             .current_act;
         let mut options = Vec::new();
-        for group in groups
-            .iter()
-            .filter(|group| group.only_in_act.is_none_or(|only| only == act))
-        {
+        for group in groups.iter().filter(|group| group.acts.includes(act)) {
             let Some(relic) = rng
                 .next_item(&group.relics)
                 .map_err(|error| {
@@ -7717,8 +7714,8 @@ impl Simulator {
             } else {
                 0.0
             };
-        // A white beast statue makes the answer yes whatever the roll came to,
-        // and the roll still happens.
+        // A white beast statue makes the answer yes before anything is rolled:
+        // no draw is spent and the odds stay where they were.
         let forced = self.potion_reward_is_forced();
         // The gold proportion, which only a monster room's purse is held to: an
         // elite and a boss pay their whole purse however many of their monsters
@@ -7746,10 +7743,11 @@ impl Simulator {
         };
         let (minimum_gold, maximum_gold) = (scaled(spec.minimum_gold), scaled(spec.maximum_gold));
         let rng = self.state.player_rng.stream_mut(PlayerStream::Rewards);
-        let potion_roll = rng
-            .next_float(0.0, 1.0)
-            .expect("ordered unit range is valid");
-        let include_potion = forced || potion_roll < potion_threshold;
+        let include_potion = forced
+            || rng
+                .next_float(0.0, 1.0)
+                .expect("ordered unit range is valid")
+                < potion_threshold;
         // A purse held to nothing is not built at all, so nothing is rolled for
         // it either.
         let gold = proportion
@@ -7764,10 +7762,12 @@ impl Simulator {
         let potion = include_potion
             .then(|| generate_reward_potion(rng, pools))
             .transpose()?;
-        self.state
-            .run_player
-            .odds
-            .record_potion_reward(include_potion);
+        if !forced {
+            self.state
+                .run_player
+                .odds
+                .record_potion_reward(include_potion);
+        }
         let creation = reward_creation(pools, spec.rarity_odds, true);
         let offered_cards = self.create_cards(&creation)?;
         let listed = self.creation_pool_ids(&creation);
@@ -9272,7 +9272,7 @@ impl Simulator {
         for index in indexes.into_iter().rev() {
             self.take_deck_card(index);
         }
-        self.gain_max_hp_out_of_combat(9);
+        self.gain_max_hp_out_of_combat(5);
     }
 
     /// Gaining maximum HP outside a fight: the maximum rises and the same amount
@@ -29525,10 +29525,12 @@ fn roll_card_rarity(
                 crate::CardRarity::Common
             }
         }
+        // The base odds stack the same way: an uncommon is anything under the
+        // two shares together.
         None => {
             if roll < base_rare {
                 crate::CardRarity::Rare
-            } else if roll < base_uncommon {
+            } else if roll < base_uncommon + base_rare {
                 crate::CardRarity::Uncommon
             } else {
                 crate::CardRarity::Common
@@ -31194,6 +31196,26 @@ fn enchant_fingerprint(
             ));
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod rarity_roll_tests {
+    use super::roll_card_rarity;
+    use sts2_rng::Rng;
+
+    /// The base odds stack the uncommon share on top of the rare one: an
+    /// elite's rare tenth and uncommon four tenths put a roll of 0.43 among
+    /// the uncommons.
+    #[test]
+    fn base_odds_stack_the_uncommon_share_on_the_rare_one() {
+        // This seed's first roll is 0.4277.
+        let mut rng = Rng::new(23);
+        assert_eq!(
+            roll_card_rarity(&mut rng, crate::RarityOdds::EliteEncounter, None, 0),
+            crate::CardRarity::Uncommon
+        );
+        assert_eq!(rng.counter(), 1);
     }
 }
 

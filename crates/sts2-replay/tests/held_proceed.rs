@@ -435,6 +435,8 @@ fn walks_that_drink_on_the_map_never_write_the_belt_after_a_proceed() {
         "QEY5K1P4LY",
         "A1B2C3D4E5",
         "ZXCVBNMASD",
+        "HPWALK000000",
+        "HPWALK000025",
     ] {
         let mut walked = sts2_content::standard_ironclad_run_at(seed, 0).expect("seeded run");
         let mut writer = ScriptWriter::open(&walked, "test/1", seed, 0).expect("the run opens");

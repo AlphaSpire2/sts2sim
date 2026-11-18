@@ -1850,10 +1850,12 @@ fn the_reward_relics_add_an_offer_to_the_room_they_name() {
     );
 }
 
-/// A white beast statue makes every fight pay a potion.
+/// A white beast statue makes every fight pay a potion, and it does so before
+/// the chance is rolled: the chance stays where it stood.
 #[test]
 fn a_white_beast_statue_forces_a_potion() {
     let mut simulator = run_winning_a_fight(&["RELIC.WHITE_BEAST_STATUE"], true);
+    let chance = simulator.state().run_player.odds.potion_reward();
     win_the_fight(&mut simulator);
     assert_eq!(
         offered_rewards(&simulator)
@@ -1862,6 +1864,7 @@ fn a_white_beast_statue_forces_a_potion() {
             .count(),
         1
     );
+    assert_eq!(simulator.state().run_player.odds.potion_reward(), chance);
 }
 
 /// The eggs upgrade every card of their type on a card reward.
@@ -5653,7 +5656,7 @@ fn the_cook_is_worked_a_pick_at_a_time() {
         simulator.decision()
     );
     assert_eq!(simulator.state().run_player.deck.len(), deck - 2);
-    assert_eq!(simulator.state().run_player.max_hp, max_hp + 9);
+    assert_eq!(simulator.state().run_player.max_hp, max_hp + 5);
 }
 
 /// Taking an option never leaves the room. What it does is spend the option:
@@ -5740,10 +5743,10 @@ fn a_girya_is_lifted_three_times() {
     assert_eq!(rest_options(&spent), ["HEAL", "SMITH"]);
 }
 
-/// A meat cleaver's cook takes two cards out of the deck for nine more maximum
+/// A meat cleaver's cook takes two cards out of the deck for five more maximum
 /// HP, and backing out of its screen leaves the rest site exactly as it stood.
 #[test]
-fn a_meat_cleaver_cooks_two_cards_for_nine_maximum_hp() {
+fn a_meat_cleaver_cooks_two_cards_for_five_maximum_hp() {
     let mut simulator = run_holding(&["RELIC.MEAT_CLEAVER"]);
     walk_to(&mut simulator, 1);
     let deck_before = simulator.state().run_player.deck.clone();
@@ -5792,10 +5795,10 @@ fn a_meat_cleaver_cooks_two_cards_for_nine_maximum_hp() {
         simulator.state().run_player.deck.len(),
         deck_before.len() - 2
     );
-    assert_eq!(simulator.state().run_player.max_hp, max_before + 9);
+    assert_eq!(simulator.state().run_player.max_hp, max_before + 5);
     assert_eq!(
         run_hp(&simulator),
-        hp_before + 9,
+        hp_before + 5,
         "gaining maximum HP heals by as much"
     );
 }
@@ -5851,7 +5854,7 @@ fn the_cook_takes_a_pair_or_nothing() {
     assert_eq!(empties, 1, "and backing out with nothing is one more");
 
     // The gate refuses what the list does not carry, so no one-card answer
-    // reaches `finish_rest_cook` and its nine maximum HP by another route.
+    // reaches `finish_rest_cook` and its five maximum HP by another route.
     let mut single = simulator.clone();
     assert_eq!(
         single

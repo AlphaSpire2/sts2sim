@@ -1503,8 +1503,28 @@ impl EventAmount {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AncientRelicGroup {
     pub relics: Vec<ModelId>,
-    /// Some groups belong to one act only.
-    pub only_in_act: Option<usize>,
+    /// The acts, by zero-based index, the group is offered in.
+    pub acts: AncientActs,
+}
+
+/// Which acts an ancient's relic group is offered in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AncientActs {
+    Any,
+    Only(usize),
+    From(usize),
+}
+
+impl AncientActs {
+    #[must_use]
+    pub const fn includes(self, act: usize) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Only(only) => act == only,
+            Self::From(first) => act >= first,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

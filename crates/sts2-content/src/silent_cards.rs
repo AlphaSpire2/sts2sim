@@ -822,7 +822,7 @@ fn the_middle_pool() -> Vec<CardDefinition> {
                 ),
                 1,
             ),
-            sts2_engine::CardRarity::Uncommon,
+            sts2_engine::CardRarity::Rare,
         ),
         // Flechettes swing once for every skill in the hand.
         upgrading(

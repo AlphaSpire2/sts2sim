@@ -1,8 +1,8 @@
 //! Event definitions of the pinned build.
 
 use sts2_engine::{
-    AncientRelicGroup, CardTag, EventAmount, EventCardFilter, EventCondition, EventDefinition,
-    EventEffect, EventGeneration, EventOption,
+    AncientActs, AncientRelicGroup, CardTag, EventAmount, EventCardFilter, EventCondition,
+    EventDefinition, EventEffect, EventGeneration, EventOption,
 };
 use sts2_engine::{
     ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
@@ -14,14 +14,22 @@ use crate::id;
 fn group(relics: &[&str]) -> AncientRelicGroup {
     AncientRelicGroup {
         relics: relics.iter().map(|relic| id(relic)).collect(),
-        only_in_act: None,
+        acts: AncientActs::Any,
     }
 }
 
-/// A group only this act is offered.
+/// A group offered only in the act with this zero-based index.
 fn act_group(act: usize, relics: &[&str]) -> AncientRelicGroup {
     AncientRelicGroup {
-        only_in_act: Some(act),
+        acts: AncientActs::Only(act),
+        ..group(relics)
+    }
+}
+
+/// A group offered from the act with this zero-based index onward.
+fn from_act_group(act: usize, relics: &[&str]) -> AncientRelicGroup {
+    AncientRelicGroup {
+        acts: AncientActs::From(act),
         ..group(relics)
     }
 }
@@ -57,8 +65,10 @@ pub fn darv(character: &sts2_core::ModelId) -> EventDefinition {
                 group(&["RELIC.PANDORAS_BOX"]),
                 group(&["RELIC.RUNIC_PYRAMID"]),
                 group(&["RELIC.SNECKO_EYE"]),
-                act_group(1, &["RELIC.ECTOPLASM", "RELIC.SOZU"]),
-                act_group(2, &["RELIC.PHILOSOPHERS_STONE", "RELIC.VELVET_CHOKER"]),
+                act_group(1, &["RELIC.ECTOPLASM"]),
+                act_group(1, &["RELIC.SOZU"]),
+                from_act_group(1, &["RELIC.PHILOSOPHERS_STONE"]),
+                from_act_group(1, &["RELIC.VELVET_CHOKER"]),
             ],
             keepsake: id("RELIC.DUSTY_TOME"),
             // Setup still consumes a rewards draw for a one-card pool.
@@ -878,17 +888,14 @@ pub fn orobas() -> EventDefinition {
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::OrobasRelics {
-            pool_one: vec![
-                id("RELIC.ELECTRIC_SHRYMP"),
-                id("RELIC.GLASS_EYE"),
-                id("RELIC.SAND_CASTLE"),
-            ],
+            pool_one: vec![id("RELIC.ELECTRIC_SHRYMP"), id("RELIC.GLASS_EYE")],
             prismatic: id("RELIC.PRISMATIC_GEM"),
             sea_glass: id("RELIC.SEA_GLASS"),
             pool_two: vec![
                 id("RELIC.ALCHEMICAL_COFFER"),
                 id("RELIC.DRIFTWOOD"),
                 id("RELIC.RADIANT_PEARL"),
+                id("RELIC.SAND_CASTLE"),
             ],
             pool_three: vec![
                 // The touch of Orobas is only offered where there is a

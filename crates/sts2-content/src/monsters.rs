@@ -1445,9 +1445,11 @@ fn tough_egg_at(ascension: u8) -> MonsterDefinition {
                         }),
                         Command::Creature(CreatureCmd::SetMaxAndCurrentHp {
                             target: CreatureSelector::Owner,
+                            // The hatchling's own range is inclusive of its top:
+                            // 20-23 under Tough Enemies, 19-22 below it.
                             amount: sts2_engine::RolledAmount::OnNiche {
                                 min: asc(AscensionLevel::ToughEnemies, 20, 19),
-                                max: asc(AscensionLevel::ToughEnemies, 23, 22),
+                                max: asc(AscensionLevel::ToughEnemies, 24, 23),
                             },
                         }),
                     ],
