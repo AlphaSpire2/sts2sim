@@ -14659,6 +14659,33 @@ impl Simulator {
         )
     }
 
+    /// Whether a screen of this kind spends its choice id before it asks
+    /// whether a question is needed at all: the hand, pile and plain-grid
+    /// screens do, so one the build answers on its own still spends one, and
+    /// the rewards grid does once it has cards to show. None does under an
+    /// automated selector. `None` when the fight is ending (for the hand
+    /// screens, also once it is over): those screens hand back nothing before
+    /// they reserve.
+    fn reserves_choice_id_up_front(&self, screen_kind: ChoiceScreen) -> Option<bool> {
+        if self.automated_selector
+            || !matches!(
+                screen_kind,
+                ChoiceScreen::Hand
+                    | ChoiceScreen::CombatPile
+                    | ChoiceScreen::CardGrid
+                    | ChoiceScreen::RewardGrid
+            )
+        {
+            return Some(false);
+        }
+        let ending = if matches!(screen_kind, ChoiceScreen::Hand) {
+            self.combat_is_over_or_ending()
+        } else {
+            self.combat_is_ending()
+        };
+        (!ending).then_some(true)
+    }
+
     /// The same, for a screen whose candidates are grouped into bundles and
     /// which is answered with one whole bundle.
     #[allow(clippy::too_many_arguments, reason = "one argument per screen field")]
@@ -14678,11 +14705,23 @@ impl Simulator {
         semantics.validate().map_err(|error| {
             EngineError::new(ErrorCode::InvalidConfig).with_detail("choice_semantics", error)
         })?;
+        let Some(up_front) = self.reserves_choice_id_up_front(screen_kind) else {
+            return Ok(Some(Vec::new()));
+        };
         let candidates = self.selection_candidates(source, filters, only)?;
+        // The rewards grid hands back an empty offer before it reserves.
+        let up_front =
+            up_front && !(matches!(screen_kind, ChoiceScreen::RewardGrid) && candidates.is_empty());
         if candidates.is_empty() {
+            if up_front {
+                self.allocate_choice_id()?;
+            }
             return Ok(Some(Vec::new()));
         }
         if !prefs.require_manual_confirmation && candidates.len() <= prefs.minimum {
+            if up_front {
+                self.allocate_choice_id()?;
+            }
             // A screen the build answers on its own, because the pile holds no
             // more than it asks for, hands the pile over as it stands. The
             // sort by rarity and name is the screen's own order, and no screen
