@@ -1755,6 +1755,9 @@ pub enum HookCondition {
     TheHandWouldFlush,
     /// The side taking the turn is the player's.
     PlayerSideTurn,
+    /// The players are taking an extra turn: the enemy side has not acted
+    /// since their last one.
+    PlayersTakingAnExtraTurn,
     /// The side taking the turn is the enemy's. A timed debuff counts down here
     /// whichever side is carrying it.
     EnemySideTurn,

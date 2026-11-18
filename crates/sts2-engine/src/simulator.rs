@@ -8921,10 +8921,7 @@ impl Simulator {
             .map(|card| &card.model_id);
         let mut candidates: Vec<usize> = (0..deck.len())
             .filter(|index| match offered_model {
-                None => self
-                    .content
-                    .pooled_card(&deck[*index].model_id)
-                    .is_some_and(|card| card.rarity != crate::CardRarity::Basic),
+                None => self.card_rarity(&deck[*index]) != crate::CardRarity::Basic,
                 Some(model) => deck[*index].model_id != *model,
             })
             .filter(removable)
@@ -18351,10 +18348,18 @@ impl Simulator {
                         card.enchantment_status == crate::EnchantmentStatus::Normal
                     })
             }
-            Condition::SourceCardTargetsAllEnemies => self
-                .source_card(context)
-                .and_then(|card| self.content.card(&card.fingerprint.model_id).cloned())
-                .is_some_and(|definition| definition.target == crate::TargetType::AllEnemies),
+            // What the card aims at as worked out, so a Shiv under a fan of
+            // knives counts as aimed at everything.
+            Condition::SourceCardTargetsAllEnemies => {
+                self.source_card(context).is_some_and(|card| {
+                    self.content
+                        .card(&card.fingerprint.model_id)
+                        .is_some_and(|definition| {
+                            self.card_target(definition, &card.fingerprint)
+                                == crate::TargetType::AllEnemies
+                        })
+                })
+            }
             Condition::SourceCardIsUpgraded => self
                 .source_card(context)
                 .is_some_and(|card| card.fingerprint.upgrade_level > 0),
@@ -25913,6 +25918,11 @@ impl Simulator {
                     if context.moved_card == Some(card_id))
             }
             crate::HookCondition::PlayerSideTurn => context.side == Some(CombatSide::Player),
+            crate::HookCondition::PlayersTakingAnExtraTurn => self
+                .state
+                .combat
+                .as_ref()
+                .is_some_and(|combat| combat.taking_extra_turn),
             crate::HookCondition::EnemySideTurn => context.side == Some(CombatSide::Enemy),
             crate::HookCondition::OwnerSideIsActing => {
                 self.creature(owner)?.side == self.combat()?.side

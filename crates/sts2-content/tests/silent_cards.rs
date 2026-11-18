@@ -697,6 +697,28 @@ fn fan_of_knives_points_every_shiv_at_everything() {
     }
 }
 
+/// An inked Shiv under a fan of knives is aimed at everything, so its ink
+/// weakens every enemy rather than none.
+#[test]
+fn an_inked_shiv_under_a_fan_of_knives_weakens_every_enemy() {
+    let mut simulator = crowd(&[("CARD.BLADE_OF_INK", 0), ("CARD.FAN_OF_KNIVES", 0)]);
+    play(&mut simulator, "CARD.BLADE_OF_INK");
+    play(&mut simulator, "CARD.FAN_OF_KNIVES");
+    let inked = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, Action::PlayCard { card, .. }
+                if card.fingerprint.model_id == id("CARD.SHIV")
+                    && card.fingerprint.enchantment.is_some())
+        })
+        .cloned()
+        .expect("an inked Shiv is in the hand");
+    simulator.step(inked).expect("the play applies");
+    assert_eq!(power_amount(&simulator, 1, "POWER.WEAK_POWER"), 1);
+    assert_eq!(power_amount(&simulator, 2, "POWER.WEAK_POWER"), 1);
+}
+
 /// A knife trap plays every Shiv that has burned up, at whatever the trap was
 /// pointed at, and the upgraded trap upgrades each of them first.
 #[test]

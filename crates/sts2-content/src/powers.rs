@@ -1860,7 +1860,7 @@ fn chains_of_binding_power() -> PowerDefinition {
 }
 
 /// A rampart puts its block up in front of the gunner as the player's turn
-/// opens.
+/// opens, though not as an extra turn opens.
 ///
 /// The build names the turret operator outright; the only encounter that
 /// carries a rampart is the one with a living shield standing in front of one,
@@ -1876,7 +1876,10 @@ fn rampart_power() -> PowerDefinition {
                     props: ValueProps::UNPOWERED,
                 })],
             )
-            .when(HookCondition::PlayerSideTurn),
+            .when(HookCondition::All(vec![
+                HookCondition::PlayerSideTurn,
+                HookCondition::Not(Box::new(HookCondition::PlayersTakingAnExtraTurn)),
+            ])),
         ],
         ..counter("POWER.RAMPART_POWER", PowerType::Buff)
     }

@@ -627,9 +627,9 @@ fn uncommons() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 1,
-                vec![buff("POWER.PILLAR_OF_CREATION_POWER", 3)],
+                vec![buff("POWER.PILLAR_OF_CREATION_POWER", 2)],
             ),
-            vec![buff("POWER.PILLAR_OF_CREATION_POWER", 4)],
+            vec![buff("POWER.PILLAR_OF_CREATION_POWER", 3)],
         ),
         upgrading(
             card(

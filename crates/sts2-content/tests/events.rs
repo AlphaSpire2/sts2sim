@@ -2417,6 +2417,25 @@ fn a_slippery_bridge_rolls_a_card_and_charges_more_for_every_hold() {
     assert!(!deck_holds(&simulator, &taken));
 }
 
+/// A slippery bridge rolls among the deck's cards that are not basic, by the
+/// card's own rarity: an Ancient that no rolled pool holds is one of them, so
+/// beside nothing but basics it is the card rolled.
+#[test]
+fn a_slippery_bridge_rolls_an_ancient_beside_basics() {
+    let simulator = Visit::new("EVENT.SLIPPERY_BRIDGE")
+        .hp(80, 80)
+        .deck(&[
+            "CARD.STRIKE_IRONCLAD",
+            "CARD.DEFEND_IRONCLAD",
+            "CARD.BASH",
+            "CARD.SUPPRESS",
+            "CARD.STRIKE_IRONCLAD",
+        ])
+        .enter();
+    let (rolled, _) = bridge_page(&simulator);
+    assert_eq!(rolled, "CARD.SUPPRESS");
+}
+
 /// The Stone of All Time's push: six unblockable HP, and a Vigorous worth eight
 /// worked onto an attack of the deck. With one attack in the deck the screen
 /// takes it without asking.
