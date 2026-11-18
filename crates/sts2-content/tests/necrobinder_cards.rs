@@ -823,22 +823,26 @@ fn a_dredge_with_no_room_asks_for_nothing() {
     );
 }
 
-/// An eidolon burns the whole hand and pays a point of Intangible where nine
-/// or more cards burned.
+/// An eidolon plays every ethereal card of the exhaust pile that can be
+/// played, leaves the rest there, and burns itself.
 #[test]
-fn an_eidolon_burns_the_hand_and_pays_intangible_for_nine() {
-    for (held, intangible) in [(8, 0), (9, 1)] {
-        let mut hand: Vec<(&str, u8)> = vec![("CARD.EIDOLON", 0)];
-        hand.extend(std::iter::repeat_n(("CARD.DEFEND_NECROBINDER", 0), held));
-        let mut simulator = fight(&hand);
-        play(&mut simulator, "CARD.EIDOLON");
-        assert_eq!(pile(&simulator, PileName::Hand).len(), 0);
-        assert_eq!(
-            power_amount(&simulator, 0, "POWER.INTANGIBLE_POWER"),
-            intangible,
-            "with {held} cards held"
-        );
-    }
+fn an_eidolon_plays_the_ethereal_cards_that_burned() {
+    let mut simulator = built(
+        scenario(&[39], &[("CARD.EIDOLON", 0)], &[])
+            .card(PileName::Exhaust, 90, card("CARD.APPARITION", 0), 0)
+            .card(PileName::Exhaust, 91, card("CARD.DAZED", 0), 0)
+            .card(PileName::Exhaust, 92, card("CARD.DEFEND_NECROBINDER", 0), 0),
+    );
+    play(&mut simulator, "CARD.EIDOLON");
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.INTANGIBLE_POWER"),
+        1,
+        "the apparition was played"
+    );
+    let exhaust = pile(&simulator, PileName::Exhaust);
+    assert!(exhaust.contains(&"CARD.DAZED".to_owned()), "{exhaust:?}");
+    assert!(exhaust.contains(&"CARD.DEFEND_NECROBINDER".to_owned()));
+    assert!(exhaust.contains(&"CARD.EIDOLON".to_owned()));
 }
 
 /// A fetch swings the pet and draws, but only on its own first play of the
@@ -971,6 +975,51 @@ fn a_misery_copies_the_targets_debuffs_onto_everything_else() {
         assert_eq!(doom_on(&simulator, 1), 13);
         assert_eq!(doom_on(&simulator, 2), 13);
     }
+}
+
+/// A misery folds a temporary debuff into the stat it lends before copying:
+/// a mangle over a target whose strength is still a buff copies the mangle
+/// alone, and the copy lends its strength loss again as it lands.
+#[test]
+fn a_misery_copies_a_temporary_debuff_that_lends_its_stat_again() {
+    let mut simulator = built(
+        scenario(&[39, 39], &[("CARD.MANGLE", 0), ("CARD.MISERY", 0)], &[]).power(
+            1,
+            id("POWER.STRENGTH_POWER"),
+            15,
+            PowerType::Buff,
+        ),
+    );
+    play(&mut simulator, "CARD.MANGLE");
+    assert_eq!(power_amount(&simulator, 1, "POWER.STRENGTH_POWER"), 5);
+    play(&mut simulator, "CARD.MISERY");
+    assert_eq!(power_amount(&simulator, 2, "POWER.MANGLE_POWER"), 10);
+    assert_eq!(
+        power_amount(&simulator, 2, "POWER.STRENGTH_POWER"),
+        -10,
+        "the copied mangle took its own strength"
+    );
+}
+
+/// A pet's blow reads its owner's Cruelty where it carries none itself.
+#[test]
+fn osty_hits_a_vulnerable_target_harder_for_its_owners_cruelty() {
+    let poke =
+        |cruelty: i32| {
+            let mut scenario = scenario(&[200], &[("CARD.BODYGUARD", 0), ("CARD.POKE", 0)], &[])
+                .power(1, id("POWER.VULNERABLE_POWER"), 2, PowerType::Debuff);
+            if cruelty > 0 {
+                scenario = scenario.power(0, id("POWER.CRUELTY_POWER"), cruelty, PowerType::Buff);
+            }
+            let mut simulator = built(scenario);
+            play(&mut simulator, "CARD.BODYGUARD");
+            play(&mut simulator, "CARD.POKE");
+            200 - hp_of(&simulator, 1).expect("the target stands")
+        };
+    // Six from the poke: half again for Vulnerable, and three quarters again
+    // with a Cruelty of twenty-five.
+    assert_eq!(poke(0), 9);
+    assert_eq!(poke(25), 10);
 }
 
 /// An oblivion marks its target and pays Doom for every card its applier plays

@@ -694,19 +694,19 @@ fn a_recorded_answer_the_screen_would_not_take_is_refused() {
     }
 }
 
-/// A beautiful bracelet asks for three of twenty-three. The list works the
+/// A tri-boomerang asks for three of twenty-three. The list works the
 /// screen a pick at a time and carries no set of three in any order, while a
 /// record that picked them in its own order is replayed in that order, which
 /// is the order the build hands them back in.
 #[test]
-fn a_recorded_bracelet_keeps_the_order_it_was_picked_in() {
-    let mut simulator = run_at_a_chest("RELIC.BEAUTIFUL_BRACELET", 23);
+fn a_recorded_boomerang_keeps_the_order_it_was_picked_in() {
+    let mut simulator = run_at_a_chest("RELIC.TRI_BOOMERANG", 23);
     take_the_relic(&mut simulator);
     let (_, minimum, maximum, _, _) = the_screen(&simulator);
     assert_eq!(
         (minimum, maximum),
         (3, 3),
-        "the bracelet asks for exactly three"
+        "the boomerang asks for exactly three"
     );
     let (choice_id, candidates) = the_candidates(&simulator);
     let picked = vec![

@@ -545,24 +545,40 @@ fn the_punch_off_wears_both_constructs_down_before_the_fight() {
 /// to say: nothing on the map can generate it, and it pays out nothing of its
 /// own.
 #[test]
-fn the_battleworn_dummys_room_is_the_events_to_settle() {
+fn the_battleworn_dummys_rooms_are_the_events_to_settle() {
     let registry = sts2_content::standard_registry();
-    let encounter = registry
-        .encounter(&id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
-        .expect("the room is content");
+    for (encounter, monster) in [
+        (
+            "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER",
+            "MONSTER.BATTLE_FRIEND_V1",
+        ),
+        (
+            "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER",
+            "MONSTER.BATTLE_FRIEND_V2",
+        ),
+        (
+            "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER",
+            "MONSTER.BATTLE_FRIEND_V3",
+        ),
+    ] {
+        let definition = registry
+            .encounter(&id(encounter))
+            .expect("the room is content");
+        assert!(
+            definition.rewards.is_none() && !definition.gives_rewards,
+            "{encounter} gives no rewards: the event pays out instead"
+        );
+        assert_eq!(
+            definition.generation,
+            sts2_engine::MonsterGeneration::Fixed(vec![id(monster)]),
+            "{encounter}"
+        );
+    }
     assert!(
-        encounter.rewards.is_none(),
-        "the encounter gives no rewards: the event pays out instead"
-    );
-    assert_eq!(
-        encounter.generation,
-        sts2_engine::MonsterGeneration::ChosenByTheEvent {
-            options: vec![
-                id("MONSTER.BATTLE_FRIEND_V1"),
-                id("MONSTER.BATTLE_FRIEND_V2"),
-                id("MONSTER.BATTLE_FRIEND_V3"),
-            ],
-        }
+        registry
+            .encounter(&id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
+            .is_none(),
+        "the shared room is not a room of its own"
     );
 }
 

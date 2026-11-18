@@ -268,7 +268,6 @@ fn the_plain_powers_lay_down_what_they_say() {
         ("CARD.INFINITE_BLADES", "POWER.INFINITE_BLADES_POWER", 1, 1),
         ("CARD.MASTER_PLANNER", "POWER.MASTER_PLANNER_POWER", 1, 1),
         ("CARD.NOXIOUS_FUMES", "POWER.NOXIOUS_FUMES_POWER", 2, 3),
-        ("CARD.OUTBREAK", "POWER.OUTBREAK_POWER", 11, 15),
         ("CARD.PHANTOM_BLADES", "POWER.PHANTOM_BLADES_POWER", 9, 12),
         ("CARD.SERPENT_FORM", "POWER.SERPENT_FORM_POWER", 4, 6),
         ("CARD.SHADOWMELD", "POWER.SHADOWMELD_POWER", 1, 1),
@@ -1101,7 +1100,7 @@ fn bullet_time_makes_the_hand_free() {
 #[test]
 fn a_card_made_free_that_wins_the_fight_is_left_at_its_own_cost() {
     let mut simulator =
-        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"))
             .played_as(id("CHARACTER.SILENT"))
             .player_hp(70, 70)
             .energy(9, 9)

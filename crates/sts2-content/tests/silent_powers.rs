@@ -238,30 +238,26 @@ fn envenom_poisons_what_the_attack_actually_hurt() {
     assert_eq!(power_amount(&simulator, 1, "POWER.POISON_POWER"), 1);
 }
 
-/// An outbreak burns everything every third time its owner poisons anything.
+/// An outbreak poisons everything and then every enemy's poison bites at once,
+/// a stack coming off for the bite.
 #[test]
-fn an_outbreak_pays_out_every_third_poison() {
-    let mut simulator = Fight {
-        enemies: 2,
-        hand: &[
-            ("CARD.OUTBREAK", 0),
-            ("CARD.DEADLY_POISON", 0),
-            ("CARD.DEADLY_POISON", 0),
-            ("CARD.DEADLY_POISON", 0),
-        ],
-        ..Fight::default()
+fn an_outbreak_poisons_everything_and_sets_it_off() {
+    for (upgrade, poison) in [(0, 9), (1, 12)] {
+        let mut simulator = Fight {
+            enemies: 2,
+            hand: &[("CARD.OUTBREAK", upgrade)],
+            ..Fight::default()
+        }
+        .build();
+        play(&mut simulator, "CARD.OUTBREAK");
+        for enemy in 1..=2 {
+            assert_eq!(creature(&simulator, enemy).current_hp, 39 - poison);
+            assert_eq!(
+                power_amount(&simulator, enemy, "POWER.POISON_POWER"),
+                poison - 1
+            );
+        }
     }
-    .build();
-    play(&mut simulator, "CARD.OUTBREAK");
-    play(&mut simulator, "CARD.DEADLY_POISON");
-    play(&mut simulator, "CARD.DEADLY_POISON");
-    assert_eq!(creature(&simulator, 2).current_hp, 39, "not yet");
-    play(&mut simulator, "CARD.DEADLY_POISON");
-    assert_eq!(
-        creature(&simulator, 2).current_hp,
-        39 - 11,
-        "the third poison paid out over everything"
-    );
 }
 
 // --- the ones that answer for a card play --------------------------------
@@ -700,7 +696,7 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
         powers: &[
             (0, "POWER.TOOLS_OF_THE_TRADE_POWER", 1, PowerType::Buff),
             (0, "POWER.NOXIOUS_FUMES_POWER", 1, PowerType::Buff),
-            (0, "POWER.OUTBREAK_POWER", 1, PowerType::Buff),
+            (0, "POWER.SLEIGHT_OF_FLESH_POWER", 1, PowerType::Buff),
         ],
         draw: &[("CARD.DEFLECT", 0), ("CARD.SLICE", 0)],
         ..Fight::default()
@@ -718,7 +714,7 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
             .iter()
             .filter(|c| c.side == sts2_engine::CombatSide::Enemy)
             .all(|c| c.current_hp == 0),
-        "Outbreak killed every enemy"
+        "the fumes' poison cut every enemy down"
     );
     assert!(
         !combat.in_progress,
@@ -748,14 +744,14 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
 
 /// Side-start damage must preserve the discard and its continuation if enemies survive.
 #[test]
-fn tools_of_the_trade_still_requires_a_discard_after_nonlethal_outbreak() {
+fn tools_of_the_trade_still_requires_a_discard_after_nonlethal_damage() {
     let mut simulator = Fight {
         enemies: 3,
         enemy_hp: 39,
         powers: &[
             (0, "POWER.TOOLS_OF_THE_TRADE_POWER", 1, PowerType::Buff),
             (0, "POWER.NOXIOUS_FUMES_POWER", 1, PowerType::Buff),
-            (0, "POWER.OUTBREAK_POWER", 1, PowerType::Buff),
+            (0, "POWER.SLEIGHT_OF_FLESH_POWER", 1, PowerType::Buff),
         ],
         draw: &[("CARD.DEFLECT", 0), ("CARD.SLICE", 0)],
         ..Fight::default()

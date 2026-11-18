@@ -1462,25 +1462,35 @@ pub fn punch_off_event_encounter() -> EncounterDefinition {
     }
 }
 
-/// The battleworn dummy's room: one of three battle friends, and which one is
-/// the setting the event writes on the encounter before the fight stands up.
+/// The battleworn dummy's three rooms, one per setting, each standing up its
+/// own battle friend.
 #[must_use]
-pub fn battleworn_dummy_event_encounter() -> EncounterDefinition {
-    EncounterDefinition {
-        model_id: id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"),
+pub fn battleworn_dummy_event_encounters() -> Vec<EncounterDefinition> {
+    [
+        (
+            "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER",
+            "MONSTER.BATTLE_FRIEND_V1",
+        ),
+        (
+            "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER",
+            "MONSTER.BATTLE_FRIEND_V2",
+        ),
+        (
+            "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER",
+            "MONSTER.BATTLE_FRIEND_V3",
+        ),
+    ]
+    .into_iter()
+    .map(|(encounter, monster)| EncounterDefinition {
+        model_id: id(encounter),
         slots: Vec::new(),
         spawn_slot_names: Vec::new(),
-        generation: MonsterGeneration::ChosenByTheEvent {
-            options: vec![
-                id("MONSTER.BATTLE_FRIEND_V1"),
-                id("MONSTER.BATTLE_FRIEND_V2"),
-                id("MONSTER.BATTLE_FRIEND_V3"),
-            ],
-        },
-        // The fight lays out no reward set at all: the event pays out instead,
-        // and what it pays depends on which setting was fought and whether
-        // the time ran out.
+        generation: MonsterGeneration::Fixed(vec![id(monster)]),
+        // The fight lays out no reward set of its own: the event pays out
+        // instead, and what it pays depends on which setting was fought and
+        // whether the time ran out.
         gives_rewards: false,
         rewards: None,
-    }
+    })
+    .collect()
 }

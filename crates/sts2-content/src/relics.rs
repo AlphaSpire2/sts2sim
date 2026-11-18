@@ -1389,13 +1389,17 @@ fn uncommon_relics() -> Vec<RelicDefinition> {
             ..obtained_only("RELIC.LUCKY_FYSH", RelicRarity::Uncommon)
         })),
         // A planisphere heals five every time its owner walks onto an unknown
-        // point, whatever the point turned out to be.
+        // point, whatever the point turned out to be. A fight an event walks
+        // into is a second room on the stack and pays nothing.
         stops_late(RelicDefinition {
             hooks: vec![ModifierHook::every_turn(
                 HookEvent::AfterRoomEntered,
                 vec![Command::When {
                     otherwise: Vec::new(),
-                    condition: Condition::CurrentMapPointIsUnknown,
+                    condition: Condition::All(vec![
+                        Condition::CurrentMapPointIsUnknown,
+                        Condition::CurrentRoomCountAtMost(1),
+                    ]),
                     then: vec![heal(Amount::Fixed(5))],
                 }],
             )],
@@ -1750,12 +1754,13 @@ fn event_relics() -> Vec<RelicDefinition> {
             )],
             ..obtained_only("RELIC.FRESNEL_LENS", RelicRarity::Event)
         },
-        // A hand drill works two vulnerable into whoever its owner's blow took
-        // the last of the block off.
+        // A hand drill works two vulnerable into whatever its owner, or its
+        // owner's pet, took the last of the block off, by a blow or by taking
+        // the block away.
         RelicDefinition {
             hooks: vec![
                 ModifierHook::every_turn(
-                    HookEvent::AfterDamageGiven,
+                    HookEvent::AfterBlockBroken,
                     vec![Command::Power(PowerCmd::Apply {
                         marks: None,
                         power: id("POWER.VULNERABLE_POWER"),
@@ -1764,7 +1769,7 @@ fn event_relics() -> Vec<RelicDefinition> {
                         amount: Amount::Fixed(2),
                     })],
                 )
-                .when(HookCondition::OwnerBrokeAnOpponentsBlock),
+                .when(HookCondition::OwnerOrPetBrokeANonPlayersBlock),
             ],
             ..obtained_only("RELIC.HAND_DRILL", RelicRarity::Event)
         },
@@ -2804,10 +2809,14 @@ fn rare_relics() -> Vec<RelicDefinition> {
                     HookEvent::BeforePowerAmountChanged,
                     vec![Command::When {
                         otherwise: Vec::new(),
+                        // A debuff about to meet an artifact binds nothing.
                         condition: Condition::All(vec![
                             Condition::ListeningRelicHasNoBoundCard,
                             Condition::Not(Box::new(Condition::ListeningRelicIsLatched)),
                             Condition::TheRelicsOwnerIsWorkingADebuffFromACard,
+                            Condition::Not(Box::new(Condition::PowerTargetHasPower(id(
+                                "POWER.ARTIFACT_POWER",
+                            )))),
                         ]),
                         then: vec![bind_card(true)],
                     }],
@@ -3268,12 +3277,13 @@ fn rainbow_ring() -> RelicDefinition {
     }
 }
 
-/// A lasting candy puts a fourth card, a power, on every other fight's card
-/// reward.
+/// A lasting candy puts a fourth card, a power, on every other combat room's
+/// own card reward.
 ///
-/// Its count of fights seen is wound on as each fight ends, and the fight whose
-/// count came out even is the one whose reward is swelled — which is the fight
-/// after the one that started the count, and every second one after that.
+/// It counts the combat reward sets that hold a card, each once it is built,
+/// so the offer in a set is made against the count before it: the second such
+/// set is swelled, and every second one after that. A card reward a relic or a
+/// card adds to the set is never swelled.
 ///
 /// The relic is also refused to a profile that has never finished a run. This
 /// baseline is pinned to profiles with runs behind them and refuses one without
@@ -3281,14 +3291,20 @@ fn rainbow_ring() -> RelicDefinition {
 /// alone.
 fn lasting_candy() -> RelicDefinition {
     stops_late(RelicDefinition {
-        counter_property: Some("CombatsSeen".to_owned()),
+        counter_property: Some("CombatRewardsSeen".to_owned()),
         counter_kind: Some(sts2_engine::CounterKind::Cycle { wraps_at: 2 }),
         hooks: vec![
+            // A combat reward set with a card in it is counted once it is
+            // built, so the offer it holds was made against the count before.
             ModifierHook::every_turn(
-                HookEvent::AfterCombatEnd,
-                vec![Command::Relic(RelicCmd::ModifyListeningCounter(
-                    Amount::Fixed(1),
-                ))],
+                HookEvent::BeforeCombatRewardOffered,
+                vec![Command::When {
+                    otherwise: Vec::new(),
+                    condition: Condition::OfferedRewardsHoldACard,
+                    then: vec![Command::Relic(RelicCmd::ModifyListeningCounter(
+                        Amount::Fixed(1),
+                    ))],
+                }],
             ),
             ModifierHook::every_turn(
                 HookEvent::TryModifyCardRewardOptions,
@@ -3296,8 +3312,10 @@ fn lasting_candy() -> RelicDefinition {
                     otherwise: Vec::new(),
                     condition: Condition::All(vec![
                         Condition::CardOfferCameFromAnEncounter,
+                        Condition::CardOfferIsACardReward,
+                        Condition::CardOfferIsFromCombat,
                         Condition::ListeningRelicCounterAtLeast(1),
-                        Condition::ListeningRelicCounterMultipleOf(2),
+                        Condition::Not(Box::new(Condition::ListeningRelicCounterMultipleOf(2))),
                     ]),
                     then: vec![Command::Rewards(sts2_engine::RewardsCmd::AddCardOption {
                         card_type: sts2_engine::CardType::Power,
@@ -5568,10 +5586,16 @@ fn counting_relics() -> Vec<RelicDefinition> {
                     otherwise: Vec::new(),
                     condition: Condition::PlayerTurnAtMost(1),
                     then: vec![Command::Select {
+                        // A power that is not innate where the pile holds
+                        // one, and any power where it does not.
                         cards: sts2_engine::CardSelector::RandomFromPile {
                             pile: sts2_engine::PileName::Draw,
-                            filter: sts2_engine::CardFilter::OfType(sts2_engine::CardType::Power),
-                            fallback: None,
+                            filter: sts2_engine::CardFilter::NotInnateOfType(
+                                sts2_engine::CardType::Power,
+                            ),
+                            fallback: Some(sts2_engine::CardFilter::OfType(
+                                sts2_engine::CardType::Power,
+                            )),
                         },
                         then: vec![
                             Command::Card(sts2_engine::CardCmd::SetTemporaryCost {
@@ -6245,16 +6269,23 @@ fn creates(count: usize, rarity: CardRarity) -> CardCreation {
 /// The ancients whose whole body is an enchantment.
 ///
 /// Each of them either asks the player which deck cards to put one on, puts one
-/// on every deck card it can, or puts one over a card reward.
+/// on deck cards picked at random, puts one on every deck card it can, or puts
+/// one over a card reward.
+#[allow(clippy::too_many_lines, reason = "one entry per relic")]
 fn enchanting_ancients() -> Vec<RelicDefinition> {
     vec![
-        // A beautiful bracelet puts three Swift on three cards of the deck.
+        // A beautiful bracelet puts two Swift on four cards of the deck it can
+        // go on, picked at random on the niche stream.
         RelicDefinition {
-            on_obtained: vec![enchant_chosen_deck_cards(
-                "ENCHANTMENT.SWIFT",
-                3,
-                SelectorPrefs::exactly(3),
-            )],
+            on_obtained: vec![Command::Card(CardCmd::Enchant {
+                cards: CardSelector::ShuffledFromDeckEnchantableBy {
+                    enchantment: id("ENCHANTMENT.SWIFT"),
+                    take: Amount::Fixed(4),
+                    stream: sts2_engine::ShuffleStream::Niche,
+                },
+                enchantment: id("ENCHANTMENT.SWIFT"),
+                amount: Amount::Fixed(2),
+            })],
             ..obtained_only("RELIC.BEAUTIFUL_BRACELET", RelicRarity::Ancient)
         },
         // An electric shrymp puts Imbued on one.

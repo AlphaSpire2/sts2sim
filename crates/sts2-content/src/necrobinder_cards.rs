@@ -731,26 +731,17 @@ fn dredge(count: i32) -> Vec<Command> {
     })]
 }
 
-/// Eidolon, played: the whole hand burns, one card at a time over the list as
-/// it stood, and nine or more of them pay a point of Intangible. The count is
-/// the local the build increments per burn, which is the hand's own size.
+/// Eidolon, played: every card of the exhaust pile that is Ethereal and can be
+/// played is played again without the player choosing it, one at a time over
+/// the pile as it stood.
 fn eidolon() -> Vec<Command> {
-    vec![Command::WithAmount {
-        amount: Amount::counting(Count::CardsInPile(PileName::Hand)),
-        then: vec![
-            Command::Card(CardCmd::Exhaust {
-                cards: CardSelector::Pile {
-                    pile: PileName::Hand,
-                    filter: CardFilter::Any,
-                },
-            }),
-            Command::When {
-                condition: Condition::BoundAtLeast(9),
-                then: vec![buff("POWER.INTANGIBLE_POWER", 1)],
-                otherwise: Vec::new(),
-            },
-        ],
-    }]
+    vec![Command::Card(CardCmd::AutoPlay {
+        cards: CardSelector::Pile {
+            pile: PileName::Exhaust,
+            filter: CardFilter::EtherealAndPlayable,
+        },
+        at_the_bodys_target: false,
+    })]
 }
 
 /// Fetch, played: the pet swings, and the play draws where no play of this
@@ -876,8 +867,9 @@ fn the_cards_that_wait() -> Vec<CardDefinition> {
             ),
             dredge(3),
         ))),
-        // An eidolon burns the whole hand and pays intangible for nine.
-        upgrading_cost(
+        // An eidolon plays every ethereal card of the exhaust pile again, and
+        // burns itself.
+        exhausting(upgrading_cost(
             card(
                 "CARD.EIDOLON",
                 CardType::Skill,
@@ -886,7 +878,7 @@ fn the_cards_that_wait() -> Vec<CardDefinition> {
                 eidolon(),
             ),
             1,
-        ),
+        )),
         // An eradicate lands as many times as the energy its own X swallowed.
         retaining(costing_x(with_damage_var(
             upgrading(

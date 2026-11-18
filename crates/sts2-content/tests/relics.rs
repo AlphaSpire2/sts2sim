@@ -2918,6 +2918,70 @@ fn a_hand_drill_answers_a_broken_shield() {
     assert_eq!(power_amount(&simulator, 1, "POWER.VULNERABLE_POWER"), 0);
 }
 
+/// The same fight with the beetle plated for `block`, carried on to the
+/// player's second turn, where it stands behind that much block and the cards
+/// have come back round into the hand.
+fn fight_tough_behind_block(relics: &[&str], hand: &[(&str, u8)], block: i32) -> Simulator {
+    let held: Vec<sts2_core::ModelId> = relics.iter().map(|model| id(model)).collect();
+    let mut scenario = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(30, 30)
+        .turn(1, 1)
+        .relics(&held)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 999, 999, "SHRINKER_MOVE")
+        .power(
+            1,
+            id("POWER.PLATING_POWER"),
+            block,
+            sts2_engine::PowerType::Buff,
+        );
+    for (index, (model_id, upgrade)) in hand.iter().enumerate() {
+        scenario = scenario.card(
+            PileName::Hand,
+            u64::try_from(index).expect("small index"),
+            card(model_id, *upgrade),
+            0,
+        );
+    }
+    let mut simulator = scenario
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    assert_eq!(creature(&simulator, 1).block, block, "the plating stands");
+    simulator
+}
+
+/// A blow that takes the last of the block, and a card that takes the block
+/// away, both answer a hand drill; a blow that leaves block standing does not.
+#[test]
+fn a_hand_drill_answers_block_broken_by_a_blow_or_taken_away() {
+    let mut simulator =
+        fight_tough_behind_block(&["RELIC.HAND_DRILL"], &[("CARD.STRIKE_IRONCLAD", 0)], 4);
+    play(&mut simulator, "CARD.STRIKE_IRONCLAD");
+    assert_eq!(power_amount(&simulator, 1, "POWER.VULNERABLE_POWER"), 2);
+
+    let mut simulator =
+        fight_tough_behind_block(&["RELIC.HAND_DRILL"], &[("CARD.STRIKE_IRONCLAD", 0)], 10);
+    play(&mut simulator, "CARD.STRIKE_IRONCLAD");
+    assert_eq!(
+        power_amount(&simulator, 1, "POWER.VULNERABLE_POWER"),
+        0,
+        "block is still standing"
+    );
+
+    let mut plain = fight_tough_behind_block(&[], &[("CARD.EXPOSE", 0)], 10);
+    play(&mut plain, "CARD.EXPOSE");
+    let mut drilled = fight_tough_behind_block(&["RELIC.HAND_DRILL"], &[("CARD.EXPOSE", 0)], 10);
+    play(&mut drilled, "CARD.EXPOSE");
+    assert_eq!(
+        power_amount(&drilled, 1, "POWER.VULNERABLE_POWER"),
+        power_amount(&plain, 1, "POWER.VULNERABLE_POWER") + 2,
+        "taking the block away breaks it too"
+    );
+}
+
 /// A lost wisp cuts every enemy for every power.
 #[test]
 fn a_lost_wisp_answers_a_power() {
@@ -5029,7 +5093,6 @@ fn the_relics_that_ask_which_cards_to_enchant() {
         ("RELIC.GNARLED_HAMMER", "ENCHANTMENT.SHARP", 3, 3),
         ("RELIC.KIFUDA", "ENCHANTMENT.ADROIT", 3, 3),
         ("RELIC.PUNCH_DAGGER", "ENCHANTMENT.MOMENTUM", 5, 1),
-        ("RELIC.BEAUTIFUL_BRACELET", "ENCHANTMENT.SWIFT", 3, 3),
         ("RELIC.ELECTRIC_SHRYMP", "ENCHANTMENT.IMBUED", 1, 1),
         ("RELIC.TRI_BOOMERANG", "ENCHANTMENT.INSTINCT", 1, 3),
     ] {
@@ -5052,6 +5115,36 @@ fn the_relics_that_ask_which_cards_to_enchant() {
             "{relic} put its own amount on"
         );
     }
+}
+
+/// A beautiful bracelet puts two Swift on four cards of the deck it can go
+/// on, picked on the niche stream without asking.
+#[test]
+fn a_beautiful_bracelet_enchants_four_cards_at_random() {
+    let mut simulator = run_holding_with_treasure(&[], "RELIC.BEAUTIFUL_BRACELET");
+    let niche = niche_counter(&simulator);
+    take_the_treasure(&mut simulator);
+    assert!(
+        !matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::ChooseCards { .. }
+        ),
+        "nothing is asked"
+    );
+    assert_eq!(deck_carrying(&simulator, "ENCHANTMENT.SWIFT"), 4);
+    assert!(
+        simulator
+            .state()
+            .run_player
+            .deck
+            .iter()
+            .filter_map(|card| card.enchantment.as_ref())
+            .all(|held| held.amount == 2)
+    );
+    assert!(
+        niche_counter(&simulator) > niche,
+        "the pick read the niche stream"
+    );
 }
 
 /// A royal stamp approves one card, and reads the niche stream once for the
@@ -8337,6 +8430,38 @@ fn an_unsettling_lamp_doubles_what_the_first_card_of_a_fight_works() {
     );
 }
 
+/// A debuff about to meet an artifact binds nothing, so the lamp waits for the
+/// next card that works one.
+#[test]
+fn an_unsettling_lamp_passes_over_a_debuff_an_artifact_will_stop() {
+    let held = [id("RELIC.UNSETTLING_LAMP")];
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(80, 80)
+        .energy(30, 30)
+        .turn(1, 1)
+        .relics(&held)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .power(
+            1,
+            id("POWER.ARTIFACT_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.BASH", 0), 0)
+        .card(PileName::Hand, 1, card("CARD.BASH", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.BASH");
+    assert_eq!(power_amount(&simulator, 1, "POWER.VULNERABLE_POWER"), 0);
+    play(&mut simulator, "CARD.BASH");
+    assert_eq!(
+        power_amount(&simulator, 1, "POWER.VULNERABLE_POWER"),
+        4,
+        "the second card is the first one the lamp binds"
+    );
+}
+
 /// Pael's eye buys its owner one more turn a fight where they chose to play
 /// nothing at all, burning whatever they were still holding on the way, and is
 /// spent for it.
@@ -8986,7 +9111,7 @@ fn a_listener_that_wins_the_fight_leaves_the_card_in_play() {
     let mut chain = sts2_engine::RelicInstance::new(id("RELIC.KUSARIGAMA"));
     chain.counter = 2;
     let mut simulator =
-        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"))
             .player_hp(80, 80)
             .energy(9, 9)
             .turn(1, 1)

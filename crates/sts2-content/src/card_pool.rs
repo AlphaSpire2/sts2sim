@@ -292,7 +292,7 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         CardRarity::Uncommon,
         1,
     ),
-    ("CARD.OUTBREAK", CardType::Power, CardRarity::Uncommon, 1),
+    ("CARD.OUTBREAK", CardType::Skill, CardRarity::Rare, 3),
     (
         "CARD.PHANTOM_BLADES",
         CardType::Power,

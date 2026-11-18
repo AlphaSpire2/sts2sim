@@ -1350,6 +1350,9 @@ pub enum HookEvent {
     TryModifyRewards,
     TryModifyRewardsLate,
     AfterModifyingRewards,
+    /// Once a combat room's reward set is built, cards and all, and just
+    /// before it is offered.
+    BeforeCombatRewardOffered,
     /// The two passes over the cards a card reward has just been built out of,
     /// and then the pass over exactly the listeners that changed one. They run
     /// while the reward is still being built, so they see the offer before
@@ -1402,6 +1405,10 @@ pub enum HookEvent {
     /// the opening turn.
     BeforeCombatStart,
     BeforeCombatStartLate,
+    /// What a power does when something sets it off outside its own timing.
+    /// It is never announced to a list: a [`crate::PowerCmd::Trigger`] runs
+    /// it for the one instance it names.
+    PowerTriggered,
     /// Once a room has been put on the run's room stack and before it is
     /// entered: before a fight's creatures stand, an event's page opens, or a
     /// shop lays out its stock. It is announced for every room, including a
@@ -1588,6 +1595,7 @@ impl HookEvent {
             // all, so a fight standing behind the reward screen takes no part
             // in them.
             Self::AfterGoldGained
+            | Self::BeforeCombatRewardOffered
             | Self::AfterItemPurchased
             | Self::ModifyMerchantPrice
             | Self::TryModifyRestSiteHealRewards
@@ -1845,8 +1853,11 @@ pub enum HookCondition {
     /// The listener's owner dealt the damage and block stopped all of it,
     /// which is what an Imbalanced asks.
     OwnerDealtFullyBlockedDamage,
-    /// The owner's blow took the last of an opponent's block.
-    OwnerBrokeAnOpponentsBlock,
+    /// The owner, or the owner's pet, took the last of the block off a
+    /// creature that is not a player, by a blow or by taking it away.
+    OwnerOrPetBrokeANonPlayersBlock,
+    /// The block that just broke was the owner's own.
+    OwnersBlockBroke,
     /// The block is going to the listener's owner, and it is powered block.
     OwnerGainsPoweredBlock,
     /// Dexterity's test: block off a card belongs to whoever owns the card,
@@ -3482,6 +3493,10 @@ pub struct CardDefinition {
     /// way.
     #[serde(default)]
     pub returns_to_hand: bool,
+    /// The same answer for the top of the draw pile: a play that would put
+    /// the card in the discard pile puts it on top of the draw pile instead.
+    #[serde(default)]
+    pub returns_to_draw_pile_top: bool,
     /// The card's star cost is X. Playing it spends every star its owner has
     /// left and writes what it spent onto the card, and its cost reads as the
     /// pool itself without the cost pass running at all, so nothing ever

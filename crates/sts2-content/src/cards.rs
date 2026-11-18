@@ -49,6 +49,7 @@ pub(crate) fn card(
         star_cost: -1,
         costs_star_x: false,
         returns_to_hand: false,
+        returns_to_draw_pile_top: false,
         costs_x: false,
         innate: false,
         retain: false,
@@ -289,6 +290,13 @@ pub(crate) fn costing_star_x(mut definition: CardDefinition) -> CardDefinition {
 /// instead.
 pub(crate) fn kept_in_hand(mut definition: CardDefinition) -> CardDefinition {
     definition.returns_to_hand = true;
+    definition
+}
+
+/// A play that would send the card to the discard pile puts it on top of the
+/// draw pile instead.
+pub(crate) fn back_on_the_draw_pile(mut definition: CardDefinition) -> CardDefinition {
+    definition.returns_to_draw_pile_top = true;
     definition
 }
 

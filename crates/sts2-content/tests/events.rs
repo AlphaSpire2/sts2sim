@@ -1373,15 +1373,26 @@ fn a_battleworn_dummy_fights_the_setting_it_was_put_on_and_pays_for_the_win() {
         won.decision()
     );
     // The fight pays nothing, and proceeding past it goes back to the event
-    // rather than to the map: the event pays the setting's prize on a page
-    // that is finished, and what is left to do is walk on.
+    // rather than to the map: the event offers the setting's prize as a
+    // reward on a page that is finished, and once it is taken what is left to
+    // do is walk on.
     proceed(&mut won);
     assert!(won.state().combat.is_none(), "the proceed ended the fight");
+    assert!(!holds_relic(&won, "RELIC.LANTERN"), "the relic is offered");
+    let claim = won
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, Action::ClaimReward { fingerprint, .. }
+                if fingerprint.model_id == Some(id("RELIC.LANTERN")))
+        })
+        .cloned()
+        .expect("the relic is on the reward screen");
+    won.step(claim).expect("claiming applies");
     assert!(holds_relic(&won, "RELIC.LANTERN"));
-    assert_only_the_map_is_left(&won);
-    // The fight itself laid out no reward set; the relic came straight off
-    // the event, so no identifier was spent on the way.
-    assert_eq!(next_reward_set_id(&won), sets_before);
+    // The fight itself laid out no reward set; the event's set is the one
+    // identifier spent on the way.
+    assert_eq!(next_reward_set_id(&won), sets_before + 1);
 }
 
 /// The finished dummy page: still the room the run is standing in, with

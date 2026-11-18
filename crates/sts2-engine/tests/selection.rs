@@ -43,6 +43,7 @@ fn card(model_id: &str, rarity: CardRarity, effects: Vec<Command>) -> CardDefini
         energy_cost: 0,
         star_cost: -1,
         returns_to_hand: false,
+        returns_to_draw_pile_top: false,
         costs_star_x: false,
         costs_x: false,
         innate: false,

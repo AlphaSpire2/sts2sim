@@ -82,6 +82,18 @@ fn poison_everything(amount: i32) -> Command {
     sweeping_power("POWER.POISON_POWER", amount)
 }
 
+/// Outbreak, played: poison on every enemy that can be hit, and then each
+/// one's poison sets off.
+fn outbreak(amount: i32) -> Vec<Command> {
+    vec![
+        poison_everything(amount),
+        Command::Power(sts2_engine::PowerCmd::Trigger {
+            target: CreatureSelector::AllOpponents,
+            power: id("POWER.POISON_POWER"),
+        }),
+    ]
+}
+
 /// The power worked onto every enemy that can be hit, one at a time.
 fn sweeping_power(power: &str, amount: i32) -> Command {
     apply_power(power, CreatureSelector::AllOpponents, Amount::Fixed(amount))
@@ -635,18 +647,17 @@ fn poisons() -> Vec<CardDefinition> {
             ),
             vec![buff("POWER.NOXIOUS_FUMES_POWER", 3)],
         ),
-        // An outbreak burns everything every third time its owner poisons
-        // anything. The three is the power's own; the card's repeat var is
-        // description.
+        // An outbreak poisons everything, and then every enemy's poison bites
+        // at once.
         upgrading(
             card(
                 "CARD.OUTBREAK",
-                CardType::Power,
-                TargetType::SelfTarget,
-                1,
-                vec![buff("POWER.OUTBREAK_POWER", 11)],
+                CardType::Skill,
+                TargetType::AllEnemies,
+                3,
+                outbreak(9),
             ),
-            vec![buff("POWER.OUTBREAK_POWER", 15)],
+            outbreak(12),
         ),
         upgrading(
             card(
@@ -1345,6 +1356,7 @@ fn expose(vulnerable: i32) -> Vec<Command> {
         Command::Creature(CreatureCmd::LoseBlock {
             target: CreatureSelector::Target,
             amount: Amount::counting(Count::TargetBlock),
+            remover: Some(CreatureSelector::Owner),
         }),
         Command::When {
             otherwise: Vec::new(),

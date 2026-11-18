@@ -509,6 +509,25 @@ fn a_scrape_keeps_only_what_costs_nothing() {
     );
 }
 
+/// What a Scrape reads is the cost with every modifier standing: under a
+/// Corruption a skill it draws costs nothing and stays.
+#[test]
+fn a_scrape_reads_the_cost_a_power_writes() {
+    let mut simulator = scenario(&Fight {
+        hand: &[("CARD.SCRAPE", 0)],
+        draw: &[
+            ("CARD.STRIKE_DEFECT", 0),
+            ("CARD.STRIKE_DEFECT", 0),
+            ("CARD.STRIKE_DEFECT", 0),
+            ("CARD.DEFEND_DEFECT", 0),
+        ],
+        powers: &[(0, "POWER.CORRUPTION_POWER", 1, PowerType::Buff)],
+        ..Fight::default()
+    });
+    play(&mut simulator, "CARD.SCRAPE");
+    assert_eq!(pile(&simulator, PileName::Hand), ["CARD.DEFEND_DEFECT"]);
+}
+
 /// A Sunder pays energy only where the swing killed something.
 #[test]
 fn a_sunder_pays_only_for_a_kill() {

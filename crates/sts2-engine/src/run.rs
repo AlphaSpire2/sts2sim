@@ -1767,6 +1767,17 @@ pub enum EventEffect {
     /// of time as it walks out of the fight, so the guard here is whether
     /// anything escaped it.
     UnlessTheFightTimedOut(Vec<EventEffect>),
+    /// One reward set after a fight the event walked into: a potion rolled out
+    /// of `rolled_potion_from` on the rewards stream where that list holds
+    /// any, a relic off the front of the bag where `relic` says so, and then
+    /// whatever the fight itself added to its rewards. Nothing is offered
+    /// where all three come to nothing.
+    OfferWithTheFightsExtras {
+        #[serde(default)]
+        rolled_potion_from: Vec<ModelId>,
+        #[serde(default)]
+        relic: bool,
+    },
     /// This many upgradable cards of the deck, upgraded one at a time: the
     /// deck's upgradable cards sorted, then stably shuffled on the event's own
     /// stream, and the first few taken.

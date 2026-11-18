@@ -240,8 +240,8 @@ fn damage_shaping_powers() -> Vec<PowerDefinition> {
         }),
         // Vulnerable's multiplier is not a constant: the power offers its own
         // increase to whatever wants to raise it, in order — a Paper Phrog and
-        // a Cruelty on whoever is swinging, and a Debilitate on whoever is
-        // taking it. Two of the three are here: a Cruelty adds its own stacks
+        // a Cruelty on whoever is swinging (or on the owner of the pet that is
+        // swinging), and a Debilitate on whoever is taking it. Two of the three are here: a Cruelty adds its own stacks
         // as hundredths, and a Paper Phrog held by whoever is swinging adds a
         // quarter. Both are additive, so the order they are asked in does not
         // show.
@@ -251,7 +251,11 @@ fn damage_shaping_powers() -> Vec<PowerDefinition> {
                 HookCondition::OwnerTakesPoweredDamage,
                 vec![Command::Modify(ModifierCmd::Scale(debilitated(
                     Amount::Sum(vec![
-                        Amount::per(150, 1, Count::DamageDealerPower(id("POWER.CRUELTY_POWER"))),
+                        Amount::per(
+                            150,
+                            1,
+                            Count::DamageDealerOrPetOwnerPower(id("POWER.CRUELTY_POWER")),
+                        ),
                         Amount::per(0, 25, Count::DamageDealerRelic(id("RELIC.PAPER_PHROG"))),
                     ]),
                 )))],
@@ -395,20 +399,24 @@ fn burrowed_power() -> PowerDefinition {
         keeps_block: true,
         stops_draws_outside_hand_draw: false,
         keeps_hand: false,
-        hooks: vec![ModifierHook::every_turn(
-            HookEvent::AfterBlockBroken,
-            vec![
-                Command::Creature(CreatureCmd::Stun {
-                    target: CreatureSelector::Owner,
-                    next_move: StunFollowUp::Named("BITE_MOVE".to_owned()),
-                    stun_move: Vec::new(),
-                }),
-                remove_self(),
-            ],
-        )],
+        hooks: vec![
+            ModifierHook::every_turn(
+                HookEvent::AfterBlockBroken,
+                vec![
+                    Command::Creature(CreatureCmd::Stun {
+                        target: CreatureSelector::Owner,
+                        next_move: StunFollowUp::Named("BITE_MOVE".to_owned()),
+                        stun_move: Vec::new(),
+                    }),
+                    remove_self(),
+                ],
+            )
+            .when(HookCondition::OwnersBlockBroke),
+        ],
         on_removed: vec![Command::Creature(CreatureCmd::LoseBlock {
             target: CreatureSelector::Owner,
             amount: Amount::Fixed(999_999_999),
+            remover: None,
         })],
         ..single("POWER.BURROWED_POWER", PowerType::Buff)
     }
@@ -673,6 +681,7 @@ fn reacting_powers() -> Vec<PowerDefinition> {
                     (0..4)
                         .map(|slot| {
                             Command::Creature(CreatureCmd::Add {
+                                hp_bonus: None,
                                 monster: id("MONSTER.WRIGGLER"),
                                 // The wriggler slots are named in order.
                                 slot: sts2_engine::SpawnSlot::Named(format!(
@@ -809,6 +818,15 @@ fn reacting_powers() -> Vec<PowerDefinition> {
                         otherwise: Vec::new(),
                         condition: Condition::ListeningPowerAmountAbove(0),
                         then: vec![Command::Creature(CreatureCmd::Add {
+                            // The replacement carries one stock less, and it
+                            // stands up ten stronger for every time a bot has
+                            // been replaced: ten for each of the two stocks
+                            // it no longer holds.
+                            hp_bonus: Some(Amount::Scaled {
+                                base: 30,
+                                per: -10,
+                                count: Count::ListeningPowerAmount,
+                            }),
                             monster: id("MONSTER.AXEBOT"),
                             slot: sts2_engine::SpawnSlot::SameAsOwner,
                             // A bot built with a stock of its own opens on
@@ -3443,38 +3461,13 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
         // Poison costs its owner what it is worth as their turn opens, and one
         // of it wears off for every time it bit. An accelerant on the other
         // side buys extra bites, and the amount comes down between them, so the
-        // second is worth one less than the first.
+        // second is worth one less than the first. An outbreak sets the same
+        // bites off whenever it is played.
         PowerDefinition {
             hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::AfterSideTurnStart,
-                    vec![Command::Repeat {
-                        times: Amount::Least(vec![
-                            stacks(),
-                            Amount::Sum(vec![
-                                Amount::Fixed(1),
-                                Amount::counting(Count::LivingOpponentsPower(id(
-                                    "POWER.ACCELERANT_POWER",
-                                ))),
-                            ]),
-                        ]),
-                        then: vec![
-                            Command::Creature(CreatureCmd::Damage {
-                                target: CreatureSelector::Owner,
-                                amount: stacks(),
-                                props: ValueProps::UNBLOCKABLE,
-                            }),
-                            // The stack only comes off if the owner survived
-                            // the blow.
-                            Command::When {
-                                otherwise: Vec::new(),
-                                condition: Condition::OwnerIsAlive,
-                                then: vec![decrement()],
-                            },
-                        ],
-                    }],
-                )
-                .when(HookCondition::OwnerIsParticipant),
+                ModifierHook::every_turn(HookEvent::AfterSideTurnStart, poison_bites())
+                    .when(HookCondition::OwnerIsParticipant),
+                ModifierHook::every_turn(HookEvent::PowerTriggered, poison_bites()),
             ],
             ..counter("POWER.POISON_POWER", PowerType::Debuff)
         },
@@ -3692,39 +3685,6 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
                 .when(HookCondition::OwnerIsParticipant),
             ],
             ..counter("POWER.NOXIOUS_FUMES_POWER", PowerType::Buff)
-        },
-        // An outbreak counts the times its owner has worked poison on anything,
-        // and every third one it burns everything for what it is worth. The
-        // count is the power's own, and it is kept modulo three.
-        PowerDefinition {
-            hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::AfterPowerAmountChanged,
-                    vec![
-                        Command::Power(PowerCmd::ModifyCounter {
-                            power: PowerRef::listening(),
-                            amount: Amount::Fixed(1),
-                        }),
-                        Command::When {
-                            otherwise: Vec::new(),
-                            condition: Condition::ListeningPowerCounterAtLeast(3),
-                            then: vec![
-                                Command::Creature(CreatureCmd::Damage {
-                                    target: CreatureSelector::AllOpponents,
-                                    amount: stacks(),
-                                    props: ValueProps::UNPOWERED,
-                                }),
-                                Command::Power(PowerCmd::ModifyCounter {
-                                    power: PowerRef::listening(),
-                                    amount: Amount::Fixed(-3),
-                                }),
-                            ],
-                        },
-                    ],
-                )
-                .when(HookCondition::OwnerWorkedPower(id("POWER.POISON_POWER"))),
-            ],
-            ..counter("POWER.OUTBREAK_POWER", PowerType::Buff)
         },
         // Phantom blades make every Shiv keep itself, and put their whole worth
         // behind the first Shiv of a turn and nothing behind the rest.
@@ -4413,6 +4373,7 @@ fn gremlin_merc_powers() -> Vec<PowerDefinition> {
                             slot: sts2_engine::SpawnSlot::Named("fat".to_owned()),
                         }),
                         Command::Creature(CreatureCmd::Add {
+                            hp_bonus: None,
                             monster: id("MONSTER.SNEAKY_GREMLIN"),
                             slot: sts2_engine::SpawnSlot::Named("sneaky".to_owned()),
                             initial_state: None,
@@ -5481,4 +5442,33 @@ pub(crate) fn shivs_into_hand(count: Amount, upgraded: bool) -> Command {
         temporary_cost: None,
         position: DrawPilePosition::Bottom,
     })
+}
+
+/// Poison's bites: as many as the amount allows, one more for every
+/// accelerant on the other side, each worth what is left, and a stack off for
+/// each one its owner survived.
+fn poison_bites() -> Vec<Command> {
+    vec![Command::Repeat {
+        times: Amount::Least(vec![
+            stacks(),
+            Amount::Sum(vec![
+                Amount::Fixed(1),
+                Amount::counting(Count::LivingOpponentsPower(id("POWER.ACCELERANT_POWER"))),
+            ]),
+        ]),
+        then: vec![
+            Command::Creature(CreatureCmd::Damage {
+                target: CreatureSelector::Owner,
+                amount: stacks(),
+                props: ValueProps::UNBLOCKABLE,
+            }),
+            // The stack only comes off if the owner survived
+            // the blow.
+            Command::When {
+                otherwise: Vec::new(),
+                condition: Condition::OwnerIsAlive,
+                then: vec![decrement()],
+            },
+        ],
+    }]
 }

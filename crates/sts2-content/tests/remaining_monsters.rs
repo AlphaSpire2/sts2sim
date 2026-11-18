@@ -326,7 +326,7 @@ fn a_battle_friend_stands_for_three_turns_and_then_leaves() {
         );
         let mut scenario = ScenarioBuilder::new(
             "LASTMONSTERS",
-            id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"),
+            id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"),
         )
         .player_hp(500, 500)
         .energy(3, 3)
@@ -539,4 +539,44 @@ fn the_medium_twig_slime_opens_on_its_sticky_shot() {
             ["STICKY_SHOT_MOVE", "POKEY_POUNCE_MOVE"].contains(&enemy(&slime).move_state.as_str())
         );
     }
+}
+
+/// An Axebot that dies holding stock is replaced by one carrying a stock less,
+/// and the replacement stands up ten stronger for every stock it no longer
+/// holds: one replaced from two stocks rolls its health from ten above the
+/// plain range.
+#[test]
+fn an_axebots_replacement_rolls_its_health_ten_higher_per_respawn() {
+    let mut simulator = ScenarioBuilder::new("LASTMONSTERS", id("ENCOUNTER.AXEBOTS_NORMAL"))
+        .player_hp(500, 500)
+        .energy(3, 3)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.AXEBOT"), 1, 76, "HAMMER_UPPERCUT_MOVE")
+        .power(1, id("POWER.STOCK_POWER"), 2, sts2_engine::PowerType::Buff)
+        .card(PileName::Hand, 0, card("CARD.STRIKE_IRONCLAD"), 1)
+        .build(content_at(0))
+        .unwrap();
+    let strike = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, Action::PlayCard { .. }))
+        .cloned()
+        .unwrap();
+    simulator.step(strike).unwrap();
+    let replacement = simulator
+        .state()
+        .combat
+        .as_ref()
+        .unwrap()
+        .creatures
+        .iter()
+        .find(|creature| creature.side == CombatSide::Enemy && creature.alive())
+        .expect("a replacement stands");
+    assert!(
+        (80..=88).contains(&replacement.max_hp),
+        "rolled from 70 to 78, ten higher: {}",
+        replacement.max_hp
+    );
+    assert_eq!(replacement.current_hp, replacement.max_hp);
 }

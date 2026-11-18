@@ -903,16 +903,18 @@ fn uncommons() -> Vec<CardDefinition> {
             )))),
             5,
         ),
-        striking(upgrading(
+        // A shining strike is put back on top of the draw pile wherever a play
+        // would have discarded it.
+        crate::cards::back_on_the_draw_pile(striking(upgrading(
             card(
                 "CARD.SHINING_STRIKE",
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 1,
-                shining_strike(8),
+                vec![attack(8), gain_stars(2)],
             ),
-            shining_strike(11),
-        )),
+            vec![attack(11), gain_stars(2)],
+        ))),
         upgrading_cost(
             card(
                 "CARD.SPECTRUM_SHIFT",
@@ -1142,24 +1144,6 @@ fn resonance(strength: i32) -> Vec<Command> {
             CreatureSelector::AllOpponents,
             Amount::Fixed(-1),
         ),
-    ]
-}
-
-/// Shining Strike, played: the blow, two stars, and the card itself back on top
-/// of the draw pile unless it is about to burn up.
-fn shining_strike(damage: i32) -> Vec<Command> {
-    vec![
-        attack(damage),
-        gain_stars(2),
-        Command::When {
-            condition: Condition::Not(Box::new(Condition::SourceCardBurnsUp)),
-            then: vec![Command::CardPile(CardPileCmd::MoveToPile {
-                cards: CardSelector::Source,
-                pile: PileName::Draw,
-                position: DrawPilePosition::Top,
-            })],
-            otherwise: Vec::new(),
-        },
     ]
 }
 

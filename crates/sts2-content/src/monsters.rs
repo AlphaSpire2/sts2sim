@@ -338,6 +338,7 @@ fn fogmog_at(ascension: u8) -> MonsterDefinition {
                 state_id: "ILLUSION_MOVE".to_owned(),
                 intent: Intent::new("ILLUSION_MOVE", vec![MoveIntent::of("summon")]),
                 commands: vec![Command::Creature(CreatureCmd::Add {
+                    hp_bonus: None,
                     initial_state: None,
                     then: Vec::new(),
                     monster: id("MONSTER.EYE_WITH_TEETH"),
@@ -1481,6 +1482,7 @@ fn ovicopter_at(ascension: u8) -> MonsterDefinition {
     let tenderizer = asc(AscensionLevel::DeadlyEnemies, 8, 7);
     let lay_one = || {
         Command::Creature(CreatureCmd::Add {
+            hp_bonus: None,
             monster: id("MONSTER.TOUGH_EGG"),
             slot: sts2_engine::SpawnSlot::LastFree,
             initial_state: None,
@@ -2944,6 +2946,7 @@ fn living_fog_at(ascension: u8) -> MonsterDefinition {
                 // and the swing follows it.
                 commands: vec![
                     Command::Creature(CreatureCmd::Add {
+                        hp_bonus: None,
                         monster: id("MONSTER.GAS_BOMB"),
                         slot: sts2_engine::SpawnSlot::FirstFree,
                         initial_state: None,
@@ -3611,6 +3614,7 @@ fn the_obscura_at(ascension: u8) -> MonsterDefinition {
                 state_id: "ILLUSION_MOVE".to_owned(),
                 intent: Intent::new("ILLUSION_MOVE", vec![MoveIntent::of("summon")]),
                 commands: vec![Command::Creature(CreatureCmd::Add {
+                    hp_bonus: None,
                     initial_state: None,
                     then: Vec::new(),
                     monster: id("MONSTER.PARAFRIGHT"),
@@ -4939,6 +4943,7 @@ fn two_tailed_rat_at(ascension: u8) -> MonsterDefinition {
                         // The last slot nothing is standing in, and no free
                         // slot at all is a call that brings nobody.
                         Command::Creature(CreatureCmd::Add {
+                            hp_bonus: None,
                             monster: id("MONSTER.TWO_TAILED_RAT"),
                             slot: SpawnSlot::LastFree,
                             initial_state: None,
