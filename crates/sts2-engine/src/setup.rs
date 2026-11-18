@@ -458,8 +458,10 @@ impl Simulator {
                         // Rolled off the run's seed and the relic's place on
                         // the belt: deterministic, and never off a stream
                         // the fight will spend.
-                        let hash =
-                            sts2_rng::deterministic_hash(&format!("{seed}:{}:{index}", relic.id));
+                        let hash = sts2_rng::deterministic_hash_old(&format!(
+                            "{seed}:{}:{index}",
+                            relic.id
+                        ));
                         hash.rem_euclid(wraps_at)
                     }
                     (None, Some(CounterKind::Cycle { .. }) | None) => {

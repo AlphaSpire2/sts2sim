@@ -265,8 +265,8 @@ fn the_raiders_are_three_of_the_five_and_all_different() {
 /// opening state: the crossbow one loads before it fires.
 #[test]
 fn a_raider_opens_on_its_own_machines_first_state() {
-    // Floor five is a walk that draws the crossbow raider.
-    let fight = walk_in("ENCOUNTER.RUBY_RAIDERS_NORMAL", 5);
+    // Floor six is a walk that draws the crossbow raider.
+    let fight = walk_in("ENCOUNTER.RUBY_RAIDERS_NORMAL", 6);
     for (model, slot, _) in enemies(&fight) {
         assert_eq!(slot, None, "{model} stands in no named slot");
     }
@@ -287,16 +287,16 @@ fn a_raider_opens_on_its_own_machines_first_state() {
             .collect::<Vec<_>>(),
         vec![
             (
+                "MONSTER.BRUTE_RUBY_RAIDER".to_owned(),
+                "BEAT_MOVE".to_owned()
+            ),
+            (
                 "MONSTER.ASSASSIN_RUBY_RAIDER".to_owned(),
                 "KILLSHOT_MOVE".to_owned()
             ),
             (
                 "MONSTER.CROSSBOW_RUBY_RAIDER".to_owned(),
                 "RELOAD_MOVE".to_owned()
-            ),
-            (
-                "MONSTER.BRUTE_RUBY_RAIDER".to_owned(),
-                "BEAT_MOVE".to_owned()
             ),
         ]
     );
@@ -398,7 +398,7 @@ fn the_rat_room_fills_its_back_three_slots_and_rotates_their_openers() {
         "SCREECH_MOVE".to_owned(),
     ];
     let mut seen = BTreeSet::new();
-    for floor in 1..12 {
+    for floor in 1..18 {
         let fight = walk_in("ENCOUNTER.TWO_TAILED_RATS_NORMAL", floor);
         assert_eq!(
             enemies(&fight)

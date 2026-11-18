@@ -1596,7 +1596,10 @@ fn grab_on_the_belt(simulator: &Simulator) -> (Vec<EventEffect>, i32) {
 
 #[test]
 fn an_endless_conveyor_rolls_a_dish_and_puts_the_next_one_up_behind_it() {
-    let mut simulator = Visit::new("EVENT.ENDLESS_CONVEYOR").gold(200).enter();
+    let mut simulator = Visit::new("EVENT.ENDLESS_CONVEYOR")
+        .gold(200)
+        .seed("PSQB89LLX5XF")
+        .enter();
     let page = option_ids(&simulator);
     assert_eq!(page.len(), 2);
     assert!(

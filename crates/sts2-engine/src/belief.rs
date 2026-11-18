@@ -132,13 +132,7 @@ impl BeliefState {
         // Fresh streams from the analysis walk, never the real run seed: the
         // sampled world's future randomness is analysis randomness.
         state.rng = RunRngSet::new(format!("ANALYSIS{:016X}", splitmix64(&mut mix)));
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "the player seed is 32 bits by construction"
-        )]
-        {
-            state.player_rng = PlayerRngSet::new(splitmix64(&mut mix) as u32);
-        }
+        state.player_rng = PlayerRngSet::new(splitmix64(&mut mix));
         Simulator::from_scenario(state, Arc::clone(&self.content))
     }
 }
@@ -248,13 +242,7 @@ impl ActBeliefState {
             &mut Rearrange::Deal(&mut analysis),
         );
         state.rng = RunRngSet::new(format!("ANALYSIS{:016X}", splitmix64(&mut mix)));
-        #[allow(
-            clippy::cast_possible_truncation,
-            reason = "the player seed is 32 bits by construction"
-        )]
-        {
-            state.player_rng = PlayerRngSet::new(splitmix64(&mut mix) as u32);
-        }
+        state.player_rng = PlayerRngSet::new(splitmix64(&mut mix));
         Simulator::from_scenario(state, Arc::clone(&self.content))
     }
 }

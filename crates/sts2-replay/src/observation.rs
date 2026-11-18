@@ -93,14 +93,10 @@ fn render_player(state: &GameState, content: &sts2_engine::ContentRegistry) -> V
             .map(|run| render_player_grab_bag(&run.player_relic_grab_bag)),
         "rng": {
             "seed": state.player_rng.seed(),
-            "counters": {
-                "rewards": state.player_rng.stream(PlayerStream::Rewards).counter(),
-                "shops": state.player_rng.stream(PlayerStream::Shops).counter(),
-                "transformations": state
-                    .player_rng
-                    .stream(PlayerStream::Transformations)
-                    .counter(),
-            },
+            "rngs": PlayerStream::ALL
+                .into_iter()
+                .map(|stream| (stream.name().to_owned(), render_rng(state.player_rng.stream(stream))))
+                .collect::<Map<_, _>>(),
         },
     })
 }
@@ -402,26 +398,18 @@ fn render_run(state: &GameState, run: &RunState) -> Value {
         "shared_relic_grab_bag": render_grab_bag(&run.shared_relic_grab_bag),
         "rng": {
             "seed": run.config.seed,
-            "counters": {
-                "up_front": counter(state, RunStream::UpFront),
-                "shuffle": counter(state, RunStream::Shuffle),
-                "unknown_map_point": counter(state, RunStream::UnknownMapPoint),
-                "combat_card_generation": counter(state, RunStream::CombatCardGeneration),
-                "combat_potion_generation": counter(state, RunStream::CombatPotionGeneration),
-                "combat_card_selection": counter(state, RunStream::CombatCardSelection),
-                "combat_energy_costs": counter(state, RunStream::CombatEnergyCosts),
-                "combat_targets": counter(state, RunStream::CombatTargets),
-                "monster_ai": counter(state, RunStream::MonsterAi),
-                "niche": counter(state, RunStream::Niche),
-                "combat_orbs": counter(state, RunStream::CombatOrbs),
-                "treasure_room_relics": counter(state, RunStream::TreasureRoomRelics),
-            },
+            "rngs": RunStream::ALL
+                .into_iter()
+                .map(|stream| (stream.name().to_owned(), render_rng(state.rng.stream(stream))))
+                .collect::<Map<_, _>>(),
         },
     })
 }
 
-fn counter(state: &GameState, stream: RunStream) -> u64 {
-    state.rng.stream(stream).counter()
+/// One stream as a save carries it: the draws taken so far and the
+/// generator's four state words after them.
+fn render_rng(rng: &sts2_rng::Rng) -> Value {
+    json!({"counter": rng.counter(), "state": rng.state()})
 }
 
 fn render_grab_bag(bag: &sts2_engine::RelicGrabBagState) -> Value {

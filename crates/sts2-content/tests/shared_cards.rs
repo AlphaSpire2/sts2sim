@@ -2104,28 +2104,29 @@ fn an_entropy_puts_its_power_on_and_nothing_else() {
 
     // A stream position at which the two filters part ways: with the
     // combat-ineligible cards taken out ahead of the roll, the transform
-    // lands on Refine Blade rather than Reflect.
-    let mut transformed = ScenarioBuilder::new("ZPBUDFAAAA", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
-        .played_as(id("CHARACTER.REGENT"))
-        .player_hp(75, 75)
-        .energy(3, 3)
-        .turn(3, 3)
-        .rng_counter(RunStream::MonsterAi, 0)
-        .rng_counter(RunStream::CombatCardSelection, 0)
-        .power(
-            0,
-            id("POWER.ENTROPY_POWER"),
-            1,
-            sts2_engine::PowerType::Buff,
-        )
-        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
-        .card(PileName::Draw, 10, card("CARD.DEFEND_REGENT", 0), 1)
-        .build(registry)
-        .expect("the transform scenario builds");
+    // lands on Neutron Aegis rather than Orbit.
+    let mut transformed =
+        ScenarioBuilder::new("ZPBUD0000002", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+            .played_as(id("CHARACTER.REGENT"))
+            .player_hp(75, 75)
+            .energy(3, 3)
+            .turn(3, 3)
+            .rng_counter(RunStream::MonsterAi, 0)
+            .rng_counter(RunStream::CombatCardSelection, 0)
+            .power(
+                0,
+                id("POWER.ENTROPY_POWER"),
+                1,
+                sts2_engine::PowerType::Buff,
+            )
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+            .card(PileName::Draw, 10, card("CARD.DEFEND_REGENT", 0), 1)
+            .build(registry)
+            .expect("the transform scenario builds");
     end_turn(&mut transformed);
     assert_eq!(
         pile(&transformed, PileName::Hand),
-        ["CARD.REFINE_BLADE"],
+        ["CARD.NEUTRON_AEGIS"],
         "the combat-ineligible Royalties is removed before this roll"
     );
     assert_eq!(
@@ -2637,7 +2638,7 @@ fn a_splash_offers_the_other_characters_attacks() {
 fn splash_with_seven_stars(upgrade: u8) -> Simulator {
     let mut simulator = scenario(&[("CARD.SPLASH", upgrade)], &[], 999)
         // This roll offers Seven Stars, so both resource costs are exercised.
-        .rng_counter(RunStream::CombatCardGeneration, 59)
+        .rng_counter(RunStream::CombatCardGeneration, 50)
         .build(sts2_content::standard_registry())
         .expect("the scenario builds");
     play(&mut simulator, "CARD.SPLASH");

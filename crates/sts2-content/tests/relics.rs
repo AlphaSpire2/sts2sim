@@ -3433,7 +3433,7 @@ fn a_sea_glass_deals_fifteen_of_another_characters_cards() {
         sequence: 1,
         kind: "choice.index".into(),
         payload: serde_json::json!({"data": {
-            "choice_id": choice_id.get(), "indexes": [12, 14, 5],
+            "choice_id": choice_id.get(), "indexes": [12, 13, 5],
             "offered": {"options": {"options": candidates.iter().map(|card| {
                 serde_json::json!({"index": card.index, "fingerprint": card.fingerprint})
             }).collect::<Vec<_>>()}}
@@ -3463,7 +3463,7 @@ fn a_sea_glass_deals_fifteen_of_another_characters_cards() {
         &adapter.simulator().state().run_player.deck[simulator.state().run_player.deck.len()..];
     assert_eq!(
         added.iter().map(|card| &card.model_id).collect::<Vec<_>>(),
-        [12, 14, 5].map(|index| &candidates[index].fingerprint.model_id)
+        [12, 13, 5].map(|index| &candidates[index].fingerprint.model_id)
     );
 
     // The grid takes any number of its cards, a pick at a time: one card is
@@ -6605,9 +6605,9 @@ fn scroll_boxes_roll_a_claw_bundle_for_the_defect() {
     take_from_the_chest(&mut his);
     assert_eq!(rewards_counter(&his) - before, 8);
 
-    // Forty-one is the first rewards counter of this run whose first die comes
-    // up under a hundredth.
-    let mut lucky = his_run(41);
+    // Two hundred and seventy-one is the first rewards counter of this run
+    // whose first die comes up under a hundredth.
+    let mut lucky = his_run(271);
     take_from_the_chest(&mut lucky);
     let sts2_engine::DecisionContext::ChooseCards {
         candidates,

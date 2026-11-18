@@ -41,8 +41,8 @@ pub fn standard_neow_options(seed: &str) -> Vec<String> {
 /// starts from.
 #[must_use]
 pub fn standard_neow_page(seed: &str) -> (Vec<String>, u64) {
-    let run_seed = deterministic_hash(seed) as u32;
-    let event_seed = run_seed.wrapping_add(deterministic_hash("NEOW") as u32);
+    let run_seed = deterministic_hash(seed);
+    let event_seed = run_seed.wrapping_add(deterministic_hash("NEOW"));
     let mut rng = Rng::new(event_seed);
 
     let curse = CURSES[rng

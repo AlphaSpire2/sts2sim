@@ -3041,7 +3041,7 @@ impl Simulator {
             .collect();
         // The stream is built fresh from the relic's owner and identity for
         // every marking, so it reads the same dice each time it is asked.
-        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed()) as u32;
+        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed());
         let model_entry = self.state.run_player.relics[relic_index]
             .model_id
             .entry()
@@ -3986,7 +3986,7 @@ impl Simulator {
     /// so it is the same whenever the run walks in and never moves a run
     /// counter.
     fn event_rng(&self, model_id: &ModelId) -> Rng {
-        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed()) as u32;
+        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed());
         Rng::content_local(run_seed, 0, model_id.entry(), 0)
     }
 
@@ -4254,8 +4254,8 @@ impl Simulator {
             .as_ref()
             .ok_or_else(|| EngineError::new(ErrorCode::WrongDecisionContext))?;
         let seed = sts2_rng::deterministic_hash(self.state.rng.string_seed())
-            .wrapping_add(i32::try_from(run.floor).unwrap_or(i32::MAX))
-            .wrapping_add(sts2_rng::deterministic_hash(model_id.entry())) as u32;
+            .wrapping_add(u64::from(run.floor))
+            .wrapping_add(sts2_rng::deterministic_hash(model_id.entry()));
         let mut rng = Rng::new(seed);
         let spawns = match &encounter.generation {
             crate::MonsterGeneration::Placed(spawns) => {

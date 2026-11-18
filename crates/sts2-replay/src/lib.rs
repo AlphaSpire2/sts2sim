@@ -764,9 +764,9 @@ mod tests {
              [FormatVersion \"1\"]\n\
              [RecorderVersion \"test\"]\n\
              [RunId \"run\"]\n\
-             [GameVersion \"v0.107.1\"]\n\
-             [GameCommit \"59260271\"]\n\
-             [ModelIdHash \"3954186980\"]\n\
+             [GameVersion \"v0.111.1\"]\n\
+             [GameCommit \"cc1f9462\"]\n\
+             [ModelIdHash \"1568834832\"]\n\
              [Seed \"ABC\"]\n\
              [Mode \"STANDARD\"]\n\
              [Ascension \"0\"]\n\
@@ -815,7 +815,7 @@ mod tests {
     fn format_two_uses_the_same_build_and_mode_compatibility_checks() {
         let input = minimal("", "{}").replace("[FormatVersion \"1\"]", "[FormatVersion \"2\"]");
         validate_compatibility(&Parser::new(Cursor::new(&input)).unwrap()).unwrap();
-        let unsupported = input.replace("59260271", "unsupported");
+        let unsupported = input.replace("cc1f9462", "unsupported");
         assert_eq!(
             validate_compatibility(&Parser::new(Cursor::new(unsupported)).unwrap())
                 .unwrap_err()

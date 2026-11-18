@@ -125,10 +125,10 @@ fn the_shrinker_beetle_fight_plays_out_along_its_action_line() {
 
     end_turn(&mut simulator);
     assert_eq!((combat(&simulator).round, hp(&simulator, 0)), (3, 73));
-    assert_eq!(ids(&combat(&simulator).player.piles.hand), [10, 4, 7, 6, 0]);
+    assert_eq!(ids(&combat(&simulator).player.piles.hand), [10, 2, 0, 4, 6]);
     assert_eq!(
         ids(&combat(&simulator).player.piles.draw),
-        [3, 1, 9, 5, 2, 8]
+        [5, 8, 3, 7, 9, 1]
     );
     assert_eq!(
         simulator.state().rng.stream(RunStream::Shuffle).counter(),

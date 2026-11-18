@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-pub const PINNED_COMPATIBILITY_ID: &str = "sts2-v0.107.1-59260271-models-3954186980";
-pub const PINNED_GAME_VERSION: &str = "v0.107.1";
-pub const PINNED_GAME_COMMIT: &str = "59260271";
-pub const PINNED_MODEL_ID_HASH: u32 = 3_954_186_980;
+pub const PINNED_COMPATIBILITY_ID: &str = "sts2-v0.111.1-cc1f9462-models-1568834832";
+pub const PINNED_GAME_VERSION: &str = "v0.111.1";
+pub const PINNED_GAME_COMMIT: &str = "cc1f9462";
+pub const PINNED_MODEL_ID_HASH: u32 = 1_568_834_832;
 /// The one unlock preset the pinned baseline generates runs against.
-pub const FIXTURE_UNLOCK_PRESET: &str = "v0107_1_veteran";
+pub const FIXTURE_UNLOCK_PRESET: &str = "v0111_1_veteran";
 
 /// A stable content identifier such as `CARD.BASH`.
 ///
@@ -406,7 +406,7 @@ pub struct ProfileInputs {
 /// prior-run count that is merely nonzero. One entry stands for one
 /// generation environment.
 const REGISTERED_UNLOCK_PRESETS: [&str; 1] = [include_str!(
-    "../../../manifests/unlock-presets/v0107_1_veteran.json"
+    "../../../manifests/unlock-presets/v0111_1_veteran.json"
 )];
 
 impl UnlockPresetManifest {
@@ -537,20 +537,20 @@ mod tests {
 
     #[test]
     fn preset_matching_relaxes_the_prior_run_count_past_a_first_run() {
-        let registered = UnlockPresetManifest::with_id("v0107_1_veteran").unwrap();
+        let registered = UnlockPresetManifest::with_id("v0111_1_veteran").unwrap();
         let mut unlocks = registered.unlocks.clone();
         unlocks.number_of_runs = 101;
         let named = UnlockPresetManifest::matching(&unlocks).unwrap().unwrap();
         // The one registered environment answers, carrying the asked count
         // and encounter list — projection data rather than generation inputs.
-        assert_eq!(named.preset_id, "v0107_1_veteran");
+        assert_eq!(named.preset_id, "v0111_1_veteran");
         assert_eq!(named.unlocks.number_of_runs, 101);
         assert_eq!(named.unlocks.encounters_seen, unlocks.encounters_seen);
     }
 
     #[test]
     fn preset_matching_ignores_encounters_the_build_never_reads() {
-        let registered = UnlockPresetManifest::with_id("v0107_1_veteran").unwrap();
+        let registered = UnlockPresetManifest::with_id("v0111_1_veteran").unwrap();
         let mut seen_more = registered.unlocks.clone();
         seen_more
             .encounters_seen
@@ -569,7 +569,7 @@ mod tests {
 
     #[test]
     fn preset_matching_holds_the_generation_inputs_apart() {
-        let registered = UnlockPresetManifest::with_id("v0107_1_veteran").unwrap();
+        let registered = UnlockPresetManifest::with_id("v0111_1_veteran").unwrap();
         let mut fresh = registered.unlocks.clone();
         fresh.number_of_runs = 0;
         assert!(UnlockPresetManifest::matching(&fresh).unwrap().is_none());

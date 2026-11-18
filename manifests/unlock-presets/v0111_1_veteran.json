@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "preset_id": "v0107_1_veteran",
-  "compatibility_id": "sts2-v0.107.1-59260271-models-3954186980",
+  "preset_id": "v0111_1_veteran",
+  "compatibility_id": "sts2-v0.111.1-cc1f9462-models-1568834832",
   "description": "The veteran generation environment of the pinned build: a profile past its first run, with every patch epoch revealed, every boss-discovery encounter seen, and both opening acts discovered. Every such profile generates identically, so this one preset carries them all.",
   "unlocks": {
     "epochs": [

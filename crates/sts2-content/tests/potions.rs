@@ -390,7 +390,11 @@ fn alchemize_rolls_one_potion_on_the_potion_stream() {
     assert_eq!(counter(&simulator, RunStream::CombatPotionGeneration), 2);
     assert_eq!(
         belt(&simulator),
-        [Some("POTION.ENERGY_POTION".to_owned()), None, None]
+        [
+            Some("POTION.DROPLET_OF_PRECOGNITION".to_owned()),
+            None,
+            None
+        ]
     );
     // The card burns up for having been played.
     assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.ALCHEMIZE"]);

@@ -89,7 +89,7 @@ fn every_neow_option_a_single_player_run_can_be_offered_is_taken() {
 /// it is standing.
 #[test]
 fn neows_bones_offer_two_of_neows_own_and_charge_a_curse() {
-    let simulator = sts2_content::standard_ironclad_run("N3Z9EE2CXB").expect("the run generates");
+    let simulator = sts2_content::standard_ironclad_run("SEED00002000").expect("the run generates");
     let mut state = simulator.state().clone();
     let option_id = "NEOW.pages.INITIAL.options.NEOWS_BONES".to_owned();
     let option = sts2_engine::EventOption {
@@ -169,7 +169,7 @@ fn neows_bones_wait_for_both_relics_without_holding_the_claimed_relics_body() {
     use sts2_rng::RunStream;
 
     let mut simulator =
-        sts2_content::standard_ironclad_run("N3EWU9Z7TK").expect("the run generates");
+        sts2_content::standard_ironclad_run("BNS3E0000000").expect("the run generates");
     let bones = simulator.legal_actions().iter().find(|action| {
         matches!(action, Action::ChooseEvent { option_id, .. } if option_id.ends_with(".NEOWS_BONES"))
     }).cloned().expect("Neow offers the bones");
