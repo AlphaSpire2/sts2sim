@@ -483,6 +483,19 @@ fn a_knockout_blow_pays_only_for_a_kill() {
     let mut simulator = built(scenario(&[80], &[("CARD.KNOCKOUT_BLOW", 0)], &[], 0));
     play(&mut simulator, "CARD.KNOCKOUT_BLOW");
     assert_eq!(stars(&simulator), 0, "and this one did not");
+
+    // A kill pays whether or not the death counts as fatal: a minion's does
+    // not, and it pays all the same.
+    let mut simulator = built(
+        scenario(&[20, 300], &[("CARD.KNOCKOUT_BLOW", 0)], &[], 0).power(
+            1,
+            id("POWER.MINION_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        ),
+    );
+    play(&mut simulator, "CARD.KNOCKOUT_BLOW");
+    assert_eq!(stars(&simulator), 5, "a minion put down pays too");
 }
 
 // --- the forge ------------------------------------------------------------
@@ -905,6 +918,46 @@ fn the_debuffs_the_pool_lands_on_the_side() {
             );
         }
     }
+}
+
+/// A crush under lists the enemies before it swings: the wrigglers a parasite
+/// it kills lets loose were not there to be crushed.
+#[test]
+fn a_crush_under_leaves_what_its_kill_lets_loose_uncrushed() {
+    let mut simulator = built(
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.PHROG_PARASITE_ELITE"))
+            .played_as(id("CHARACTER.REGENT"))
+            .player_hp(75, 75)
+            .energy(9, 9)
+            .turn(1, 1)
+            .rng_counter(RunStream::MonsterAi, 0)
+            .rng_counter(RunStream::CombatTargets, 0)
+            .enemy(1, id("MONSTER.PHROG_PARASITE"), 5, 60, "INFECT_MOVE")
+            .power(
+                1,
+                id("POWER.INFESTED_POWER"),
+                4,
+                sts2_engine::PowerType::Buff,
+            )
+            .card(PileName::Hand, 0, card("CARD.CRUSH_UNDER", 0), 0),
+    );
+    play(&mut simulator, "CARD.CRUSH_UNDER");
+    let wrigglers: Vec<_> = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("a fight is standing")
+        .creatures
+        .iter()
+        .filter(|creature| creature.model_id == id("MONSTER.WRIGGLER"))
+        .collect();
+    assert_eq!(wrigglers.len(), 4, "the parasite let its wrigglers loose");
+    assert!(
+        wrigglers
+            .iter()
+            .all(|wriggler| wriggler.power_amount("POWER.CRUSH_UNDER_POWER") == 0),
+        "and none of them was crushed"
+    );
 }
 
 /// A know thy place is the two debuffs and nothing else, and the upgrade takes

@@ -719,6 +719,32 @@ fn an_inked_shiv_under_a_fan_of_knives_weakens_every_enemy() {
     assert_eq!(power_amount(&simulator, 2, "POWER.WEAK_POWER"), 1);
 }
 
+/// An echoing slash is one attack however many times it echoes: a skittish
+/// gardener it hit hears the swing once it is over and puts its block up.
+#[test]
+fn an_echoing_slash_is_an_attack_a_skittish_gardener_answers() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.PHANTASMAL_GARDENERS_ELITE"))
+        .played_as(id("CHARACTER.SILENT"))
+        .player_hp(70, 70)
+        .energy(9, 9)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.PHANTASMAL_GARDENER"), 30, 30, "BITE_MOVE")
+        .power(
+            1,
+            id("POWER.SKITTISH_POWER"),
+            6,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.ECHOING_SLASH", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.ECHOING_SLASH");
+    assert_eq!(creature(&simulator, 1).current_hp, 20);
+    assert_eq!(creature(&simulator, 1).block, 6);
+}
+
 /// A knife trap plays every Shiv that has burned up, at whatever the trap was
 /// pointed at, and the upgraded trap upgrades each of them first.
 #[test]

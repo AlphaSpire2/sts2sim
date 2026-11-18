@@ -889,6 +889,12 @@ pub struct PlayerCombatState {
     /// How many card plays this player has started this turn.
     #[serde(default)]
     pub cards_played_this_turn: u32,
+    /// How many of the plays this player chose have finished this turn while a
+    /// Void Form was counting them: a Void Form's own after-card-played
+    /// listener counts each, a replayed card's whole series once, and its
+    /// cards stay free until the count reaches the form's amount.
+    #[serde(default)]
+    pub chosen_plays_finished_this_turn: u32,
     /// Cards this player discarded this turn. The flush of the hand at the end
     /// of a turn is a move between piles rather than a discard, so it does not
     /// count.
@@ -1176,6 +1182,11 @@ pub enum ListenerScope {
 }
 
 /// The `true` a `#[serde(default)]` boolean needs when its absent value is yes.
+/// A play loop runs one pass unless something replays it.
+pub(crate) const fn one_pass() -> i32 {
+    1
+}
+
 pub(crate) const fn yes() -> bool {
     true
 }
@@ -1768,6 +1779,9 @@ pub enum HookCondition {
     /// The play is one the player chose. A listener that counts a turn's
     /// plays skips the ones nobody chose.
     PlayWasChosen,
+    /// The pass the play is on is the last of its series, which is where a
+    /// listener that counts a replayed card once counts it.
+    LastPassOfThePlay,
     /// The card that was played is of this type.
     PlayedCardIsOfType(CardType),
     /// The play or the potion was aimed at somebody, and it belongs to the
@@ -4398,6 +4412,10 @@ pub enum Effect {
         /// reads it to refuse a replay past the first.
         #[serde(default)]
         play_index: i32,
+        /// How many passes the play loop runs, so a listener can tell the
+        /// last pass of a replayed card's series.
+        #[serde(default = "one_pass")]
+        play_count: i32,
     },
     /// The rest of an effect a selection screen interrupted, run where it
     /// stands rather than one command per entry, because that is what the rest
@@ -4624,6 +4642,10 @@ pub enum LoopFrame {
         standing: Vec<CreatureCombatId>,
         then: Vec<crate::Command>,
         context: crate::CommandContext,
+        /// The hits the passes before the interruption landed, which the one
+        /// after-attack pass at the end reports with the rest.
+        #[serde(default)]
+        landed: Vec<(usize, CreatureCombatId, DamageResult)>,
     },
     /// A walk over orbs: the ones it has not reached. Each is looked up again
     /// as it comes up, exactly as an uninterrupted walk looks it up.
@@ -5548,6 +5570,9 @@ pub struct CombatState {
     /// cleared there next time.
     #[serde(default)]
     pub taking_extra_turn: bool,
+    /// The opponents a body wrote down with `Command::NoteOpponents`.
+    #[serde(default)]
+    pub noted_opponents: Vec<CreatureCombatId>,
     /// Arrivals rolled ahead of being brought in: a monster whose health and
     /// identifier are settled before another arrival's, and which joins the
     /// fight after it.
@@ -5558,6 +5583,10 @@ pub struct CombatState {
     /// pass.
     #[serde(default)]
     pub played_card_play_index: i32,
+    /// How many passes the play loop running has, which with the pass it is on
+    /// tells its last pass.
+    #[serde(default = "one_pass")]
+    pub played_card_play_count: i32,
     /// Whether something has made the player ready to end their turn without
     /// them choosing to. Ending a turn this way does not block, so the
     /// handover runs once whatever reached it has settled rather than inside

@@ -665,6 +665,58 @@ fn a_void_form_makes_the_first_cards_free_of_both_pools() {
     );
 }
 
+/// A void form counts a play once it has finished: while the play that will
+/// use up the last free play is still asking its question, the hand is free.
+#[test]
+fn a_void_form_counts_a_play_once_it_has_finished() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[300],
+        powers: &[(0, "POWER.VOID_FORM_POWER", 2, PowerType::Buff)],
+        hand: &[
+            ("CARD.STRIKE_REGENT", 0),
+            ("CARD.DISCOVERY", 0),
+            ("CARD.KINGLY_KICK", 0),
+        ],
+        stars: 0,
+        ..Fight::default()
+    });
+    let kick_cost = |simulator: &Simulator| {
+        simulator
+            .agent_observation()
+            .hand
+            .iter()
+            .find(|card| card.fingerprint.model_id.to_string() == "CARD.KINGLY_KICK")
+            .expect("the kick is in hand")
+            .face
+            .energy_cost
+    };
+    play(&mut simulator, "CARD.STRIKE_REGENT");
+    play(&mut simulator, "CARD.DISCOVERY");
+    assert!(
+        matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::ChooseCards { .. }
+        ),
+        "the discovery is asking"
+    );
+    assert_eq!(
+        kick_cost(&simulator),
+        0,
+        "and the second play has not finished"
+    );
+    let pick = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, sts2_engine::Action::ChooseCards { .. }))
+        .cloned()
+        .expect("the discovery offers a card");
+    simulator.step(pick).expect("the pick applies");
+    assert!(
+        kick_cost(&simulator) > 0,
+        "once it has, the kick costs again"
+    );
+}
+
 /// A hammer time mirrors every forge onto the other players. No single-player
 /// run has one, so what it declares never answers anything: a forge made while
 /// it stands is the one forge.

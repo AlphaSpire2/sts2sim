@@ -152,6 +152,11 @@ pub enum Command {
         creatures: CreatureSelector,
         then: Vec<Command>,
     },
+    /// The opponents standing now, written down for a later command of the
+    /// same body to name through [`CreatureSelector::Noted`]. A body that has
+    /// to stay one command a place, so its upgraded form can take over mid-play,
+    /// notes its targets this way rather than binding them.
+    NoteOpponents,
     /// What a Misery notes before it swings: a copy of every power on the
     /// play's target that counts as a debuff at the amount it is standing at,
     /// taken before the play does anything to that target, so the copies are
@@ -1279,6 +1284,8 @@ pub enum CardSelectCmd {
 pub enum PlayerCmd {
     /// The player gains this much energy.
     GainEnergy(Amount),
+    /// A play the player chose has finished, as a Void Form counts it.
+    CountAFinishedChosenPlay,
     /// The player loses this much energy, which never takes the pool below
     /// nothing.
     LoseEnergy(Amount),
@@ -1992,6 +1999,9 @@ pub enum CreatureSelector {
     Pet,
     /// The creatures the enclosing [`Command::WithCreatures`] resolved.
     Bound,
+    /// The opponents the body's last [`Command::NoteOpponents`] wrote down,
+    /// less any that has since gone down or left the fight.
+    Noted,
     /// Whoever the caller named, and one rolled over the hittable opponents on
     /// the combat-targets stream where the caller named nobody. A Lightning
     /// orb's passive and evoke are the same body and differ only in whether a

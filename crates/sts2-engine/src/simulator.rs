@@ -880,6 +880,14 @@ const fn screen_name(screen: &CardSelectCmd) -> &'static str {
     }
 }
 
+/// The hits a repeat-per-kill swing has landed, while it runs.
+#[derive(Clone, Debug)]
+struct SwingHits {
+    card: Option<CardInstanceId>,
+    pass: usize,
+    landed: Vec<(usize, CreatureCombatId, DamageResult)>,
+}
+
 /// The semantic selection surface a screen corresponds to.
 const fn choice_screen(screen: &CardSelectCmd) -> ChoiceScreen {
     match screen {
@@ -1077,6 +1085,9 @@ pub struct Simulator {
     /// nothing else in the pinned build does. It is live only inside that burst,
     /// so it is not part of the exact state.
     automated_selector: bool,
+    /// The hits a repeat-per-kill swing has landed so far, while one is
+    /// running: the card dealing them, and each hit's pass number beside it.
+    swing_hits: Option<SwingHits>,
     /// The arguments of the hook currently dispatching, which is what the
     /// listener bodies' own tests read.
     hook_context: HookContext,
@@ -1273,6 +1284,7 @@ impl Simulator {
             modifier: None,
             just_applied_power: None,
             automated_selector: false,
+            swing_hits: None,
             hook_context: HookContext::none(),
             hook_screens_owed: None,
             last_screen_request: None,
@@ -5461,6 +5473,7 @@ impl Simulator {
             played_card: None,
             played_card_energy_spent: 0,
             played_card_play_index: 0,
+            played_card_play_count: 1,
             taking_extra_turn: false,
             reserved_arrivals: Vec::new(),
             round: 1,
@@ -5496,6 +5509,7 @@ impl Simulator {
                 play_types_started_this_turn: Vec::new(),
                 powers_applied_this_turn: Vec::new(),
                 card_plays_finished: 0,
+                chosen_plays_finished_this_turn: 0,
                 plays_finished: Vec::new(),
                 attack_or_skill_plays_this_turn: 0,
                 attacks_played_this_turn: 0,
@@ -5541,6 +5555,7 @@ impl Simulator {
             rewards_open: false,
             finish_owed: false,
             next_choice_id: 1,
+            noted_opponents: Vec::new(),
             next_reward_set_id: 1,
             escaped_creatures: Vec::new(),
             escaped_stolen_gold: 0,
@@ -9669,6 +9684,7 @@ impl Simulator {
                     card_id: card.id,
                     target: announced_target,
                     play_index,
+                    play_count,
                 });
             // The card's own body is queued as one entry and resolved where it
             // is reached, because a pass of this loop can change what the next
@@ -10080,10 +10096,12 @@ impl Simulator {
                 card_id,
                 target,
                 play_index,
+                play_count,
             } => {
                 // Which pass of the play loop is running is written at the top
                 // of the pass, before anything the pass runs can read it.
                 self.combat_mut()?.played_card_play_index = play_index;
+                self.combat_mut()?.played_card_play_count = play_count;
                 let card = self
                     .combat()?
                     .player
@@ -10917,7 +10935,8 @@ impl Simulator {
                 standing,
                 then,
                 context,
-            } => self.run_repeat_per_kill_rounds(owed, Some(standing), &then, &context, events),
+                landed,
+            } => self.run_repeat_per_kill(owed, Some(standing), landed, &then, &context, events),
             Loop::ForEachOrb {
                 rest,
                 then,
@@ -11028,6 +11047,49 @@ impl Simulator {
         Ok(false)
     }
 
+    /// `Command::RepeatPerKill` as the one attack it is: its passes' hits are
+    /// gathered, and once the last pass is done the swing is announced to the
+    /// after-attack listeners once, with every hit it landed. A swing a screen
+    /// interrupted carries what it has landed on its frame and is announced
+    /// where it finishes.
+    fn run_repeat_per_kill(
+        &mut self,
+        owed: usize,
+        interrupted: Option<Vec<CreatureCombatId>>,
+        landed: Vec<(usize, CreatureCombatId, DamageResult)>,
+        then: &[Command],
+        context: &CommandContext,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        let pass = landed.iter().map(|(pass, _, _)| *pass).max().unwrap_or(0);
+        let outer = self.swing_hits.replace(SwingHits {
+            card: context.card,
+            pass,
+            landed,
+        });
+        let outcome = self.run_repeat_per_kill_rounds(owed, interrupted, then, context, events);
+        let swing = std::mem::replace(&mut self.swing_hits, outer);
+        let stopped = outcome?;
+        if self.queue_is_held() || self.state.combat.is_none() {
+            return Ok(stopped);
+        }
+        let announced = HookContext {
+            attack_results: swing.map(|swing| swing.landed).unwrap_or_default(),
+            ..HookContext::over(ValueContext {
+                dealer: context.owner,
+                card: context.card,
+                props: ValueProps::NONE,
+                ..ValueContext::default()
+            })
+        };
+        self.without_suspension(
+            "a listener answering for a finished swing",
+            true,
+            |engine| engine.dispatch_hooks(&[crate::HookEvent::AfterAttack], &announced),
+        )?;
+        Ok(stopped || self.combat_is_ending())
+    }
+
     /// `Command::RepeatPerKill`'s rounds. The enemies standing are listed
     /// before each round, and the kills among them are counted after it; a
     /// round a screen interrupted has not been counted yet, so its snapshot
@@ -11056,6 +11118,9 @@ impl Simulator {
         }
         while owed > 0 {
             owed -= 1;
+            if let Some(swing) = self.swing_hits.as_mut() {
+                swing.pass += 1;
+            }
             let standing: Vec<CreatureCombatId> = self
                 .combat()?
                 .creatures
@@ -11073,6 +11138,11 @@ impl Simulator {
                         standing,
                         then: then.to_vec(),
                         context: context.clone(),
+                        landed: self
+                            .swing_hits
+                            .as_ref()
+                            .map(|swing| swing.landed.clone())
+                            .unwrap_or_default(),
                     }),
                 ))))?;
                 return Ok(false);
@@ -11800,7 +11870,7 @@ impl Simulator {
             // lands on everything hittable — is the count of results that
             // killed what they landed on.
             Command::RepeatPerKill { then } => {
-                self.run_repeat_per_kill_rounds(1, None, then, context, events)
+                self.run_repeat_per_kill(1, None, Vec::new(), then, context, events)
             }
             // The local a body binds before it acts: the amount is worked out
             // once and the commands inside it read it back rather than working
@@ -11862,6 +11932,11 @@ impl Simulator {
             }
             // The local a body names a resolved set of creatures in, so that
             // what it damages and what it hands back are the same creatures.
+            Command::NoteOpponents => {
+                let standing = self.resolve_creatures(CreatureSelector::AllOpponents, context)?;
+                self.combat_mut()?.noted_opponents = standing;
+                Ok(false)
+            }
             Command::WithCreatures { creatures, then } => {
                 let bound = self.resolve_creatures(creatures.clone(), context)?;
                 let context = CommandContext {
@@ -12154,7 +12229,7 @@ impl Simulator {
                     return Ok(false);
                 }
                 let targets = self.resolve_creatures(target.clone(), context)?;
-                self.run_damage(
+                let landed = self.run_damage(
                     crate::DamageFrame {
                         targets,
                         dealer: context.owner,
@@ -12167,6 +12242,16 @@ impl Simulator {
                     },
                     events,
                 )?;
+                if let Some(swing) = self.swing_hits.as_mut()
+                    && swing.card == context.card
+                {
+                    let pass = swing.pass;
+                    swing.landed.extend(
+                        landed
+                            .into_iter()
+                            .map(|(target, result)| (pass, target, result)),
+                    );
+                }
                 // Settling the dead is the last thing a damaging call does, so a
                 // blow settles its own dead where it was struck from rather than
                 // leaving them for whatever the call happens to be nested
@@ -15003,6 +15088,9 @@ impl Simulator {
                 let amount = self.resolve_amount(amount, context)?;
                 self.gain_stars(amount)?;
             }
+            PlayerCmd::CountAFinishedChosenPlay => {
+                self.combat_mut()?.player.chosen_plays_finished_this_turn += 1;
+            }
             // Losing stars refuses while the fight is ending and does nothing
             // else: the pool comes down and no listener hears about it.
             PlayerCmd::LoseStars(amount) => {
@@ -15750,7 +15838,7 @@ impl Simulator {
         // does, whatever order the listeners themselves came in.
         rules.sort_by_key(|(rule, _)| rule.runs_late());
         let plays_this_turn =
-            i32::try_from(combat.player.cards_played_this_turn).unwrap_or(i32::MAX);
+            i32::try_from(combat.player.chosen_plays_finished_this_turn).unwrap_or(i32::MAX);
         let costs: Vec<(CardInstanceId, i32)> = [
             PileName::Draw,
             PileName::Hand,
@@ -15852,9 +15940,9 @@ impl Simulator {
                         cost
                     }
                 }
-                // The card is free while its owner has played fewer cards this
-                // turn than the rule is worth. The count is the plays the
-                // player chose, which is what the build's own tally counts.
+                // The card is free while fewer of the plays its owner chose
+                // this turn have finished than the rule is worth, which is what
+                // the build's own tally counts.
                 crate::CardCostRule::FreeInHandOrPlayUnderCount => {
                     if matches!(pile, PileName::Hand | PileName::Play)
                         && i64::from(plays_this_turn) < i64::from(*amount)
@@ -16582,6 +16670,17 @@ impl Simulator {
         if selector == CreatureSelector::Bound {
             return Ok(context.bound_creatures.clone());
         }
+        if selector == CreatureSelector::Noted {
+            let Ok(combat) = self.combat() else {
+                return Ok(Vec::new());
+            };
+            return Ok(combat
+                .noted_opponents
+                .iter()
+                .copied()
+                .filter(|id| combat.creatures.iter().any(|c| c.id == *id && c.alive()))
+                .collect());
+        }
         // The creatures the evoked orb named, less any that has since gone down.
         if selector == CreatureSelector::EvokedOrbTargets {
             let announced = self.hook_context.evoked_orb_targets.clone();
@@ -16625,6 +16724,7 @@ impl Simulator {
             | CreatureSelector::DoomedAmongOpponents(_)
             | CreatureSelector::ListeningPowerTarget
             | CreatureSelector::Bound
+            | CreatureSelector::Noted
             | CreatureSelector::EvokedOrbTargets
             | CreatureSelector::TargetOrRandomOpponent
             // Only a `PowerRef` names it, and it is resolved there.
@@ -20886,6 +20986,7 @@ impl Simulator {
                 combat.player.phase = crate::PlayerTurnPhase::Start;
                 combat.player.ready_to_end_turn = false;
                 combat.player.cards_played_this_turn = 0;
+                combat.player.chosen_plays_finished_this_turn = 0;
                 combat.player.cards_discarded_this_turn = 0;
                 combat.player.attacks_played_this_turn = 0;
                 combat.player.attack_or_skill_plays_this_turn = 0;
@@ -25963,6 +26064,11 @@ impl Simulator {
                 .combat
                 .as_ref()
                 .is_some_and(|combat| combat.played_card_was_chosen),
+            crate::HookCondition::LastPassOfThePlay => {
+                self.state.combat.as_ref().is_some_and(|combat| {
+                    combat.played_card_play_index + 1 >= combat.played_card_play_count
+                })
+            }
             crate::HookCondition::PlayedCardIsOfType(card_type) => {
                 context.played_card_type == Some(*card_type)
             }

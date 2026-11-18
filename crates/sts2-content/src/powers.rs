@@ -4921,9 +4921,22 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
             ..counter("POWER.TYRANNY_POWER", PowerType::Buff)
         },
         // A void form makes the first cards of every turn free, of energy and
-        // of stars alike, and counts what its owner has played itself.
+        // of stars alike, and counts what its owner has played itself: each
+        // play they chose, once its last pass is over, from its own place
+        // among the after-card-played listeners.
         PowerDefinition {
             card_cost_rule: Some(sts2_engine::CardCostRule::FreeInHandOrPlayUnderCount),
+            hooks: vec![
+                ModifierHook::every_turn(
+                    HookEvent::AfterCardPlayed,
+                    vec![Command::Player(PlayerCmd::CountAFinishedChosenPlay)],
+                )
+                .when(HookCondition::All(vec![
+                    HookCondition::OwnerPlayedTheCard,
+                    HookCondition::PlayWasChosen,
+                    HookCondition::LastPassOfThePlay,
+                ])),
+            ],
             ..counter("POWER.VOID_FORM_POWER", PowerType::Buff)
         },
     ]

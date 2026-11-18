@@ -511,11 +511,15 @@ fn crescent_spear(per_card: i32) -> Command {
 /// Crush Under, played: one blow over the whole enemy side, and then the
 /// strength each of them loses for a turn.
 fn crush_under(damage: i32, strength: i32) -> Vec<Command> {
+    // The enemies are noted before the swing, so whatever its kills bring
+    // into the fight is not crushed. One command a place, so a play that
+    // gets its upgrade back mid-swing saps as the upgraded card.
     vec![
+        Command::NoteOpponents,
         sweep(damage, 1),
         apply_power(
             "POWER.CRUSH_UNDER_POWER",
-            CreatureSelector::AllOpponents,
+            CreatureSelector::Noted,
             Amount::Fixed(strength),
         ),
     ]
@@ -1043,14 +1047,20 @@ fn kingly_punch() -> Command {
 
 /// Knockout Blow, played: the blow, and five stars if it put something down.
 fn knockout_blow(damage: i32) -> Vec<Command> {
-    vec![
-        attack(damage),
-        Command::When {
-            condition: Condition::AFatalKillHappenedThisPlay,
+    // Any kill pays, a minion's or a segment's that will reattach included:
+    // what is asked is whether the swing put its target down, not whether
+    // the death counts as fatal.
+    vec![Command::Strike {
+        amount: Amount::Fixed(damage),
+        hits: Amount::Fixed(1),
+        target: CreatureSelector::Target,
+        props: ValueProps::NONE,
+        then: vec![Command::When {
+            condition: Condition::TheSwingKilledSomething,
             then: vec![gain_stars(5)],
             otherwise: Vec::new(),
-        },
-    ]
+        }],
+    }]
 }
 
 /// Lunar Blast's hit count: one hit for every skill play its owner has
