@@ -842,17 +842,17 @@ fn the_middle_pool() -> Vec<CardDefinition> {
             ),
             vec![sweep(9, 1)],
         )),
-        // A scare shakes everything, and upgrading stops it burning up.
-        upgrade_drops_exhaust(exhausting(upgrading(
+        // A sidestep is energy owed next turn.
+        upgrading(
             card(
-                "CARD.SCARE",
+                "CARD.SIDESTEP",
                 CardType::Skill,
-                TargetType::AllEnemies,
+                TargetType::SelfTarget,
                 0,
-                vec![sweeping_power("POWER.WEAK_POWER", 1)],
+                vec![buff("POWER.ENERGY_NEXT_TURN_POWER", 1)],
             ),
-            vec![sweeping_power("POWER.WEAK_POWER", 1)],
-        ))),
+            vec![buff("POWER.ENERGY_NEXT_TURN_POWER", 2)],
+        ),
         upgrading(
             card(
                 "CARD.FOOTWORK",

@@ -732,6 +732,13 @@ impl RunState {
             .or(self.current_room_type)
     }
 
+    /// How many rooms the run's room stack holds: the map point's own room,
+    /// and a fight an event walked into on top of it.
+    #[must_use]
+    pub fn room_count(&self) -> u32 {
+        1 + u32::from(self.pushed_room.is_some())
+    }
+
     #[must_use]
     pub fn map(&self) -> &ActMap {
         &self.maps[self.current_act]

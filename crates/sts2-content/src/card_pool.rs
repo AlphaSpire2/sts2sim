@@ -250,7 +250,7 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
     ("CARD.FINISHER", CardType::Attack, CardRarity::Uncommon, 1),
     ("CARD.FLECHETTES", CardType::Attack, CardRarity::Uncommon, 1),
     ("CARD.FLICK_FLACK", CardType::Attack, CardRarity::Common, 1),
-    ("CARD.SCARE", CardType::Skill, CardRarity::Uncommon, 0),
+    ("CARD.SIDESTEP", CardType::Skill, CardRarity::Uncommon, 0),
     ("CARD.FOOTWORK", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.GRAND_FINALE", CardType::Attack, CardRarity::Rare, 0),
     ("CARD.HAND_TRICK", CardType::Skill, CardRarity::Uncommon, 1),
@@ -1059,13 +1059,19 @@ const TOKEN_POOL: [&str; 14] = [
 ];
 
 /// The quest card pool, in the pool's own declaration order. A quest card
-/// transforms against the colorless pool, so this list is what says the three
+/// transforms against the colorless pool, so this list is what says the four
 /// stand in a pool of their own rather than what any roll reads.
-const QUEST_POOL: [&str; 3] = ["CARD.BYRDONIS_EGG", "CARD.LANTERN_KEY", "CARD.SPOILS_MAP"];
+const QUEST_POOL: [&str; 4] = [
+    "CARD.BYRDONIS_EGG",
+    "CARD.DOWSING",
+    "CARD.LANTERN_KEY",
+    "CARD.SPOILS_MAP",
+];
 
 /// The event card pool, in the pool's own declaration order. The last two are not
 /// in alphabetical order in the build either.
-const EVENT_POOL: [&str; 27] = [
+const EVENT_POOL: [&str; 28] = [
+    "CARD.ABUNDANCE",
     "CARD.APOTHEOSIS",
     "CARD.APPARITION",
     "CARD.BRIGHTEST_FLAME",
@@ -1118,7 +1124,8 @@ const VISUAL_POOL_OVERRIDES: [(&str, &str); 10] = [
 
 /// The cards a generation effect in combat is never allowed to hand out.
 /// Everything else is fair game for an effect that rolls against a pool.
-const NEVER_GENERATED_IN_COMBAT: [&str; 18] = [
+const NEVER_GENERATED_IN_COMBAT: [&str; 19] = [
+    "CARD.ABUNDANCE",
     "CARD.ALCHEMIZE",
     "CARD.ASCENDERS_BANE",
     "CARD.DISINTEGRATION",

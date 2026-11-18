@@ -1930,6 +1930,51 @@ fn a_discovery_offers_three_and_gives_one_free() {
     assert_eq!(hand[0].energy_cost, 0);
 }
 
+/// An abundance offers three upgraded powers of the character's own pool, one
+/// of which must be taken, and the one taken is free for the turn.
+#[test]
+fn an_abundance_offers_three_upgraded_powers() {
+    let registry = sts2_content::standard_registry();
+    let mut simulator = fight(&[("CARD.ABUNDANCE", 0)]);
+    play(&mut simulator, "CARD.ABUNDANCE");
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        minimum,
+        maximum,
+        candidates,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("a screen is up: {:?}", simulator.decision());
+    };
+    assert_eq!((minimum, maximum), (1, 1), "the screen cannot be skipped");
+    assert_eq!(candidates.len(), 3);
+    for candidate in &candidates {
+        let definition = registry
+            .card(&candidate.fingerprint.model_id)
+            .expect("the card is content");
+        assert_eq!(definition.card_type, sts2_engine::CardType::Power);
+        assert_eq!(candidate.fingerprint.upgrade_level, 1);
+    }
+    simulator
+        .step(Action::ChooseCards {
+            choice_id,
+            cards: vec![candidates[0].clone()],
+        })
+        .expect("the choice applies");
+    let hand = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing")
+        .player
+        .piles
+        .hand;
+    assert_eq!(hand.len(), 1);
+    assert_eq!(hand[0].energy_cost, 0);
+    assert_eq!(hand[0].fingerprint.upgrade_level, 1);
+}
+
 /// A hidden gem makes one card of the draw pile play twice more.
 #[test]
 fn a_hidden_gem_makes_one_card_play_again() {

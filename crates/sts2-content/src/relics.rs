@@ -5962,9 +5962,11 @@ fn skin_of_four() -> sts2_engine::RolledSkin {
 fn neow_option_relics() -> Vec<sts2_core::ModelId> {
     [
         "RELIC.CURSED_PEARL",
+        "RELIC.DOWSING_ROD",
         "RELIC.HEFTY_TABLET",
         "RELIC.LARGE_CAPSULE",
         "RELIC.LEAFY_POULTICE",
+        "RELIC.NEOWS_SACRIFICE",
         "RELIC.PRECARIOUS_SHEARS",
         "RELIC.SILKEN_TRESS",
         "RELIC.SILVER_CRUCIBLE",
@@ -6005,6 +6007,22 @@ fn offered_only(model_id: &str) -> RelicDefinition {
 #[allow(clippy::too_many_lines, reason = "one entry per relic")]
 fn neow_relics() -> Vec<RelicDefinition> {
     vec![
+        // A dowsing rod puts a Dowsing in the deck.
+        upon_pickup(RelicDefinition {
+            on_obtained: vec![joins_the_deck("CARD.DOWSING")],
+            ..obtained_only("RELIC.DOWSING_ROD", RelicRarity::Ancient)
+        }),
+        // Neow's sacrifice hands over an ambergris where the belt has room for
+        // it, and charges a Guilty for it either way.
+        upon_pickup(RelicDefinition {
+            on_obtained: vec![
+                Command::Potion(sts2_engine::PotionCmd::TryToProcure(
+                    sts2_engine::PotionOrigin::Model(id("POTION.AMBERGRIS")),
+                )),
+                joins_the_deck("CARD.GUILTY"),
+            ],
+            ..obtained_only("RELIC.NEOWS_SACRIFICE", RelicRarity::Ancient)
+        }),
         // Cursed Pearl pays 333 gold for a Greed curse, both as it is
         // obtained, in that order.
         RelicDefinition {

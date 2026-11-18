@@ -5237,6 +5237,9 @@ impl Simulator {
                 resume,
             });
         }
+        // The fight is on the stack above the event, and nothing of it stands
+        // yet.
+        self.dispatch_hooks(&[crate::HookEvent::BeforeRoomEntered], &HookContext::none())?;
         self.start_combat(combat)?;
         // What the option handed over is offered along with the fight's own, in
         // the order the reward screen sorts them.
@@ -5246,6 +5249,8 @@ impl Simulator {
 
     pub(crate) fn enter_room(&mut self, definition: RoomDefinition) -> Result<(), EngineError> {
         self.record_room_visit(&definition);
+        // The room is on the stack and nothing of it stands yet.
+        self.dispatch_hooks(&[crate::HookEvent::BeforeRoomEntered], &HookContext::none())?;
         let mut fill_the_chest = false;
         let active = match definition {
             RoomDefinition::Event {
@@ -17927,6 +17932,11 @@ impl Simulator {
                     );
                 current * 100 > maximum * *percent
             }
+            Condition::CurrentRoomCountAtMost(most) => self
+                .state
+                .run
+                .as_ref()
+                .is_some_and(|run| run.room_count() <= *most),
             Condition::CurrentMapPointIsUnknown => self.state.run.as_ref().is_some_and(|run| {
                 run.map()
                     .points

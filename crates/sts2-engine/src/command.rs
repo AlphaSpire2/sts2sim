@@ -2991,6 +2991,10 @@ pub enum Condition {
     /// The map point the run is standing on is an unknown one, whatever it
     /// turned out to be.
     CurrentMapPointIsUnknown,
+    /// The run's room stack holds at most this many rooms: one while the
+    /// player stands in the map point's own room, two in a fight an event
+    /// walked into.
+    CurrentRoomCountAtMost(u32),
     /// The room the run is standing in is a monster, elite, or boss room.
     CurrentRoomIsCombat,
     /// The act the run is walking is the last one it has.

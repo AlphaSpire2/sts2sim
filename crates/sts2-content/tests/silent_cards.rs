@@ -281,6 +281,7 @@ fn the_plain_powers_lay_down_what_they_say() {
             1,
         ),
         ("CARD.WELL_LAID_PLANS", "POWER.WELL_LAID_PLANS_POWER", 1, 1),
+        ("CARD.SIDESTEP", "POWER.ENERGY_NEXT_TURN_POWER", 1, 2),
     ] {
         for (upgrade, stacks) in [(0, base), (1, upgraded)] {
             let mut simulator = fight(&[(model_id, upgrade)]);
@@ -335,7 +336,6 @@ fn the_sweeping_powers_land_on_everything() {
         ("CARD.HAZE", "POWER.POISON_POWER", 4, 6),
         ("CARD.HAZE", "POWER.WEAK_POWER", 1, 2),
         ("CARD.PIERCING_WAIL", "POWER.PIERCING_WAIL_POWER", 6, 8),
-        ("CARD.SCARE", "POWER.WEAK_POWER", 1, 1),
     ] {
         for (upgrade, stacks) in [(0, base), (1, upgraded)] {
             let mut simulator = crowd(&[(model_id, upgrade)]);
@@ -350,18 +350,18 @@ fn the_sweeping_powers_land_on_everything() {
     }
 }
 
-/// Upgrading a scare takes the Exhaust keyword off it; upgrading a calculated
+/// Upgrading a mirage takes the Exhaust keyword off it; upgrading a calculated
 /// gamble puts Retain on.
 #[test]
 fn two_upgrades_move_a_keyword_rather_than_a_number() {
-    let mut simulator = crowd(&[("CARD.SCARE", 0)]);
-    play(&mut simulator, "CARD.SCARE");
-    assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.SCARE"]);
+    let mut simulator = crowd(&[("CARD.MIRAGE", 0)]);
+    play(&mut simulator, "CARD.MIRAGE");
+    assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.MIRAGE"]);
 
-    let mut simulator = crowd(&[("CARD.SCARE", 1)]);
-    play(&mut simulator, "CARD.SCARE");
+    let mut simulator = crowd(&[("CARD.MIRAGE", 1)]);
+    play(&mut simulator, "CARD.MIRAGE");
     assert_eq!(pile(&simulator, PileName::Exhaust), Vec::<String>::new());
-    assert_eq!(pile(&simulator, PileName::Discard), ["CARD.SCARE"]);
+    assert_eq!(pile(&simulator, PileName::Discard), ["CARD.MIRAGE"]);
 
     let mut simulator = fight_with_draw(
         &[("CARD.CALCULATED_GAMBLE", 1), ("CARD.SLICE", 0)],

@@ -1402,12 +1402,13 @@ pub enum HookEvent {
     /// the opening turn.
     BeforeCombatStart,
     BeforeCombatStartLate,
-    /// Once the room the player walked into is standing.
-    ///
-    /// The build announces it from every room. This engine announces it from
-    /// the combat room alone, because a listener pass outside a combat has no
-    /// machinery yet; anything that answers it for another room is unsupported
-    /// until it does.
+    /// Once a room has been put on the run's room stack and before it is
+    /// entered: before a fight's creatures stand, an event's page opens, or a
+    /// shop lays out its stock. It is announced for every room, including a
+    /// fight an event walks into.
+    BeforeRoomEntered,
+    /// Once the room the player walked into is standing. It is announced from
+    /// every room, a fight an event walks into included.
     AfterRoomEntered,
     /// Once for each creature that has gone down, over the run's listeners.
     AfterDeath,
@@ -1581,6 +1582,7 @@ impl HookEvent {
             | Self::BeforeCombatStart
             | Self::BeforeCombatStartLate
             | Self::AfterDeath
+            | Self::BeforeRoomEntered
             | Self::AfterRoomEntered => ListenerScope::Run,
             // The reward passes walk the run list with no combat behind it at
             // all, so a fight standing behind the reward screen takes no part

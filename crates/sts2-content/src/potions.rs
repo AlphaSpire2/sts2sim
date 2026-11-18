@@ -7,9 +7,9 @@
 
 use sts2_engine::{
     Amount, CardCmd, CardFilter, CardOrigin, CardPileCmd, CardSelectCmd, CardSelector, CardType,
-    Command, Count, CreatureCmd, CreatureSelector, DrawPilePosition, PileName, PlayerCmd,
-    PotionCmd, PotionDefinition, PotionOrigin, PotionRarity, PotionUsage, PowerCmd, SelectorPrefs,
-    TargetType, TemporaryCost, ValueProps,
+    Command, Condition, Count, CreatureCmd, CreatureSelector, DrawPilePosition, PileName,
+    PlayerCmd, PotionCmd, PotionDefinition, PotionOrigin, PotionRarity, PotionUsage, PowerCmd,
+    SelectorPrefs, TargetType, TemporaryCost, ValueProps,
 };
 use sts2_engine::{
     ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
@@ -240,9 +240,13 @@ fn character_potion_pool_id(character: &sts2_core::ModelId) -> Option<&'static s
     }
 }
 
-/// The event potion pool, in its own order: the two an event hands over.
-/// Neither carries a rolled rarity, so no generation reads them.
-const EVENT_POTION_POOL: [&str; 2] = ["POTION.FOUL_POTION", "POTION.GLOWWATER_POTION"];
+/// The event potion pool, in its own order: the three an event or a relic
+/// hands over. None carries a rolled rarity, so no generation reads them.
+const EVENT_POTION_POOL: [&str; 3] = [
+    "POTION.AMBERGRIS",
+    "POTION.FOUL_POTION",
+    "POTION.GLOWWATER_POTION",
+];
 
 /// The token pool, whole: the one potion an effect conjures that a reward or a
 /// shop must never offer.
@@ -896,9 +900,31 @@ fn fairy_in_a_bottle() -> PotionDefinition {
     }
 }
 
-/// The event potions: the two an event hands over. Neither is ever rolled.
+/// The event potions: the three an event or a relic hands over. None is ever
+/// rolled.
 fn event_potions() -> Vec<PotionDefinition> {
     vec![
+        // Ambergris heals half of whoever drinks it, anywhere, and in a fight
+        // also owes them a turn of their own in place of the enemy's.
+        any_time(potion(
+            "POTION.AMBERGRIS",
+            PotionRarity::Event,
+            TargetType::AnyPlayer,
+            vec![
+                Command::Creature(CreatureCmd::Heal {
+                    target: CreatureSelector::Target,
+                    amount: Amount::Percent {
+                        percent: 50,
+                        count: Count::TargetMaxHp,
+                    },
+                }),
+                Command::When {
+                    otherwise: Vec::new(),
+                    condition: Condition::InACombat,
+                    then: vec![applied("POWER.AMBERGRIS_POWER", 1)],
+                },
+            ],
+        )),
         // A foul potion splashes everyone in the fight but the pets, the
         // drinker included: both sides at once.
         PotionDefinition {

@@ -1181,6 +1181,82 @@ fn a_planisphere_pays_for_an_unknown_point() {
     assert_eq!(run_hp(&simulator), before, "a known rest site pays nothing");
 }
 
+/// A run carrying a Dowsing in its deck, counted up to `rooms` already.
+fn run_dowsing(rooms: i32) -> Simulator {
+    let mut state = run_holding(&[]).state().clone();
+    state
+        .run_player
+        .deck
+        .push(CardFingerprint::base(id("CARD.DOWSING")).with_property("RoomsEntered", rooms));
+    Simulator::from_generated_state(state, sts2_content::standard_registry())
+        .expect("the run rebuilds")
+}
+
+fn rooms_entered(simulator: &Simulator) -> Option<i64> {
+    simulator
+        .state()
+        .run_player
+        .deck
+        .iter()
+        .find(|card| card.model_id == id("CARD.DOWSING"))
+        .and_then(|card| card.properties.get("RoomsEntered"))
+        .and_then(serde_json::Value::as_i64)
+}
+
+/// A Dowsing in the deck counts every unknown point its owner walks onto, and
+/// nothing else.
+#[test]
+fn a_dowsing_counts_the_unknown_points() {
+    let mut simulator = run_dowsing(0);
+    walk_to(&mut simulator, 2);
+    assert_eq!(
+        rooms_entered(&simulator),
+        Some(1),
+        "an unknown point counts"
+    );
+
+    let mut simulator = run_dowsing(0);
+    walk_to(&mut simulator, 1);
+    assert_eq!(rooms_entered(&simulator), Some(0), "a rest site does not");
+}
+
+/// The fifth unknown point turns the Dowsing into an Abundance.
+#[test]
+fn a_dowsing_becomes_an_abundance_at_the_fifth_unknown_point() {
+    let mut simulator = run_dowsing(4);
+    walk_to(&mut simulator, 2);
+    let deck = deck_models(&simulator);
+    assert!(!deck.contains(&"CARD.DOWSING".to_owned()), "{deck:?}");
+    assert_eq!(deck.last().map(String::as_str), Some("CARD.ABUNDANCE"));
+}
+
+/// A dowsing rod puts a Dowsing in the deck, and Neow's sacrifice hands over
+/// an ambergris and charges a Guilty for it.
+#[test]
+fn the_new_neow_relics_hand_over_what_they_say() {
+    let mut simulator = run_holding_with_treasure(&[], "RELIC.DOWSING_ROD");
+    take_the_treasure(&mut simulator);
+    assert_eq!(
+        deck_models(&simulator).last().map(String::as_str),
+        Some("CARD.DOWSING")
+    );
+
+    let mut simulator = run_holding_with_treasure(&[], "RELIC.NEOWS_SACRIFICE");
+    take_the_treasure(&mut simulator);
+    assert_eq!(
+        deck_models(&simulator).last().map(String::as_str),
+        Some("CARD.GUILTY")
+    );
+    assert!(
+        simulator
+            .state()
+            .run_player
+            .potions
+            .contains(&Some(id("POTION.AMBERGRIS"))),
+        "the ambergris is on the belt"
+    );
+}
+
 /// A pantograph heals twenty-five as a boss fight opens and nothing as an
 /// ordinary one does.
 #[test]
