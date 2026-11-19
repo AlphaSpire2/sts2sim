@@ -960,6 +960,45 @@ fn a_crush_under_leaves_what_its_kill_lets_loose_uncrushed() {
     );
 }
 
+/// An auto-played shining strike is put down where a play of its own would
+/// put it: a beat down throws it from the discard pile onto the draw pile.
+#[test]
+fn a_beat_down_puts_a_shining_strike_on_top_of_the_draw_pile() {
+    let simulator = built(
+        scenario(
+            &[300],
+            &[("CARD.BEAT_DOWN", 0)],
+            &[("CARD.STRIKE_REGENT", 0)],
+            20,
+        )
+        .card(PileName::Discard, 9, card("CARD.SHINING_STRIKE", 0), 0),
+    );
+    let mut simulator = simulator;
+    play(&mut simulator, "CARD.BEAT_DOWN");
+    let piles = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("a fight")
+        .player
+        .piles;
+    assert_eq!(
+        piles
+            .draw
+            .first()
+            .map(|card| card.fingerprint.model_id.to_string()),
+        Some("CARD.SHINING_STRIKE".to_owned()),
+        "the strike went back on top of the draw pile"
+    );
+    assert!(
+        !piles
+            .discard
+            .iter()
+            .any(|card| card.fingerprint.model_id == id("CARD.SHINING_STRIKE")),
+        "and not to the discard pile"
+    );
+}
+
 /// A make it so called back to a hand that already holds ten cards stays in
 /// the discard pile: a card bound for a full hand goes there instead.
 #[test]

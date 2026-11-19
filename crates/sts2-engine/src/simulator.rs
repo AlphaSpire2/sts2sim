@@ -13751,13 +13751,19 @@ impl Simulator {
         let play_count = self.generate_play_count(&card, &definition, Some(target))?;
         self.combat_mut()?.player.first_plays_started_this_turn += 1;
         // A copy made to be played once, and a power, both go to no pile at all
-        // and leave the fight for good.
+        // and leave the fight for good. Otherwise an auto-played card is put
+        // down where a play of its own would put it: a particle wall back in
+        // the hand, a shining strike on top of the draw pile.
         let destination = if card.dupe
             || self.content.card_type_of(&card.fingerprint) == Some(crate::CardType::Power)
         {
             crate::PlayedCardDestination::Removed
         } else if exhausts {
             crate::PlayedCardDestination::Exhaust
+        } else if definition.returns_to_hand {
+            crate::PlayedCardDestination::Hand
+        } else if definition.returns_to_draw_pile_top {
+            crate::PlayedCardDestination::DrawPileTop
         } else {
             crate::PlayedCardDestination::Discard
         };
