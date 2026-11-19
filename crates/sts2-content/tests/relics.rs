@@ -6612,6 +6612,23 @@ fn a_silver_crucible_suppresses_the_first_chest() {
     assert_eq!(relics.len(), 1);
 }
 
+/// A driftwood's reroll reaches the card offer a prayer wheel added to the set:
+/// it is on the set when the driftwood's late pass runs, only not rolled yet.
+#[test]
+fn a_driftwood_lets_a_prayer_wheels_offer_be_rerolled_too() {
+    let mut simulator = run_winning_a_fight(&["RELIC.PRAYER_WHEEL", "RELIC.DRIFTWOOD"], true);
+    win_the_fight(&mut simulator);
+    let cards: Vec<_> = offered_rewards(&simulator)
+        .into_iter()
+        .filter(|reward| reward.reward_type == "card")
+        .collect();
+    assert_eq!(cards.len(), 2, "the room's offer and the wheel's");
+    assert!(
+        cards.iter().all(|reward| reward.can_reroll),
+        "and both may be rerolled"
+    );
+}
+
 /// A driftwood puts a reroll on every card offer of a set. Taking it throws the
 /// offer away and builds another with the same options, and the button is gone.
 #[test]

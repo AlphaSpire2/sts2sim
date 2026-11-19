@@ -1197,6 +1197,20 @@ enum OrbEnd {
     Back,
 }
 
+impl PendingReward {
+    /// Whether a late listener let this card offer be rerolled before it was
+    /// rolled.
+    const fn rerollable(&self) -> bool {
+        match self {
+            Self::CardOffer { rerollable, .. }
+            | Self::CardOfferOfOtherColours { rerollable, .. }
+            | Self::CreatedCardOffer { rerollable, .. }
+            | Self::OwnCardOffer { rerollable, .. } => *rerollable,
+            _ => false,
+        }
+    }
+}
+
 /// A reward a listener put on a set that is still being built, before anything
 /// has been rolled for it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1215,15 +1229,21 @@ enum PendingReward {
     CardOffer {
         room: crate::ResolvedRoom,
         count: usize,
+        /// A late listener (a driftwood) let the set's card offers be
+        /// rerolled while this one stood on it, not yet rolled.
+        rerollable: bool,
     },
     /// An offer off the character's own pool that no room paid for: regular
     /// base odds, and the run's drifting ones left alone.
-    OwnCardOffer { count: usize },
+    OwnCardOffer { count: usize, rerollable: bool },
     /// An offer whose creation the body named itself.
-    CreatedCardOffer(crate::CardCreation),
+    CreatedCardOffer {
+        creation: crate::CardCreation,
+        rerollable: bool,
+    },
     /// One card from each of this many character colours other than the
     /// owner's, rolled off the niche stream.
-    CardOfferOfOtherColours { colours: usize },
+    CardOfferOfOtherColours { colours: usize, rerollable: bool },
     /// A relic reward for a relic already marked wax.
     WaxRelic,
 }
@@ -11720,6 +11740,7 @@ impl Simulator {
                 self.add_pending_reward(PendingReward::CardOffer {
                     room: *room,
                     count: usize::try_from(*count).unwrap_or(0),
+                    rerollable: false,
                 });
                 Ok(false)
             }
@@ -11743,6 +11764,7 @@ impl Simulator {
             Command::Rewards(RewardsCmd::AddOwnCardOffer { count }) => {
                 self.add_pending_reward(PendingReward::OwnCardOffer {
                     count: usize::try_from(*count).unwrap_or(0),
+                    rerollable: false,
                 });
                 Ok(false)
             }
@@ -11769,12 +11791,16 @@ impl Simulator {
                 Ok(false)
             }
             Command::Rewards(RewardsCmd::AddCreatedCardOffer { creation }) => {
-                self.add_pending_reward(PendingReward::CreatedCardOffer(creation.clone()));
+                self.add_pending_reward(PendingReward::CreatedCardOffer {
+                    creation: creation.clone(),
+                    rerollable: false,
+                });
                 Ok(false)
             }
             Command::Rewards(RewardsCmd::AddCardOfferOfOtherColours { colours }) => {
                 self.add_pending_reward(PendingReward::CardOfferOfOtherColours {
                     colours: *colours,
+                    rerollable: false,
                 });
                 Ok(false)
             }
@@ -26948,30 +26974,43 @@ impl Simulator {
         // adds each card in turn, so the order they land in is the caller's
         // rather than the order the piles happened to hold them in. A body that
         // shuffled its selection therefore hands the cards over shuffled.
+        //
+        // A card bound for a hand that already holds the most cards a hand can
+        // goes to the discard pile instead, and the hand is counted again for
+        // every card. One already in the discard pile goes to its end.
         let mut announced = Vec::new();
         let piles = &mut self.combat_mut()?.player.piles;
-        let mut moved = Vec::new();
         for card_id in cards {
-            for pile in [
+            let standing = [
                 PileName::Draw,
                 PileName::Hand,
                 PileName::Discard,
                 PileName::Exhaust,
                 PileName::Play,
-            ] {
-                if pile == destination {
-                    continue;
-                }
-                let held = pile_of_mut(piles, pile);
-                if let Some(at) = held.iter().position(|card| card.id == *card_id) {
-                    let card = held.remove(at);
-                    announced.push((card.id, pile));
-                    moved.push(card);
-                    break;
-                }
+            ]
+            .into_iter()
+            .find_map(|pile| {
+                pile_of(piles, pile)
+                    .iter()
+                    .position(|card| card.id == *card_id)
+                    .map(|at| (pile, at))
+            });
+            let Some((from, at)) = standing else {
+                continue;
+            };
+            if from == destination {
+                continue;
             }
+            let target =
+                if destination == PileName::Hand && piles.hand.len() >= Self::MAX_CARDS_IN_HAND {
+                    PileName::Discard
+                } else {
+                    destination
+                };
+            let card = pile_of_mut(piles, from).remove(at);
+            announced.push((card.id, from));
+            pile_of_mut(piles, target).push(card);
         }
-        pile_of_mut(piles, destination).extend(moved);
         for (card_id, from) in announced {
             self.announce_card_changed_piles(card_id, Some(from))?;
         }
@@ -28120,7 +28159,10 @@ impl Simulator {
         result?;
         let mut rolled = Vec::new();
         for reward in pending.unwrap_or_default() {
-            rolled.push(self.populate_pending_reward(reward)?);
+            let rerollable = reward.rerollable();
+            let mut populated = self.populate_pending_reward(reward)?;
+            populated.can_reroll |= rerollable;
+            rolled.push(populated);
         }
         Ok(rolled)
     }
@@ -28134,6 +28176,17 @@ impl Simulator {
                 if reward.reward_type == "card" {
                     reward.can_reroll = true;
                 }
+            }
+        }
+        // A card offer an earlier listener added is on the set already, only
+        // not rolled yet: it may be rerolled too.
+        for pending in self.pending_rewards.iter_mut().flatten() {
+            if let PendingReward::CardOffer { rerollable, .. }
+            | PendingReward::CardOfferOfOtherColours { rerollable, .. }
+            | PendingReward::CreatedCardOffer { rerollable, .. }
+            | PendingReward::OwnCardOffer { rerollable, .. } = pending
+            {
+                *rerollable = true;
             }
         }
         self.reward_edits += 1;
@@ -28179,7 +28232,7 @@ impl Simulator {
                 })?;
                 Ok(crate::RewardFingerprint::of("relic").with_model(relic))
             }
-            PendingReward::OwnCardOffer { count } => {
+            PendingReward::OwnCardOffer { count, .. } => {
                 let mut spec = self.card_reward_pools(&self.reward_spec()?);
                 spec.card_option_count = count;
                 let creation = reward_creation(&spec, crate::RarityOdds::RegularEncounter, false);
@@ -28193,7 +28246,7 @@ impl Simulator {
                     .from_creation(creation)
                     .from_source(crate::RewardSource::Other))
             }
-            PendingReward::CardOfferOfOtherColours { colours } => {
+            PendingReward::CardOfferOfOtherColours { colours, .. } => {
                 // The pools other than the owner's own are sorted by model ID
                 // and then walked by a Fisher-Yates over the niche stream, and
                 // the first few are taken.
@@ -28243,7 +28296,7 @@ impl Simulator {
                     .with_cards(cards, Vec::new(), crate::RarityOdds::Uniform)
                     .from_source(crate::RewardSource::Other))
             }
-            PendingReward::CreatedCardOffer(creation) => {
+            PendingReward::CreatedCardOffer { creation, .. } => {
                 let odds = creation.odds;
                 let cards = self.create_cards(&creation)?;
                 // An offer built out of cards that already exist carries no
@@ -28255,7 +28308,7 @@ impl Simulator {
                     .from_creation(creation)
                     .from_source(crate::RewardSource::Other))
             }
-            PendingReward::CardOffer { room, count } => {
+            PendingReward::CardOffer { room, count, .. } => {
                 let mut spec = self.card_reward_pools(&self.reward_spec()?);
                 spec.card_option_count = count;
                 // A combat room's offer is an encounter's, and rolls with the

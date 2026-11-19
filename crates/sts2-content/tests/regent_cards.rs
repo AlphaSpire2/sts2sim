@@ -960,6 +960,51 @@ fn a_crush_under_leaves_what_its_kill_lets_loose_uncrushed() {
     );
 }
 
+/// A make it so called back to a hand that already holds ten cards stays in
+/// the discard pile: a card bound for a full hand goes there instead.
+#[test]
+fn a_make_it_so_called_back_to_a_full_hand_stays_in_the_discard_pile() {
+    let mut builder = scenario(&[300], &[("CARD.BLADE_DANCE", 0)], &[], 20);
+    for next_id in 1..10 {
+        builder = builder.card(PileName::Hand, next_id, card("CARD.STRIKE_REGENT", 0), 0);
+    }
+    let simulator = built(builder.card(PileName::Discard, 10, card("CARD.MAKE_IT_SO", 0), 0));
+    // Two skills already played this turn, so the blade dance is the third.
+    let mut state = simulator.state().clone();
+    let combat = state.combat.as_mut().expect("a fight");
+    for card_id in [100, 101] {
+        combat
+            .player
+            .plays_finished
+            .push(sts2_engine::FinishedPlay {
+                card_id: sts2_core::CardInstanceId::from(card_id),
+                card_type: sts2_engine::CardType::Skill,
+                turn: combat.player.turn,
+                was_dupe: false,
+                was_chosen: true,
+                was_ethereal: false,
+            });
+    }
+    let mut simulator =
+        Simulator::from_scenario(state, sts2_content::standard_registry()).expect("it rebuilds");
+    play(&mut simulator, "CARD.BLADE_DANCE");
+    let piles = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("a fight")
+        .player
+        .piles;
+    assert_eq!(piles.hand.len(), 10, "the shivs filled the hand");
+    assert!(
+        piles
+            .discard
+            .iter()
+            .any(|card| card.fingerprint.model_id == id("CARD.MAKE_IT_SO")),
+        "so the make it so stayed in the discard pile"
+    );
+}
+
 /// A know thy place is the two debuffs and nothing else, and the upgrade takes
 /// the burn off rather than changing what it does.
 #[test]
