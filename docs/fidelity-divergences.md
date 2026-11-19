@@ -286,6 +286,29 @@ play's settled observation.
 test that runs the rest of itself over a won fight with each command's own
 guard, as a top-level card body does.
 
+## A step that would draw and auto-play without end is refused
+
+**The build.** Some content combinations never stop. A Pillage keeps drawing
+while each card it draws is an attack and the hand has room. A Hellraiser plays
+every Strike the moment it is drawn, and a play that is not allowed sends the
+Strike straight to the discard pile. Where none of the Strikes can be played (a
+Bound card already played under Chains of Binding, a Sloth already spent), the
+hand never fills and the same Strikes are drawn, refused and reshuffled
+forever, and the game does not return.
+
+**This simulator.** A step that draws and auto-plays more than 10,000 cards
+between them fails with `internal_invariant`, detail `endless_loop`, and the
+state before the step stands (`step`) or the simulator is poisoned
+(`step_quietly`), as for any failed step.
+
+**Whether it can reach a conformance claim.** No. A recording ends where the
+game stopped responding, so no trace holds the step's outcome, and real play
+stays far below the limit: a Pillage whose Strikes do land kills a boss in tens
+of draws.
+
+**What would change this.** A supported build that bounds these loops itself,
+or a legitimate step that draws or auto-plays more cards than the limit.
+
 ## Not on this list
 
 **A potion offer the belt has no room for is not a divergence.** The build

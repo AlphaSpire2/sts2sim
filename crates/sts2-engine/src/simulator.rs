@@ -1176,6 +1176,10 @@ pub struct Simulator {
     /// evoke hands back and the after-evoked pass is then given. It is live only
     /// inside that body, so it is not part of the exact state.
     orb_reached: Vec<CreatureCombatId>,
+    /// Cards drawn and cards auto-played since the step began, counted
+    /// against [`Simulator::ENDLESS_LOOP_LIMIT`]. Live only inside a step, so
+    /// it is not part of the exact state.
+    draws_and_auto_plays_this_step: u32,
 }
 
 /// The orbs a roll may land on, in the build's own order: what a rolled orb
@@ -1319,6 +1323,7 @@ impl Simulator {
             record_checkpoints: true,
             poisoned: false,
             orb_reached: Vec::new(),
+            draws_and_auto_plays_this_step: 0,
             detached_power: None,
             pending_rewards: None,
             modifying_rewards: None,
@@ -2040,6 +2045,7 @@ impl Simulator {
         });
         self.resume_cursor = 0;
         self.rest_option_owed_this_step = false;
+        self.draws_and_auto_plays_this_step = 0;
         let mut events = Vec::new();
         self.record_checkpoints = false;
         self.creature_mut(player_id)?.current_hp = player_hp;
@@ -2129,6 +2135,7 @@ impl Simulator {
         action: &Action,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<(), EngineError> {
+        self.draws_and_auto_plays_this_step = 0;
         if self.is_owed_automatic(action) {
             return self.apply_owed_automatic(action, events);
         }
@@ -13670,6 +13677,7 @@ impl Simulator {
         aimed_at: Option<CreatureCombatId>,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
+        self.tally_toward_endless_loop("auto_play")?;
         let Some(card) = self
             .combat()?
             .player
@@ -21514,6 +21522,30 @@ impl Simulator {
     /// The most cards a hand can hold.
     const MAX_CARDS_IN_HAND: usize = 10;
 
+    /// The most cards one step may draw and auto-play between them.
+    ///
+    /// Some content combinations never stop in the build itself: a pillage
+    /// keeps drawing while each card it draws is an attack and the hand has
+    /// room, and a hellraiser that cannot play the strikes it is handed (a
+    /// bound card already played under chains of binding, a sloth already
+    /// spent) sends every one of them straight to the discard pile, so the
+    /// same strikes are drawn, refused and reshuffled forever. Such a step is
+    /// refused rather than run without end. Real play stays far below the
+    /// limit: a pillage whose strikes do land kills a boss in tens of draws.
+    const ENDLESS_LOOP_LIMIT: u32 = 10_000;
+
+    /// Counts one draw or auto-play toward [`Self::ENDLESS_LOOP_LIMIT`], and
+    /// refuses the step once it is passed.
+    fn tally_toward_endless_loop(&mut self, site: &'static str) -> Result<(), EngineError> {
+        self.draws_and_auto_plays_this_step += 1;
+        if self.draws_and_auto_plays_this_step > Self::ENDLESS_LOOP_LIMIT {
+            return Err(EngineError::new(ErrorCode::InternalInvariant)
+                .with_detail("endless_loop", site)
+                .with_detail("draws_and_auto_plays", Self::ENDLESS_LOOP_LIMIT));
+        }
+        Ok(())
+    }
+
     /// Drawing. A listener can refuse the whole call before a single card
     /// moves, and the hand holds ten cards at the most.
     ///
@@ -21580,6 +21612,7 @@ impl Simulator {
                 })))?;
                 return Ok(reported);
             }
+            self.tally_toward_endless_loop("draw")?;
             let card = self.combat_mut()?.player.piles.draw.remove(0);
             let drawn = card.id;
             reported.push(drawn);

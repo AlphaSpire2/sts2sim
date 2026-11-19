@@ -247,7 +247,8 @@ are:
 - `state_divergence` for a conformance mismatch;
 - `unrecorded_progress` for a recording that loads its run further along than
   it recorded, so the play in between is missing; and
-- `internal_invariant` for impossible simulator state.
+- `internal_invariant` for impossible simulator state, and for a step the
+  build would never finish (see `fidelity-divergences.md`).
 
 An error includes a stable code, decision/location context, and structured
 details. Illegal player input cannot consume RNG or partially mutate state.
