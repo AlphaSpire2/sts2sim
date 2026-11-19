@@ -260,7 +260,7 @@ fn the_plain_powers_lay_down_what_they_say() {
         ("CARD.ACCELERANT", "POWER.ACCELERANT_POWER", 1, 2),
         ("CARD.ACCURACY", "POWER.ACCURACY_POWER", 4, 6),
         ("CARD.AFTERIMAGE", "POWER.AFTERIMAGE_POWER", 1, 1),
-        ("CARD.ANTICIPATE", "POWER.ANTICIPATE_POWER", 2, 3),
+        ("CARD.ANTICIPATE", "POWER.ANTICIPATE_POWER", 2, 4),
         ("CARD.BURST", "POWER.BURST_POWER", 1, 2),
         ("CARD.CORROSIVE_WAVE", "POWER.CORROSIVE_WAVE_POWER", 2, 3),
         ("CARD.ENVENOM", "POWER.ENVENOM_POWER", 1, 2),
@@ -268,7 +268,6 @@ fn the_plain_powers_lay_down_what_they_say() {
         ("CARD.INFINITE_BLADES", "POWER.INFINITE_BLADES_POWER", 1, 1),
         ("CARD.MASTER_PLANNER", "POWER.MASTER_PLANNER_POWER", 1, 1),
         ("CARD.NOXIOUS_FUMES", "POWER.NOXIOUS_FUMES_POWER", 2, 3),
-        ("CARD.OUTBREAK", "POWER.OUTBREAK_POWER", 11, 15),
         ("CARD.PHANTOM_BLADES", "POWER.PHANTOM_BLADES_POWER", 9, 12),
         ("CARD.SERPENT_FORM", "POWER.SERPENT_FORM_POWER", 4, 6),
         ("CARD.SHADOWMELD", "POWER.SHADOWMELD_POWER", 1, 1),
@@ -280,7 +279,8 @@ fn the_plain_powers_lay_down_what_they_say() {
             1,
             1,
         ),
-        ("CARD.WELL_LAID_PLANS", "POWER.WELL_LAID_PLANS_POWER", 1, 2),
+        ("CARD.WELL_LAID_PLANS", "POWER.WELL_LAID_PLANS_POWER", 1, 1),
+        ("CARD.SIDESTEP", "POWER.ENERGY_NEXT_TURN_POWER", 1, 2),
     ] {
         for (upgrade, stacks) in [(0, base), (1, upgraded)] {
             let mut simulator = fight(&[(model_id, upgrade)]);
@@ -318,7 +318,7 @@ fn the_plain_debuffs_land_where_they_are_aimed() {
 /// The cards that sweep the whole enemy side.
 #[test]
 fn the_sweeps_land_on_everything() {
-    for (model_id, base, upgraded) in [("CARD.FLICK_FLACK", 6, 8), ("CARD.DAGGER_SPRAY", 8, 12)] {
+    for (model_id, base, upgraded) in [("CARD.FLICK_FLACK", 7, 9), ("CARD.DAGGER_SPRAY", 8, 12)] {
         for (upgrade, damage) in [(0, base), (1, upgraded)] {
             let mut simulator = crowd(&[(model_id, upgrade)]);
             play(&mut simulator, model_id);
@@ -333,8 +333,8 @@ fn the_sweeps_land_on_everything() {
 fn the_sweeping_powers_land_on_everything() {
     for (model_id, power, base, upgraded) in [
         ("CARD.HAZE", "POWER.POISON_POWER", 4, 6),
+        ("CARD.HAZE", "POWER.WEAK_POWER", 1, 2),
         ("CARD.PIERCING_WAIL", "POWER.PIERCING_WAIL_POWER", 6, 8),
-        ("CARD.SCARE", "POWER.WEAK_POWER", 1, 1),
     ] {
         for (upgrade, stacks) in [(0, base), (1, upgraded)] {
             let mut simulator = crowd(&[(model_id, upgrade)]);
@@ -349,18 +349,18 @@ fn the_sweeping_powers_land_on_everything() {
     }
 }
 
-/// Upgrading a scare takes the Exhaust keyword off it; upgrading a calculated
+/// Upgrading a mirage takes the Exhaust keyword off it; upgrading a calculated
 /// gamble puts Retain on.
 #[test]
 fn two_upgrades_move_a_keyword_rather_than_a_number() {
-    let mut simulator = crowd(&[("CARD.SCARE", 0)]);
-    play(&mut simulator, "CARD.SCARE");
-    assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.SCARE"]);
+    let mut simulator = crowd(&[("CARD.MIRAGE", 0)]);
+    play(&mut simulator, "CARD.MIRAGE");
+    assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.MIRAGE"]);
 
-    let mut simulator = crowd(&[("CARD.SCARE", 1)]);
-    play(&mut simulator, "CARD.SCARE");
+    let mut simulator = crowd(&[("CARD.MIRAGE", 1)]);
+    play(&mut simulator, "CARD.MIRAGE");
     assert_eq!(pile(&simulator, PileName::Exhaust), Vec::<String>::new());
-    assert_eq!(pile(&simulator, PileName::Discard), ["CARD.SCARE"]);
+    assert_eq!(pile(&simulator, PileName::Discard), ["CARD.MIRAGE"]);
 
     let mut simulator = fight_with_draw(
         &[("CARD.CALCULATED_GAMBLE", 1), ("CARD.SLICE", 0)],
@@ -480,36 +480,26 @@ fn escape_plan_pays_block_only_for_a_skill() {
     }
 }
 
-/// Expertise draws the hand back up to its number, and nothing at all when the
-/// hand already holds that many.
+/// Expertise draws, and what it drew is kept in hand through the end of the
+/// turn while the rest of the hand goes down.
 #[test]
-fn expertise_fills_the_hand_and_no_further() {
-    let mut simulator = fight_with_draw(
-        &[("CARD.EXPERTISE", 0), ("CARD.SLICE", 0)],
-        &[
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-            ("CARD.SLICE", 0),
-        ],
-    );
-    play(&mut simulator, "CARD.EXPERTISE");
-    // The hand held one card once the expertise left it, so five come up.
-    assert_eq!(pile(&simulator, PileName::Hand).len(), 6);
-
-    let hand: Vec<(&str, u8)> = std::iter::once(("CARD.EXPERTISE", 0))
-        .chain(std::iter::repeat_n(("CARD.SLICE", 0), 7))
-        .collect();
-    let mut simulator = fight_with_draw(&hand, &[("CARD.DEFLECT", 0)]);
-    play(&mut simulator, "CARD.EXPERTISE");
-    assert_eq!(
-        pile(&simulator, PileName::Hand).len(),
-        7,
-        "nothing is drawn"
-    );
+fn expertise_draws_and_keeps_what_it_drew() {
+    for (upgrade, drawn) in [(0, 2), (1, 3)] {
+        let draw: Vec<(&str, u8)> = std::iter::repeat_n(("CARD.DEFLECT", 0), drawn)
+            .chain(std::iter::repeat_n(("CARD.SLICE", 0), 5))
+            .collect();
+        let mut simulator =
+            fight_with_draw(&[("CARD.EXPERTISE", upgrade), ("CARD.SLICE", 0)], &draw);
+        play(&mut simulator, "CARD.EXPERTISE");
+        let hand = pile(&simulator, PileName::Hand);
+        assert_eq!(hand.len(), 1 + drawn, "at level {upgrade}");
+        end_turn(&mut simulator);
+        let kept = pile(&simulator, PileName::Hand)
+            .iter()
+            .filter(|card| *card == "CARD.DEFLECT")
+            .count();
+        assert_eq!(kept, drawn, "the drawn cards were kept at level {upgrade}");
+    }
 }
 
 /// Prepared draws and puts back as many as it drew.
@@ -707,6 +697,54 @@ fn fan_of_knives_points_every_shiv_at_everything() {
     }
 }
 
+/// An inked Shiv under a fan of knives is aimed at everything, so its ink
+/// weakens every enemy rather than none.
+#[test]
+fn an_inked_shiv_under_a_fan_of_knives_weakens_every_enemy() {
+    let mut simulator = crowd(&[("CARD.BLADE_OF_INK", 0), ("CARD.FAN_OF_KNIVES", 0)]);
+    play(&mut simulator, "CARD.BLADE_OF_INK");
+    play(&mut simulator, "CARD.FAN_OF_KNIVES");
+    let inked = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, Action::PlayCard { card, .. }
+                if card.fingerprint.model_id == id("CARD.SHIV")
+                    && card.fingerprint.enchantment.is_some())
+        })
+        .cloned()
+        .expect("an inked Shiv is in the hand");
+    simulator.step(inked).expect("the play applies");
+    assert_eq!(power_amount(&simulator, 1, "POWER.WEAK_POWER"), 1);
+    assert_eq!(power_amount(&simulator, 2, "POWER.WEAK_POWER"), 1);
+}
+
+/// An echoing slash is one attack however many times it echoes: a skittish
+/// gardener it hit hears the swing once it is over and puts its block up.
+#[test]
+fn an_echoing_slash_is_an_attack_a_skittish_gardener_answers() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.PHANTASMAL_GARDENERS_ELITE"))
+        .played_as(id("CHARACTER.SILENT"))
+        .player_hp(70, 70)
+        .energy(9, 9)
+        .turn(1, 1)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .rng_counter(RunStream::CombatTargets, 0)
+        .enemy(1, id("MONSTER.PHANTASMAL_GARDENER"), 30, 30, "BITE_MOVE")
+        .power(
+            1,
+            id("POWER.SKITTISH_POWER"),
+            6,
+            sts2_engine::PowerType::Buff,
+        )
+        .card(PileName::Hand, 0, card("CARD.ECHOING_SLASH", 0), 0)
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    play(&mut simulator, "CARD.ECHOING_SLASH");
+    assert_eq!(creature(&simulator, 1).current_hp, 20);
+    assert_eq!(creature(&simulator, 1).block, 6);
+}
+
 /// A knife trap plays every Shiv that has burned up, at whatever the trap was
 /// pointed at, and the upgraded trap upgrades each of them first.
 #[test]
@@ -863,14 +901,14 @@ fn bubble_bubble_only_adds_to_poison_already_there() {
     }
 }
 
-/// Tracking stacks two the first time and one every time after it.
+/// Tracking stacks fifty every time it is played.
 #[test]
-fn tracking_stacks_two_and_then_one() {
+fn tracking_stacks_fifty_each_time() {
     let mut simulator = fight(&[("CARD.TRACKING", 0), ("CARD.TRACKING", 0)]);
     play(&mut simulator, "CARD.TRACKING");
-    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 2);
+    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 50);
     play(&mut simulator, "CARD.TRACKING");
-    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 3);
+    assert_eq!(power_amount(&simulator, 0, "POWER.TRACKING_POWER"), 100);
 }
 
 /// A dodge and roll owes next turn exactly what its block came to.
@@ -1110,7 +1148,7 @@ fn bullet_time_makes_the_hand_free() {
 #[test]
 fn a_card_made_free_that_wins_the_fight_is_left_at_its_own_cost() {
     let mut simulator =
-        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"))
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER"))
             .played_as(id("CHARACTER.SILENT"))
             .player_hp(70, 70)
             .energy(9, 9)

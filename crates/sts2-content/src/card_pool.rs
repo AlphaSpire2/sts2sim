@@ -33,7 +33,12 @@ pub(crate) const IRONCLAD_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         0,
     ),
     ("CARD.BLOOD_WALL", CardType::Skill, CardRarity::Common, 2),
-    ("CARD.BLOODLETTING", CardType::Skill, CardRarity::Common, 0),
+    (
+        "CARD.BLOODLETTING",
+        CardType::Skill,
+        CardRarity::Uncommon,
+        0,
+    ),
     ("CARD.BLUDGEON", CardType::Attack, CardRarity::Uncommon, 3),
     ("CARD.BODY_SLAM", CardType::Attack, CardRarity::Common, 1),
     ("CARD.BRAND", CardType::Skill, CardRarity::Rare, 0),
@@ -50,11 +55,11 @@ pub(crate) const IRONCLAD_POOL: [(&str, CardType, CardRarity, i32); 80] = [
     ("CARD.COLOSSUS", CardType::Skill, CardRarity::Uncommon, 1),
     ("CARD.CONFLAGRATION", CardType::Attack, CardRarity::Rare, 1),
     ("CARD.CRIMSON_MANTLE", CardType::Power, CardRarity::Rare, 1),
-    ("CARD.CRUELTY", CardType::Power, CardRarity::Rare, 1),
+    ("CARD.CRUELTY", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.DARK_EMBRACE", CardType::Power, CardRarity::Rare, 2),
     ("CARD.DEMON_FORM", CardType::Power, CardRarity::Rare, 3),
     ("CARD.DISMANTLE", CardType::Attack, CardRarity::Uncommon, 1),
-    ("CARD.DOMINATE", CardType::Skill, CardRarity::Uncommon, 1),
+    ("CARD.DOMINATE", CardType::Skill, CardRarity::Rare, 1),
     (
         "CARD.DRUM_OF_BATTLE",
         CardType::Skill,
@@ -66,7 +71,7 @@ pub(crate) const IRONCLAD_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         "CARD.EXPECT_A_FIGHT",
         CardType::Skill,
         CardRarity::Uncommon,
-        2,
+        3,
     ),
     ("CARD.FEED", CardType::Attack, CardRarity::Rare, 1),
     (
@@ -154,7 +159,7 @@ pub(crate) const IRONCLAD_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         CardRarity::Common,
         1,
     ),
-    ("CARD.TAUNT", CardType::Skill, CardRarity::Uncommon, 1),
+    ("CARD.TAUNT", CardType::Skill, CardRarity::Common, 1),
     ("CARD.TEAR_ASUNDER", CardType::Attack, CardRarity::Rare, 2),
     ("CARD.THRASH", CardType::Attack, CardRarity::Rare, 1),
     ("CARD.THUNDERCLAP", CardType::Attack, CardRarity::Common, 1),
@@ -181,7 +186,7 @@ pub(crate) const IRONCLAD_POOL: [(&str, CardType, CardRarity, i32); 80] = [
 /// run's pool carries.
 pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
     ("CARD.ABRASIVE", CardType::Power, CardRarity::Rare, 3),
-    ("CARD.ACCELERANT", CardType::Power, CardRarity::Rare, 1),
+    ("CARD.ACCELERANT", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.ACCURACY", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.ACROBATICS", CardType::Skill, CardRarity::Uncommon, 1),
     ("CARD.ADRENALINE", CardType::Skill, CardRarity::Rare, 0),
@@ -231,7 +236,12 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         CardRarity::Common,
         1,
     ),
-    ("CARD.ECHOING_SLASH", CardType::Attack, CardRarity::Rare, 1),
+    (
+        "CARD.ECHOING_SLASH",
+        CardType::Attack,
+        CardRarity::Uncommon,
+        1,
+    ),
     ("CARD.ENVENOM", CardType::Power, CardRarity::Rare, 2),
     ("CARD.ESCAPE_PLAN", CardType::Skill, CardRarity::Uncommon, 0),
     ("CARD.EXPERTISE", CardType::Skill, CardRarity::Uncommon, 1),
@@ -240,11 +250,11 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
     ("CARD.FINISHER", CardType::Attack, CardRarity::Uncommon, 1),
     ("CARD.FLECHETTES", CardType::Attack, CardRarity::Uncommon, 1),
     ("CARD.FLICK_FLACK", CardType::Attack, CardRarity::Common, 1),
-    ("CARD.SCARE", CardType::Skill, CardRarity::Uncommon, 0),
+    ("CARD.SIDESTEP", CardType::Skill, CardRarity::Uncommon, 0),
     ("CARD.FOOTWORK", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.GRAND_FINALE", CardType::Attack, CardRarity::Rare, 0),
     ("CARD.HAND_TRICK", CardType::Skill, CardRarity::Uncommon, 1),
-    ("CARD.HAZE", CardType::Skill, CardRarity::Uncommon, 3),
+    ("CARD.HAZE", CardType::Skill, CardRarity::Uncommon, 2),
     (
         "CARD.HIDDEN_DAGGERS",
         CardType::Skill,
@@ -282,7 +292,7 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         CardRarity::Uncommon,
         1,
     ),
-    ("CARD.OUTBREAK", CardType::Power, CardRarity::Uncommon, 1),
+    ("CARD.OUTBREAK", CardType::Skill, CardRarity::Rare, 3),
     (
         "CARD.PHANTOM_BLADES",
         CardType::Power,
@@ -334,12 +344,7 @@ pub(crate) const SILENT_POOL: [(&str, CardType, CardRarity, i32); 80] = [
         CardRarity::Uncommon,
         2,
     ),
-    (
-        "CARD.WELL_LAID_PLANS",
-        CardType::Power,
-        CardRarity::Uncommon,
-        1,
-    ),
+    ("CARD.WELL_LAID_PLANS", CardType::Power, CardRarity::Rare, 2),
 ];
 
 pub(crate) const NECROBINDER_POOL: [(&str, CardType, CardRarity, i32); 80] = [
@@ -958,7 +963,7 @@ pub(crate) const COLORLESS_POOL: [(&str, CardType, CardRarity, i32); 53] = [
     ("CARD.PROLONG", CardType::Skill, CardRarity::Uncommon, 0),
     ("CARD.PROWESS", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.PURITY", CardType::Skill, CardRarity::Uncommon, 0),
-    ("CARD.REND", CardType::Attack, CardRarity::Rare, 2),
+    ("CARD.REND", CardType::Attack, CardRarity::Rare, 1),
     (
         "CARD.RESTLESSNESS",
         CardType::Skill,
@@ -966,7 +971,7 @@ pub(crate) const COLORLESS_POOL: [(&str, CardType, CardRarity, i32); 53] = [
         0,
     ),
     ("CARD.ROLLING_BOULDER", CardType::Power, CardRarity::Rare, 3),
-    ("CARD.SALVO", CardType::Attack, CardRarity::Rare, 1),
+    ("CARD.SALVO", CardType::Attack, CardRarity::Uncommon, 1),
     ("CARD.SCRAWL", CardType::Skill, CardRarity::Rare, 1),
     (
         "CARD.SECRET_TECHNIQUE",
@@ -982,7 +987,7 @@ pub(crate) const COLORLESS_POOL: [(&str, CardType, CardRarity, i32); 53] = [
         1,
     ),
     ("CARD.SHOCKWAVE", CardType::Skill, CardRarity::Uncommon, 2),
-    ("CARD.SPLASH", CardType::Skill, CardRarity::Uncommon, 1),
+    ("CARD.SPLASH", CardType::Skill, CardRarity::Rare, 1),
     ("CARD.STRATAGEM", CardType::Power, CardRarity::Uncommon, 1),
     ("CARD.THE_BOMB", CardType::Skill, CardRarity::Uncommon, 2),
     ("CARD.THE_GAMBIT", CardType::Skill, CardRarity::Rare, 0),
@@ -1054,13 +1059,19 @@ const TOKEN_POOL: [&str; 14] = [
 ];
 
 /// The quest card pool, in the pool's own declaration order. A quest card
-/// transforms against the colorless pool, so this list is what says the three
+/// transforms against the colorless pool, so this list is what says the four
 /// stand in a pool of their own rather than what any roll reads.
-const QUEST_POOL: [&str; 3] = ["CARD.BYRDONIS_EGG", "CARD.LANTERN_KEY", "CARD.SPOILS_MAP"];
+const QUEST_POOL: [&str; 4] = [
+    "CARD.BYRDONIS_EGG",
+    "CARD.DOWSING",
+    "CARD.LANTERN_KEY",
+    "CARD.SPOILS_MAP",
+];
 
 /// The event card pool, in the pool's own declaration order. The last two are not
 /// in alphabetical order in the build either.
-const EVENT_POOL: [&str; 27] = [
+const EVENT_POOL: [&str; 28] = [
+    "CARD.ABUNDANCE",
     "CARD.APOTHEOSIS",
     "CARD.APPARITION",
     "CARD.BRIGHTEST_FLAME",
@@ -1113,20 +1124,25 @@ const VISUAL_POOL_OVERRIDES: [(&str, &str); 10] = [
 
 /// The cards a generation effect in combat is never allowed to hand out.
 /// Everything else is fair game for an effect that rolls against a pool.
-const NEVER_GENERATED_IN_COMBAT: [&str; 14] = [
+const NEVER_GENERATED_IN_COMBAT: [&str; 19] = [
+    "CARD.ABUNDANCE",
     "CARD.ALCHEMIZE",
+    "CARD.ASCENDERS_BANE",
     "CARD.DISINTEGRATION",
+    "CARD.EIDOLON",
     "CARD.FEED",
     "CARD.FRANTIC_ESCAPE",
     "CARD.HAND_OF_GREED",
     "CARD.HIDDEN_GEM",
     "CARD.MIND_ROT",
     "CARD.NEOWS_FURY",
+    "CARD.NIGHTMARE",
     "CARD.NOT_YET",
     "CARD.ROYALTIES",
     "CARD.SLOTH",
     "CARD.SOOT",
     "CARD.THE_HUNT",
+    "CARD.TRANSFIGURE",
     "CARD.WASTE_AWAY",
 ];
 

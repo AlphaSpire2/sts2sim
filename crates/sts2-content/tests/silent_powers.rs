@@ -238,30 +238,26 @@ fn envenom_poisons_what_the_attack_actually_hurt() {
     assert_eq!(power_amount(&simulator, 1, "POWER.POISON_POWER"), 1);
 }
 
-/// An outbreak burns everything every third time its owner poisons anything.
+/// An outbreak poisons everything and then every enemy's poison bites at once,
+/// a stack coming off for the bite.
 #[test]
-fn an_outbreak_pays_out_every_third_poison() {
-    let mut simulator = Fight {
-        enemies: 2,
-        hand: &[
-            ("CARD.OUTBREAK", 0),
-            ("CARD.DEADLY_POISON", 0),
-            ("CARD.DEADLY_POISON", 0),
-            ("CARD.DEADLY_POISON", 0),
-        ],
-        ..Fight::default()
+fn an_outbreak_poisons_everything_and_sets_it_off() {
+    for (upgrade, poison) in [(0, 9), (1, 12)] {
+        let mut simulator = Fight {
+            enemies: 2,
+            hand: &[("CARD.OUTBREAK", upgrade)],
+            ..Fight::default()
+        }
+        .build();
+        play(&mut simulator, "CARD.OUTBREAK");
+        for enemy in 1..=2 {
+            assert_eq!(creature(&simulator, enemy).current_hp, 39 - poison);
+            assert_eq!(
+                power_amount(&simulator, enemy, "POWER.POISON_POWER"),
+                poison - 1
+            );
+        }
     }
-    .build();
-    play(&mut simulator, "CARD.OUTBREAK");
-    play(&mut simulator, "CARD.DEADLY_POISON");
-    play(&mut simulator, "CARD.DEADLY_POISON");
-    assert_eq!(creature(&simulator, 2).current_hp, 39, "not yet");
-    play(&mut simulator, "CARD.DEADLY_POISON");
-    assert_eq!(
-        creature(&simulator, 2).current_hp,
-        39 - 11,
-        "the third poison paid out over everything"
-    );
 }
 
 // --- the ones that answer for a card play --------------------------------
@@ -412,34 +408,26 @@ fn tools_of_the_trade_draw_one_more_and_take_one_back() {
     assert_eq!(hand(&simulator).len(), 5);
 }
 
-/// Well laid plans ask which cards to keep back on the late half of the
-/// before-flush pass, where every listener gets to act before any of them
-/// finishes. The engine banks the screen a deferred body asks for and opens it
-/// once the whole pass has run, so ending the turn puts the
-/// retain pick to the player before the hand goes down — see
-/// `a_deferred_pass_still_asks.rs` for the discipline itself.
+/// Well laid plans keep the whole hand through the end of the turn, without
+/// asking anything.
 #[test]
-fn well_laid_plans_ask_on_the_way_out_of_the_turn() {
+fn well_laid_plans_keep_the_whole_hand() {
     let mut simulator = Fight {
-        hand: &[("CARD.WELL_LAID_PLANS", 0), ("CARD.SLICE", 0)],
+        hand: &[
+            ("CARD.WELL_LAID_PLANS", 0),
+            ("CARD.SLICE", 0),
+            ("CARD.DEFLECT", 0),
+        ],
         ..Fight::default()
     }
     .build();
     play(&mut simulator, "CARD.WELL_LAID_PLANS");
     end_turn(&mut simulator);
-    let kept = simulator
-        .legal_actions()
-        .iter()
-        .find(|action| {
-            matches!(action, Action::ChooseCards { cards, .. }
-                if cards.len() == 1 && cards[0].fingerprint.model_id == id("CARD.SLICE"))
-        })
-        .cloned()
-        .expect("the retain pick offers the slice");
-    simulator.step(kept).expect("keeping it applies");
+    let held = hand(&simulator);
     assert!(
-        hand(&simulator).iter().any(|card| card == "CARD.SLICE"),
-        "the kept slice survived the flush into the next turn"
+        held.iter().any(|card| card == "CARD.SLICE")
+            && held.iter().any(|card| card == "CARD.DEFLECT"),
+        "the whole hand survived the flush into the next turn: {held:?}"
     );
 }
 
@@ -570,8 +558,8 @@ fn phantom_blades_pay_for_the_first_shiv_of_a_turn() {
     );
 }
 
-/// Tracking multiplies what its owner's cards deal to anything shaken, and
-/// leaves everything else where it was.
+/// Tracking raises what its owner's cards deal to anything weakened by its
+/// amount in percent, and leaves everything else where it was.
 #[test]
 fn tracking_multiplies_what_lands_on_the_weakened() {
     let mut simulator = Fight {
@@ -591,7 +579,11 @@ fn tracking_multiplies_what_lands_on_the_weakened() {
     .build();
     play(&mut simulator, "CARD.TRACKING");
     play(&mut simulator, "CARD.SLICE");
-    assert_eq!(creature(&simulator, 1).current_hp, 39 - 12, "twice over");
+    assert_eq!(
+        creature(&simulator, 1).current_hp,
+        39 - 9,
+        "half as much again"
+    );
 }
 
 /// Flanking makes everyone but the player who worked it hit its holder harder.
@@ -704,7 +696,7 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
         powers: &[
             (0, "POWER.TOOLS_OF_THE_TRADE_POWER", 1, PowerType::Buff),
             (0, "POWER.NOXIOUS_FUMES_POWER", 1, PowerType::Buff),
-            (0, "POWER.OUTBREAK_POWER", 1, PowerType::Buff),
+            (0, "POWER.SLEIGHT_OF_FLESH_POWER", 1, PowerType::Buff),
         ],
         draw: &[("CARD.DEFLECT", 0), ("CARD.SLICE", 0)],
         ..Fight::default()
@@ -722,7 +714,7 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
             .iter()
             .filter(|c| c.side == sts2_engine::CombatSide::Enemy)
             .all(|c| c.current_hp == 0),
-        "Outbreak killed every enemy"
+        "the fumes' poison cut every enemy down"
     );
     assert!(
         !combat.in_progress,
@@ -752,14 +744,14 @@ fn tools_of_the_trade_does_not_hold_a_poison_won_fight_open() {
 
 /// Side-start damage must preserve the discard and its continuation if enemies survive.
 #[test]
-fn tools_of_the_trade_still_requires_a_discard_after_nonlethal_outbreak() {
+fn tools_of_the_trade_still_requires_a_discard_after_nonlethal_damage() {
     let mut simulator = Fight {
         enemies: 3,
         enemy_hp: 39,
         powers: &[
             (0, "POWER.TOOLS_OF_THE_TRADE_POWER", 1, PowerType::Buff),
             (0, "POWER.NOXIOUS_FUMES_POWER", 1, PowerType::Buff),
-            (0, "POWER.OUTBREAK_POWER", 1, PowerType::Buff),
+            (0, "POWER.SLEIGHT_OF_FLESH_POWER", 1, PowerType::Buff),
         ],
         draw: &[("CARD.DEFLECT", 0), ("CARD.SLICE", 0)],
         ..Fight::default()

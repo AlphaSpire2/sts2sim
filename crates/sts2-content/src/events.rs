@@ -1,8 +1,8 @@
 //! Event definitions of the pinned build.
 
 use sts2_engine::{
-    AncientRelicGroup, CardTag, EventAmount, EventCardFilter, EventCondition, EventDefinition,
-    EventEffect, EventGeneration, EventOption,
+    AncientActs, AncientRelicGroup, CardTag, EventAmount, EventCardFilter, EventCondition,
+    EventDefinition, EventEffect, EventGeneration, EventOption,
 };
 use sts2_engine::{
     ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
@@ -14,14 +14,22 @@ use crate::id;
 fn group(relics: &[&str]) -> AncientRelicGroup {
     AncientRelicGroup {
         relics: relics.iter().map(|relic| id(relic)).collect(),
-        only_in_act: None,
+        acts: AncientActs::Any,
     }
 }
 
-/// A group only this act is offered.
+/// A group offered only in the act with this zero-based index.
 fn act_group(act: usize, relics: &[&str]) -> AncientRelicGroup {
     AncientRelicGroup {
-        only_in_act: Some(act),
+        acts: AncientActs::Only(act),
+        ..group(relics)
+    }
+}
+
+/// A group offered from the act with this zero-based index onward.
+fn from_act_group(act: usize, relics: &[&str]) -> AncientRelicGroup {
+    AncientRelicGroup {
+        acts: AncientActs::From(act),
         ..group(relics)
     }
 }
@@ -57,8 +65,10 @@ pub fn darv(character: &sts2_core::ModelId) -> EventDefinition {
                 group(&["RELIC.PANDORAS_BOX"]),
                 group(&["RELIC.RUNIC_PYRAMID"]),
                 group(&["RELIC.SNECKO_EYE"]),
-                act_group(1, &["RELIC.ECTOPLASM", "RELIC.SOZU"]),
-                act_group(2, &["RELIC.PHILOSOPHERS_STONE", "RELIC.VELVET_CHOKER"]),
+                act_group(1, &["RELIC.ECTOPLASM"]),
+                act_group(1, &["RELIC.SOZU"]),
+                from_act_group(1, &["RELIC.PHILOSOPHERS_STONE"]),
+                from_act_group(1, &["RELIC.VELVET_CHOKER"]),
             ],
             keepsake: id("RELIC.DUSTY_TOME"),
             // Setup still consumes a rewards draw for a one-card pool.
@@ -343,6 +353,7 @@ pub fn brain_leech() -> EventDefinition {
                             flags: sts2_engine::CardCreationFlags {
                                 no_upgrade_roll: true,
                                 is_card_reward: true,
+                                is_from_combat: false,
                                 no_card_pool_modifications: true,
                             },
                         }],
@@ -761,6 +772,7 @@ pub fn colorful_philosophers(character: &sts2_core::ModelId) -> EventDefinition 
                 is_card_reward: true,
                 no_card_pool_modifications: true,
                 no_upgrade_roll: false,
+                is_from_combat: false,
             },
         };
         vec![EventEffect::OfferCreatedCardRewards {
@@ -878,17 +890,14 @@ pub fn orobas() -> EventDefinition {
         allowed: EventCondition::Always,
         vars: Vec::new(),
         generation: EventGeneration::OrobasRelics {
-            pool_one: vec![
-                id("RELIC.ELECTRIC_SHRYMP"),
-                id("RELIC.GLASS_EYE"),
-                id("RELIC.SAND_CASTLE"),
-            ],
+            pool_one: vec![id("RELIC.ELECTRIC_SHRYMP"), id("RELIC.GLASS_EYE")],
             prismatic: id("RELIC.PRISMATIC_GEM"),
             sea_glass: id("RELIC.SEA_GLASS"),
             pool_two: vec![
                 id("RELIC.ALCHEMICAL_COFFER"),
                 id("RELIC.DRIFTWOOD"),
                 id("RELIC.RADIANT_PEARL"),
+                id("RELIC.SAND_CASTLE"),
             ],
             pool_three: vec![
                 // The touch of Orobas is only offered where there is a
@@ -2981,14 +2990,16 @@ pub fn tanx() -> EventDefinition {
     }
 }
 
-/// The battleworn dummy: pick a setting and fight the battle friend it stands
-/// up, on a three-turn clock the friend carries itself.
+/// The battleworn dummy: pick a setting and fight the battle friend its room
+/// stands up, on a three-turn clock the friend carries itself.
 ///
 /// The fight is pushed on top of the event's own room and the page stays
-/// standing under it, so proceeding past the fight's rewards goes back to the
-/// event rather than to the map. What the event then pays depends on the
-/// setting, and pays nothing at all where the clock ran out — which is what the
-/// friend walking out of the fight comes to.
+/// standing under it, so proceeding past the fight goes back to the event
+/// rather than to the map. What the event then pays depends on the setting —
+/// a potion, two upgrades, or a relic — and is offered in one set together
+/// with whatever the fight itself added to its rewards. It pays nothing at all
+/// where the clock ran out, which is what the friend walking out of the fight
+/// comes to.
 #[must_use]
 pub fn battleworn_dummy(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
     let setting = |index: usize, resume: Vec<EventEffect>| {
@@ -2999,10 +3010,13 @@ pub fn battleworn_dummy(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
             ),
             &format!("Setting {}", index + 1),
             vec![EventEffect::EnterCombatWithoutLeaving {
-                encounter: id("ENCOUNTER.BATTLEWORN_DUMMY_EVENT_ENCOUNTER"),
+                encounter: id(&format!(
+                    "ENCOUNTER.BATTLEWORN_DUMMY_EVENT_V{}_ENCOUNTER",
+                    index + 1
+                )),
                 extra_rewards: Vec::new(),
                 resumes_parent: true,
-                chosen_monster: Some(index),
+                chosen_monster: None,
                 resume: vec![EventEffect::UnlessTheFightTimedOut(resume)],
             }],
         )
@@ -3017,12 +3031,28 @@ pub fn battleworn_dummy(potions: Vec<sts2_core::ModelId>) -> EventDefinition {
         generation: EventGeneration::Fixed(vec![
             setting(
                 0,
-                vec![EventEffect::OfferRolledPotion {
-                    candidates: potions,
+                vec![EventEffect::OfferWithTheFightsExtras {
+                    rolled_potion_from: potions,
+                    relic: false,
                 }],
             ),
-            setting(1, vec![EventEffect::UpgradeShuffledDeckCards { count: 2 }]),
-            setting(2, vec![EventEffect::ObtainRolledRelic]),
+            setting(
+                1,
+                vec![
+                    EventEffect::UpgradeShuffledDeckCards { count: 2 },
+                    EventEffect::OfferWithTheFightsExtras {
+                        rolled_potion_from: Vec::new(),
+                        relic: false,
+                    },
+                ],
+            ),
+            setting(
+                2,
+                vec![EventEffect::OfferWithTheFightsExtras {
+                    rolled_potion_from: Vec::new(),
+                    relic: true,
+                }],
+            ),
         ]),
     }
 }

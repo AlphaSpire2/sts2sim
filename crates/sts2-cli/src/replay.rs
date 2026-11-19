@@ -494,7 +494,7 @@ mod tests {
         let mut start = profile_start();
         start.payload["data"]["state"]["players"][0]["unlocks"]["encounters_seen"] =
             json!(["ENCOUNTER.WATERFALL_GIANT_BOSS"]);
-        let sim = recorded_run("X7JFABM2QS", 10, sts2_engine::RunMode::Standard, &start).unwrap();
+        let sim = recorded_run("7CM298WJ2J2Y", 10, sts2_engine::RunMode::Standard, &start).unwrap();
         let run = sim.state().run.as_ref().unwrap();
         assert_eq!(run.acts[0].boss.to_string(), "ENCOUNTER.SOUL_FYSH_BOSS");
         assert_eq!(
@@ -517,7 +517,8 @@ mod tests {
     #[test]
     fn explicit_empty_discovery_is_distinct_from_legacy_all_discovered() {
         let mut start = profile_start();
-        let legacy = recorded_run("N3Z9EE2CXB", 0, sts2_engine::RunMode::Standard, &start).unwrap();
+        let legacy =
+            recorded_run("2Q01FZ2BG4ZC", 0, sts2_engine::RunMode::Standard, &start).unwrap();
         assert_eq!(
             legacy.state().run.as_ref().unwrap().acts[0]
                 .act_model
@@ -526,7 +527,7 @@ mod tests {
         );
         start.payload["data"]["profile"] = json!({"discovered_acts":[]});
         let undiscovered =
-            recorded_run("N3Z9EE2CXB", 0, sts2_engine::RunMode::Standard, &start).unwrap();
+            recorded_run("2Q01FZ2BG4ZC", 0, sts2_engine::RunMode::Standard, &start).unwrap();
         assert_eq!(
             undiscovered.state().run.as_ref().unwrap().acts[0]
                 .act_model
@@ -535,7 +536,7 @@ mod tests {
         );
         start.payload["data"]["profile"] = json!({"discovered_acts":["ACT.UNDERDOCKS"]});
         let discovered =
-            recorded_run("N3Z9EE2CXB", 0, sts2_engine::RunMode::Standard, &start).unwrap();
+            recorded_run("2Q01FZ2BG4ZC", 0, sts2_engine::RunMode::Standard, &start).unwrap();
         assert_eq!(
             discovered.state().run.as_ref().unwrap().acts,
             legacy.state().run.as_ref().unwrap().acts
@@ -593,8 +594,8 @@ mod tests {
         let mut text = format!(
             "[Format \"STS2PGN\"]\n[FormatVersion \"{version}\"]\n\
              [RecorderVersion \"test\"]\n[RunId \"synthetic\"]\n\
-             [GameVersion \"v0.107.1\"]\n[GameCommit \"59260271\"]\n\
-             [ModelIdHash \"3954186980\"]\n[Seed \"ABC\"]\n\
+             [GameVersion \"v0.111.1\"]\n[GameCommit \"cc1f9462\"]\n\
+             [ModelIdHash \"1568834832\"]\n[Seed \"ABC\"]\n\
              [Mode \"STANDARD\"]\n[Ascension \"0\"]\n\
              [Players \"[{{\\\"slot\\\":\\\"p0\\\",\\\"character\\\":\\\"IRONCLAD\\\"}}]\"]\n\
              [Mods \"[]\"]\n[Result \"*\"]\n\n"

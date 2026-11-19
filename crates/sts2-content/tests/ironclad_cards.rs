@@ -253,7 +253,7 @@ fn fiend_fire_on_an_empty_hand_swings_nothing() {
 fn mangle_takes_strength_for_one_turn_and_gives_it_back() {
     let mut simulator = fight(&[("CARD.MANGLE", 0)]);
     play(&mut simulator, "CARD.MANGLE");
-    assert_eq!(creature(&simulator, 1).current_hp, 39 - 15);
+    assert_eq!(creature(&simulator, 1).current_hp, 39 - 20);
     assert_eq!(power_amount(&simulator, 1, "POWER.MANGLE_POWER"), 10);
     assert_eq!(power_amount(&simulator, 1, "POWER.STRENGTH_POWER"), -10);
 
@@ -266,12 +266,12 @@ fn mangle_takes_strength_for_one_turn_and_gives_it_back() {
     assert_eq!(power_amount(&simulator, 1, "POWER.STRENGTH_POWER"), 0);
 }
 
-/// Upgrading a mangling pays five more damage and five more strength.
+/// Upgrading a mangling pays six more damage and five more strength.
 #[test]
-fn an_upgraded_mangle_takes_five_more_of_each() {
+fn an_upgraded_mangle_takes_more_of_each() {
     let mut simulator = fight(&[("CARD.MANGLE", 1)]);
     play(&mut simulator, "CARD.MANGLE");
-    assert_eq!(creature(&simulator, 1).current_hp, 39 - 20);
+    assert_eq!(creature(&simulator, 1).current_hp, 39 - 26);
     assert_eq!(power_amount(&simulator, 1, "POWER.STRENGTH_POWER"), -15);
 }
 
@@ -279,7 +279,7 @@ fn an_upgraded_mangle_takes_five_more_of_each() {
 /// Strike for whatever is counting them.
 #[test]
 fn setup_strike_lends_its_owner_strength_for_the_turn() {
-    for (upgrade, damage, strength) in [(0, 7, 2), (1, 9, 3)] {
+    for (upgrade, damage, strength) in [(0, 7, 3), (1, 9, 4)] {
         let mut simulator = fight(&[("CARD.SETUP_STRIKE", upgrade)]);
         play(&mut simulator, "CARD.SETUP_STRIKE");
         assert_eq!(creature(&simulator, 1).current_hp, 39 - damage);
@@ -315,7 +315,7 @@ fn pacts_end_only_swings_once_three_cards_have_burned() {
         .build(sts2_content::standard_registry())
         .expect("the scenario builds");
     play(&mut simulator, "CARD.PACTS_END");
-    assert_eq!(creature(&simulator, 1).current_hp, 39 - 17);
+    assert_eq!(creature(&simulator, 1).current_hp, 39 - 18);
 }
 
 // --- skills --------------------------------------------------------------
@@ -633,11 +633,11 @@ fn stomping_beetle(hand: &[(&str, u8)], shaken: bool) -> Simulator {
 fn a_colossus_halves_what_a_shaken_attacker_lands() {
     let mut simulator = stomping_beetle(&[("CARD.COLOSSUS", 0)], false);
     play(&mut simulator, "CARD.COLOSSUS");
-    assert_eq!(player(&simulator).block, 5);
+    assert_eq!(player(&simulator).block, 4);
     end_turn(&mut simulator);
     assert_eq!(
         player(&simulator).current_hp,
-        80 - (13 - 5),
+        80 - (13 - 4),
         "an unshaken stomp lands whole"
     );
 
@@ -646,7 +646,7 @@ fn a_colossus_halves_what_a_shaken_attacker_lands() {
     end_turn(&mut simulator);
     assert_eq!(
         player(&simulator).current_hp,
-        80 - (13 / 2 - 5),
+        80 - (13 / 2 - 4),
         "a shaken one is halved before the block takes any of it"
     );
     assert_eq!(
@@ -661,7 +661,7 @@ fn a_colossus_halves_what_a_shaken_attacker_lands() {
 fn an_upgraded_colossus_stands_behind_more_block() {
     let mut simulator = fight(&[("CARD.COLOSSUS", 1)]);
     play(&mut simulator, "CARD.COLOSSUS");
-    assert_eq!(player(&simulator).block, 8);
+    assert_eq!(player(&simulator).block, 7);
     assert_eq!(power_amount(&simulator, 0, "POWER.COLOSSUS_POWER"), 1);
 }
 
@@ -759,7 +759,7 @@ fn cruelty_raises_what_a_shaking_its_owner_worked_is_worth() {
 /// the turn it was laid down.
 #[test]
 fn a_demon_form_pays_out_at_the_start_of_its_owners_turn() {
-    for (upgrade, strength) in [(0, 2), (1, 3)] {
+    for (upgrade, strength) in [(0, 3), (1, 4)] {
         let mut simulator = fight(&[("CARD.DEMON_FORM", upgrade)]);
         play(&mut simulator, "CARD.DEMON_FORM");
         assert_eq!(
@@ -891,33 +891,19 @@ fn an_evil_eye_pays_twice_once_something_has_burned() {
     }
 }
 
-/// A forgotten ritual asks before it burns itself, so playing it first pays
-/// nothing at all.
+/// A forgotten ritual pays its energy whether or not anything has burned, and
+/// burns itself for having been played.
 #[test]
-fn a_forgotten_ritual_does_not_count_its_own_burn() {
+fn a_forgotten_ritual_pays_its_energy_outright() {
     for (upgrade, gained) in [(0, 3), (1, 4)] {
         let mut simulator = fight(&[("CARD.FORGOTTEN_RITUAL", upgrade)]);
         let before = energy(&simulator);
         play(&mut simulator, "CARD.FORGOTTEN_RITUAL");
-        assert_eq!(
-            energy(&simulator),
-            before - 1,
-            "it costs its energy and pays none back"
-        );
+        assert_eq!(energy(&simulator), before - 1 + gained);
         assert_eq!(
             pile(&simulator, PileName::Exhaust),
             ["CARD.FORGOTTEN_RITUAL"]
         );
-
-        let mut simulator = fight(&[
-            ("CARD.FORGOTTEN_RITUAL", upgrade),
-            ("CARD.IMPERVIOUS", 0),
-            ("CARD.STRIKE_IRONCLAD", 0),
-        ]);
-        play(&mut simulator, "CARD.IMPERVIOUS");
-        let before = energy(&simulator);
-        play(&mut simulator, "CARD.FORGOTTEN_RITUAL");
-        assert_eq!(energy(&simulator), before - 1 + gained);
     }
 }
 
@@ -1203,37 +1189,22 @@ fn second_wind_burns_the_skills_and_pays_block_for_each() {
     }
 }
 
-/// Expecting a fight pays a point for every attack in hand — the second wind's
-/// own card is in the play pile by then, so it is not one of them — and then
-/// stops the next gain outright.
+/// Expecting a fight is block, and more of it for every point of strength its
+/// owner stands with.
 #[test]
-fn expect_a_fight_pays_per_attack_in_hand_and_then_stops_the_next_gain() {
-    let mut simulator = fight(&[
-        ("CARD.EXPECT_A_FIGHT", 0),
-        ("CARD.STRIKE_IRONCLAD", 0),
-        ("CARD.STRIKE_IRONCLAD", 0),
-        ("CARD.DEFEND_IRONCLAD", 0),
-        ("CARD.BLOODLETTING", 0),
-    ]);
-    let before = energy(&simulator);
-    play(&mut simulator, "CARD.EXPECT_A_FIGHT");
-    assert_eq!(energy(&simulator), before - 2 + 2);
+fn expect_a_fight_stands_behind_more_block_for_every_strength() {
+    for (upgrade, base, per) in [(0, 15, 5), (1, 16, 8)] {
+        let mut simulator = fight(&[("CARD.EXPECT_A_FIGHT", upgrade)]);
+        let before = energy(&simulator);
+        play(&mut simulator, "CARD.EXPECT_A_FIGHT");
+        assert_eq!(energy(&simulator), before - 3);
+        assert_eq!(player(&simulator).block, base);
 
-    let before = energy(&simulator);
-    play(&mut simulator, "CARD.BLOODLETTING");
-    assert_eq!(
-        energy(&simulator),
-        before,
-        "the bloodletting still costs its HP but its energy is worth nothing"
-    );
-    assert_eq!(player(&simulator).current_hp, 77);
-
-    end_turn(&mut simulator);
-    assert_eq!(
-        power_amount(&simulator, 0, "POWER.NO_ENERGY_GAIN_POWER"),
-        0,
-        "the stopper comes off at the end of a turn its owner took part in"
-    );
+        let mut simulator = fight(&[("CARD.EXPECT_A_FIGHT", upgrade), ("CARD.INFLAME", 0)]);
+        play(&mut simulator, "CARD.INFLAME");
+        play(&mut simulator, "CARD.EXPECT_A_FIGHT");
+        assert_eq!(player(&simulator).block, base + 2 * per);
+    }
 }
 
 /// A battle trance draws and then stops the well; the next turn's own opening
@@ -1390,7 +1361,7 @@ fn a_howl_from_beyond_plays_itself_again_out_of_the_exhaust_pile() {
 
     let mut simulator = howling(PileName::Hand);
     play(&mut simulator, "CARD.HOWL_FROM_BEYOND");
-    assert_eq!(creature(&simulator, 1).current_hp, 200 - 16);
+    assert_eq!(creature(&simulator, 1).current_hp, 200 - 18);
     assert_eq!(
         pile(&simulator, PileName::Discard),
         ["CARD.HOWL_FROM_BEYOND"]
@@ -1407,7 +1378,7 @@ fn a_howl_from_beyond_plays_itself_again_out_of_the_exhaust_pile() {
     end_turn(&mut simulator);
     assert_eq!(
         creature(&simulator, 1).current_hp,
-        200 - 16,
+        200 - 18,
         "a howl in the exhaust pile plays itself once the player stops acting"
     );
 }
@@ -1777,7 +1748,7 @@ fn tear_asunder_lands_once_more_for_every_blow_that_got_through() {
 /// A rampage grows its own damage every time it is played.
 #[test]
 fn a_rampage_grows_every_time_it_is_played() {
-    for (upgrade, increase) in [(0, 5), (1, 9)] {
+    for (upgrade, increase) in [(0, 5), (1, 10)] {
         let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
             .player_hp(80, 80)
             .energy(9, 9)
@@ -1787,10 +1758,10 @@ fn a_rampage_grows_every_time_it_is_played() {
             .build(sts2_content::standard_registry())
             .expect("the scenario builds");
         play(&mut simulator, "CARD.RAMPAGE");
-        assert_eq!(creature(&simulator, 1).current_hp, 200 - 9);
+        assert_eq!(creature(&simulator, 1).current_hp, 200 - 10);
         // The second copy is its own card and has not grown.
         play(&mut simulator, "CARD.RAMPAGE");
-        assert_eq!(creature(&simulator, 1).current_hp, 200 - 9 - 9);
+        assert_eq!(creature(&simulator, 1).current_hp, 200 - 10 - 10);
         let grown = simulator
             .state()
             .combat

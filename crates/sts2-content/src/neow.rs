@@ -1,11 +1,13 @@
 use sts2_rng::{Rng, deterministic_hash};
 
-const CURSES: [&str; 8] = [
+const CURSES: [&str; 10] = [
     "CURSED_PEARL",
+    "DOWSING_ROD",
     "HEFTY_TABLET",
     "LARGE_CAPSULE",
     "LEAFY_POULTICE",
     "NEOWS_BONES",
+    "NEOWS_SACRIFICE",
     "PRECARIOUS_SHEARS",
     "SILKEN_TRESS",
     "SILVER_CRUCIBLE",
@@ -41,8 +43,8 @@ pub fn standard_neow_options(seed: &str) -> Vec<String> {
 /// starts from.
 #[must_use]
 pub fn standard_neow_page(seed: &str) -> (Vec<String>, u64) {
-    let run_seed = deterministic_hash(seed) as u32;
-    let event_seed = run_seed.wrapping_add(deterministic_hash("NEOW") as u32);
+    let run_seed = deterministic_hash(seed);
+    let event_seed = run_seed.wrapping_add(deterministic_hash("NEOW"));
     let mut rng = Rng::new(event_seed);
 
     let curse = CURSES[rng
@@ -55,6 +57,9 @@ pub fn standard_neow_page(seed: &str) -> (Vec<String>, u64) {
         "HEFTY_TABLET" => positive.retain(|option| *option != "ARCANE_SCROLL"),
         "LEAFY_POULTICE" => positive.retain(|option| *option != "NEW_LEAF"),
         "PRECARIOUS_SHEARS" => positive.retain(|option| *option != "PRECISE_SCISSORS"),
+        "NEOWS_SACRIFICE" => {
+            positive.retain(|option| !matches!(*option, "PHIAL_HOLSTER" | "LOST_COFFER"));
+        }
         _ => {}
     }
     if curse != "LARGE_CAPSULE" {

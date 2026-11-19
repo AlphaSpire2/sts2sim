@@ -152,6 +152,11 @@ pub enum Command {
         creatures: CreatureSelector,
         then: Vec<Command>,
     },
+    /// The opponents standing now, written down for a later command of the
+    /// same body to name through [`CreatureSelector::Noted`]. A body that has
+    /// to stay one command a place, so its upgraded form can take over mid-play,
+    /// notes its targets this way rather than binding them.
+    NoteOpponents,
     /// What a Misery notes before it swings: a copy of every power on the
     /// play's target that counts as a debuff at the amount it is standing at,
     /// taken before the play does anything to that target, so the copies are
@@ -287,10 +292,39 @@ pub enum CreatureCmd {
         /// monster's own first move state.
         #[serde(default)]
         initial_state: Option<String>,
+        /// Added to both ends of the arrival's health range before it is
+        /// rolled, which is what a monster built with a bonus of its own — an
+        /// Axebot's replacement — rolls against. Worked out by the caller.
+        #[serde(default)]
+        hp_bonus: Option<Amount>,
         /// What the body goes on to do with the creature the add brought in.
         /// These run with the caller as owner and the arrival as target, so a
         /// power worked here is worked by the caller onto what it just made.
         /// An add that put nothing down runs none of them.
+        #[serde(default)]
+        then: Vec<Command>,
+    },
+    /// Rolls a monster's arrival without bringing it in: the slot it will
+    /// stand in, its health against the enemies already standing, and its
+    /// identifier. The arrival is held until an
+    /// [`CreatureCmd::AddReserved`] of the same monster brings it in, so an
+    /// arrival made in between neither rolls against its health nor takes its
+    /// identifier.
+    Reserve {
+        monster: ModelId,
+        #[serde(default)]
+        slot: SpawnSlot,
+    },
+    /// Brings in the arrival a [`CreatureCmd::Reserve`] rolled for this
+    /// monster. `prepare` runs once it stands and before its own arrival and
+    /// the creature-added pass are settled; `then` runs after them, as for an
+    /// add. Both run with the caller as owner and the arrival as target.
+    AddReserved {
+        monster: ModelId,
+        #[serde(default)]
+        initial_state: Option<String>,
+        #[serde(default)]
+        prepare: Vec<Command>,
         #[serde(default)]
         then: Vec<Command>,
     },
@@ -351,6 +385,11 @@ pub enum CreatureCmd {
     LoseBlock {
         target: CreatureSelector,
         amount: Amount,
+        /// The creature that took the block away, which the block-broken pass
+        /// names as the breaker. `None` where no creature did, such as a power
+        /// coming off.
+        #[serde(default)]
+        remover: Option<CreatureSelector>,
     },
     /// Heals the target.
     Heal {
@@ -1245,6 +1284,8 @@ pub enum CardSelectCmd {
 pub enum PlayerCmd {
     /// The player gains this much energy.
     GainEnergy(Amount),
+    /// A play the player chose has finished, as a Void Form counts it.
+    CountAFinishedChosenPlay,
     /// The player loses this much energy, which never takes the pool below
     /// nothing.
     LoseEnergy(Amount),
@@ -1392,6 +1433,11 @@ pub enum OrbCmd {
         orb: OrbSelector,
         #[serde(default)]
         target: Option<CreatureSelector>,
+        /// The passive is counted the way a turn trigger counts it, so what
+        /// changes an orb's trigger count changes how many times it fires.
+        /// Only an emotion chip asks for it.
+        #[serde(default)]
+        counted: bool,
     },
     /// One of an orb's own two numbers, written by that orb: the evoke
     /// amount a Dark orb grows by its own passive, and the passive amount a
@@ -1524,6 +1570,13 @@ pub enum PowerCmd {
     /// Sets the yes-or-no the listening power keeps for itself, the way Chains
     /// of Binding notes that the card it is bound to has been played.
     SetLatch(bool),
+    /// Sets off the named power on each creature that carries it, outside its
+    /// own timing: the power's [`crate::HookEvent::PowerTriggered`] body runs
+    /// as that instance, the way an Outbreak makes every poison bite at once.
+    Trigger {
+        target: CreatureSelector,
+        power: ModelId,
+    },
     /// Attaches a card to a power instance, which is how a thief carries what
     /// it stole until it is killed for it.
     HoldCard {
@@ -1815,6 +1868,10 @@ pub struct CardCreation {
 /// generating a card inside a modifier pass and nothing covered does, and
 /// forbidding card changes guards the tutorial's hand-set offers.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each flag mirrors one independent creation flag of the build"
+)]
 pub struct CardCreationFlags {
     /// No roll is made for whether the card comes out upgraded. That roll
     /// draws its float before it tests whether the card can be upgraded at
@@ -1826,6 +1883,10 @@ pub struct CardCreationFlags {
     /// is left alone by them.
     #[serde(default)]
     pub is_card_reward: bool,
+    /// Whether the creation is the card reward a combat room pays for itself,
+    /// rather than one a relic or a card added to the set.
+    #[serde(default)]
+    pub is_from_combat: bool,
     /// Nothing may put another pool behind the ones named here.
     #[serde(default)]
     pub no_card_pool_modifications: bool,
@@ -1938,6 +1999,9 @@ pub enum CreatureSelector {
     Pet,
     /// The creatures the enclosing [`Command::WithCreatures`] resolved.
     Bound,
+    /// The opponents the body's last [`Command::NoteOpponents`] wrote down,
+    /// less any that has since gone down or left the fight.
+    Noted,
     /// Whoever the caller named, and one rolled over the hittable opponents on
     /// the combat-targets stream where the caller named nobody. A Lightning
     /// orb's passive and evoke are the same body and differ only in whether a
@@ -2019,6 +2083,15 @@ pub enum CardSelector {
         enchantment: ModelId,
         #[serde(default = "any_card")]
         filter: CardFilter,
+    },
+    /// The same set in deck order, shuffled as it stands with no sort first,
+    /// and the first `take` of it: a random handful of the deck an
+    /// enchantment can go on.
+    ShuffledFromDeckEnchantableBy {
+        enchantment: ModelId,
+        take: Amount,
+        #[serde(default = "shuffle_stream")]
+        stream: ShuffleStream,
     },
     /// Every card anywhere in the combat that passes the filter, whichever
     /// pile it stands in.
@@ -2291,6 +2364,9 @@ pub enum CardFilter {
     /// The card carries no Innate keyword, which is what a body looking for a
     /// card of the draw pile worth burning prefers on the opening turn.
     NotInnate,
+    /// A card of this type that carries no Innate keyword, which is the power
+    /// a jeweled mask prefers to deal.
+    NotInnateOfType(CardType),
     /// The card has an energy cost that can be written over: a cost that is
     /// not below nothing before anything stands on it, and not X. That is what
     /// a snecko oil asks before it rolls a new one.
@@ -2326,6 +2402,10 @@ pub enum CardFilter {
     /// to nothing is kept and everything else goes, and an X-cost card goes
     /// whatever the nothing written on it says.
     CostsSomethingNowOrX,
+    /// A combat card that is Ethereal as it stands, its owner's powers
+    /// included, and is not Unplayable: what an Eidolon plays out of the
+    /// exhaust pile.
+    EtherealAndPlayable,
     /// The card costs nothing right now, with everything that stands over its
     /// cost taken into account, and does not cost X. That is a wider question
     /// than the one a bookmark asks, which reads only what the fight put
@@ -2473,6 +2553,9 @@ pub enum Count {
     /// carries, which is what a value-shaping body reads off the other side of
     /// the blow.
     DamageDealerPower(ModelId),
+    /// The same, read off the pet's owner where the dealer is a pet that
+    /// carries none of the power itself: a Cruelty reaches what Osty deals.
+    DamageDealerOrPetOwnerPower(ModelId),
     /// One if the player dealing the damage under modification holds this
     /// relic, nothing otherwise. It is what a power that lets a relic raise
     /// its own multiplier reads.
@@ -2735,6 +2818,9 @@ pub enum Count {
 /// A test a model body makes before acting.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Condition {
+    /// The fight is neither over nor ending: no pending loss, a primary enemy
+    /// still standing or something keeping the fight going.
+    CombatIsNotOverOrEnding,
     /// The owner has lost HP this turn.
     OwnerLostHpThisTurn,
     /// A blow block did not stop whole landed on the listener's owner during
@@ -2959,6 +3045,10 @@ pub enum Condition {
     /// The map point the run is standing on is an unknown one, whatever it
     /// turned out to be.
     CurrentMapPointIsUnknown,
+    /// The run's room stack holds at most this many rooms: one while the
+    /// player stands in the map point's own room, two in a fight an event
+    /// walked into.
+    CurrentRoomCountAtMost(u32),
     /// The room the run is standing in is a monster, elite, or boss room.
     CurrentRoomIsCombat,
     /// The act the run is walking is the last one it has.
@@ -2968,6 +3058,11 @@ pub enum Condition {
     /// The creation the pass is working on is a card reward rather than cards
     /// a body made for itself.
     CardOfferIsACardReward,
+    /// The card offer the pass is working on is the one a combat room pays
+    /// for itself.
+    CardOfferIsFromCombat,
+    /// The reward set about to be offered holds a card reward.
+    OfferedRewardsHoldACard,
     /// The listening relic's counter is exactly this.
     ListeningRelicCounterIs(i32),
     /// The listening relic's counter has reached at least this.
@@ -2984,6 +3079,10 @@ pub enum Condition {
     AllOpponentsHavePower(ModelId),
     /// Whoever the play or the move was aimed at carries this power.
     TargetHasPower(ModelId),
+    /// The creature the pass's power is going onto carries this power: an
+    /// application pass reads it off what it is announcing rather than off
+    /// the body's own target.
+    PowerTargetHasPower(ModelId),
     /// Whoever issued the command carries this power, which is what a waking
     /// beetle asks before it takes its own shell off.
     OwnerHasPower(ModelId),

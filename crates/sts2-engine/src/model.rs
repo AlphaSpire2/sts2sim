@@ -889,6 +889,12 @@ pub struct PlayerCombatState {
     /// How many card plays this player has started this turn.
     #[serde(default)]
     pub cards_played_this_turn: u32,
+    /// How many of the plays this player chose have finished this turn while a
+    /// Void Form was counting them: a Void Form's own after-card-played
+    /// listener counts each, a replayed card's whole series once, and its
+    /// cards stay free until the count reaches the form's amount.
+    #[serde(default)]
+    pub chosen_plays_finished_this_turn: u32,
     /// Cards this player discarded this turn. The flush of the hand at the end
     /// of a turn is a move between piles rather than a discard, so it does not
     /// count.
@@ -1176,6 +1182,11 @@ pub enum ListenerScope {
 }
 
 /// The `true` a `#[serde(default)]` boolean needs when its absent value is yes.
+/// A play loop runs one pass unless something replays it.
+pub(crate) const fn one_pass() -> i32 {
+    1
+}
+
 pub(crate) const fn yes() -> bool {
     true
 }
@@ -1350,6 +1361,9 @@ pub enum HookEvent {
     TryModifyRewards,
     TryModifyRewardsLate,
     AfterModifyingRewards,
+    /// Once a combat room's reward set is built, cards and all, and just
+    /// before it is offered.
+    BeforeCombatRewardOffered,
     /// The two passes over the cards a card reward has just been built out of,
     /// and then the pass over exactly the listeners that changed one. They run
     /// while the reward is still being built, so they see the offer before
@@ -1402,12 +1416,17 @@ pub enum HookEvent {
     /// the opening turn.
     BeforeCombatStart,
     BeforeCombatStartLate,
-    /// Once the room the player walked into is standing.
-    ///
-    /// The build announces it from every room. This engine announces it from
-    /// the combat room alone, because a listener pass outside a combat has no
-    /// machinery yet; anything that answers it for another room is unsupported
-    /// until it does.
+    /// What a power does when something sets it off outside its own timing.
+    /// It is never announced to a list: a [`crate::PowerCmd::Trigger`] runs
+    /// it for the one instance it names.
+    PowerTriggered,
+    /// Once a room has been put on the run's room stack and before it is
+    /// entered: before a fight's creatures stand, an event's page opens, or a
+    /// shop lays out its stock. It is announced for every room, including a
+    /// fight an event walks into.
+    BeforeRoomEntered,
+    /// Once the room the player walked into is standing. It is announced from
+    /// every room, a fight an event walks into included.
     AfterRoomEntered,
     /// Once for each creature that has gone down, over the run's listeners.
     AfterDeath,
@@ -1581,11 +1600,13 @@ impl HookEvent {
             | Self::BeforeCombatStart
             | Self::BeforeCombatStartLate
             | Self::AfterDeath
+            | Self::BeforeRoomEntered
             | Self::AfterRoomEntered => ListenerScope::Run,
             // The reward passes walk the run list with no combat behind it at
             // all, so a fight standing behind the reward screen takes no part
             // in them.
             Self::AfterGoldGained
+            | Self::BeforeCombatRewardOffered
             | Self::AfterItemPurchased
             | Self::ModifyMerchantPrice
             | Self::TryModifyRestSiteHealRewards
@@ -1745,6 +1766,9 @@ pub enum HookCondition {
     TheHandWouldFlush,
     /// The side taking the turn is the player's.
     PlayerSideTurn,
+    /// The players are taking an extra turn: the enemy side has not acted
+    /// since their last one.
+    PlayersTakingAnExtraTurn,
     /// The side taking the turn is the enemy's. A timed debuff counts down here
     /// whichever side is carrying it.
     EnemySideTurn,
@@ -1755,6 +1779,9 @@ pub enum HookCondition {
     /// The play is one the player chose. A listener that counts a turn's
     /// plays skips the ones nobody chose.
     PlayWasChosen,
+    /// The pass the play is on is the last of its series, which is where a
+    /// listener that counts a replayed card once counts it.
+    LastPassOfThePlay,
     /// The card that was played is of this type.
     PlayedCardIsOfType(CardType),
     /// The play or the potion was aimed at somebody, and it belongs to the
@@ -1843,8 +1870,11 @@ pub enum HookCondition {
     /// The listener's owner dealt the damage and block stopped all of it,
     /// which is what an Imbalanced asks.
     OwnerDealtFullyBlockedDamage,
-    /// The owner's blow took the last of an opponent's block.
-    OwnerBrokeAnOpponentsBlock,
+    /// The owner, or the owner's pet, took the last of the block off a
+    /// creature that is not a player, by a blow or by taking it away.
+    OwnerOrPetBrokeANonPlayersBlock,
+    /// The block that just broke was the owner's own.
+    OwnersBlockBroke,
     /// The block is going to the listener's owner, and it is powered block.
     OwnerGainsPoweredBlock,
     /// Dexterity's test: block off a card belongs to whoever owns the card,
@@ -2179,6 +2209,10 @@ pub struct PowerDefinition {
     /// The whole hand stays where it is at the end of the turn.
     #[serde(default)]
     pub keeps_hand: bool,
+    /// While it stands on the player with stacks left, the player takes
+    /// another turn in place of the enemy's. Its listeners spend it.
+    #[serde(default)]
+    pub grants_an_extra_turn: bool,
     /// What the power does as it comes off, whether it was taken off outright
     /// or fell away at nothing.
     #[serde(default)]
@@ -3476,6 +3510,10 @@ pub struct CardDefinition {
     /// way.
     #[serde(default)]
     pub returns_to_hand: bool,
+    /// The same answer for the top of the draw pile: a play that would put
+    /// the card in the discard pile puts it on top of the draw pile instead.
+    #[serde(default)]
+    pub returns_to_draw_pile_top: bool,
     /// The card's star cost is X. Playing it spends every star its owner has
     /// left and writes what it spent onto the card, and its cost reads as the
     /// pool itself without the cost pass running at all, so nothing ever
@@ -4203,6 +4241,10 @@ pub struct HookContext {
     pub announced_creature: Option<CreatureCombatId>,
     /// The side whose turn is starting or ending.
     pub side: Option<CombatSide>,
+    /// Only the players of that side take part, not the creatures standing
+    /// beside them: an extra turn is the players' own.
+    #[serde(default)]
+    pub players_only: bool,
     /// What a whole swing settled and who took each of them, which the
     /// after-attack pass hands its listeners.
     ///
@@ -4370,6 +4412,10 @@ pub enum Effect {
         /// reads it to refuse a replay past the first.
         #[serde(default)]
         play_index: i32,
+        /// How many passes the play loop runs, so a listener can tell the
+        /// last pass of a replayed card's series.
+        #[serde(default = "one_pass")]
+        play_count: i32,
     },
     /// The rest of an effect a selection screen interrupted, run where it
     /// stands rather than one command per entry, because that is what the rest
@@ -4596,6 +4642,10 @@ pub enum LoopFrame {
         standing: Vec<CreatureCombatId>,
         then: Vec<crate::Command>,
         context: crate::CommandContext,
+        /// The hits the passes before the interruption landed, which the one
+        /// after-attack pass at the end reports with the rest.
+        #[serde(default)]
+        landed: Vec<(usize, CreatureCombatId, DamageResult)>,
     },
     /// A walk over orbs: the ones it has not reached. Each is looked up again
     /// as it comes up, exactly as an uninterrupted walk looks it up.
@@ -4617,6 +4667,13 @@ pub enum LoopFrame {
         rest: Vec<OrbInstanceId>,
         target: Option<CreatureCombatId>,
         context: crate::CommandContext,
+        /// Whether each orb's passive is counted.
+        #[serde(default)]
+        counted: bool,
+        /// The repeats the first orb of `rest` still owes, when a screen
+        /// stopped it between two of them.
+        #[serde(default)]
+        repeats_left: Option<i32>,
     },
     /// A channel past the evoke it made room with: putting the orb in the
     /// queue and announcing it are what is left, and neither reads anything
@@ -4715,6 +4772,16 @@ impl TurnHandoverStep {
     }
 }
 
+/// A monster's arrival, rolled and not yet brought in.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReservedArrival {
+    pub model_id: ModelId,
+    pub id: CreatureCombatId,
+    pub hp: i32,
+    pub slot: i32,
+    pub slot_name: Option<String>,
+}
+
 /// The points at which the first half of ending a player's turn can stop.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -4731,6 +4798,9 @@ pub enum EndTurnPhaseOneStep {
     /// The rest of the turn end: what the hand does to whoever is still
     /// holding it.
     CardsStillHeld,
+    /// The win check the turn end makes once the orbs and the cards still held
+    /// are done, so a fight they won never reaches the pass before the flush.
+    TurnEndWinCheck,
     /// The pass before the hand is flushed.
     BeforeFlush,
 }
@@ -4742,7 +4812,8 @@ impl EndTurnPhaseOneStep {
             Self::AutoPostPlay => Some(Self::BeforeTurnEnd),
             Self::BeforeTurnEnd => Some(Self::OrbsBeforeTurnEnd),
             Self::OrbsBeforeTurnEnd => Some(Self::CardsStillHeld),
-            Self::CardsStillHeld => Some(Self::BeforeFlush),
+            Self::CardsStillHeld => Some(Self::TurnEndWinCheck),
+            Self::TurnEndWinCheck => Some(Self::BeforeFlush),
             Self::BeforeFlush => None,
         }
     }
@@ -4784,8 +4855,12 @@ pub enum SetupPlayerTurnStep {
     Draw,
     /// The pass that follows the player's turn opening.
     PlayerTurnStart,
-    /// The phase becomes auto-pre-play and the pass that follows it runs.
+    /// The phase becomes auto-pre-play, and a hand the setup left empty is
+    /// announced as emptied. It is a step of its own because what answers the
+    /// announcement may draw, and a draw may ask the player something.
     AutoPrePlay,
+    /// The pass that follows the auto-pre-play phase opening.
+    AutoPrePlayHooks,
     /// The phase becomes `Play` and the player takes control.
     Play,
 }
@@ -4798,7 +4873,8 @@ impl SetupPlayerTurnStep {
             Self::BeforeHandDraw => Some(Self::Draw),
             Self::Draw => Some(Self::PlayerTurnStart),
             Self::PlayerTurnStart => Some(Self::AutoPrePlay),
-            Self::AutoPrePlay => Some(Self::Play),
+            Self::AutoPrePlay => Some(Self::AutoPrePlayHooks),
+            Self::AutoPrePlayHooks => Some(Self::Play),
             Self::Play => None,
         }
     }
@@ -5494,11 +5570,23 @@ pub struct CombatState {
     /// cleared there next time.
     #[serde(default)]
     pub taking_extra_turn: bool,
+    /// The opponents a body wrote down with `Command::NoteOpponents`.
+    #[serde(default)]
+    pub noted_opponents: Vec<CreatureCombatId>,
+    /// Arrivals rolled ahead of being brought in: a monster whose health and
+    /// identifier are settled before another arrival's, and which joins the
+    /// fight after it.
+    #[serde(default)]
+    pub reserved_arrivals: Vec<ReservedArrival>,
     /// Which pass of the play loop the play now running is on. It is cleared
     /// to nothing between plays, so outside a play it reads as the first
     /// pass.
     #[serde(default)]
     pub played_card_play_index: i32,
+    /// How many passes the play loop running has, which with the pass it is on
+    /// tells its last pass.
+    #[serde(default = "one_pass")]
+    pub played_card_play_count: i32,
     /// Whether something has made the player ready to end their turn without
     /// them choosing to. Ending a turn this way does not block, so the
     /// handover runs once whatever reached it has settled rather than inside

@@ -89,7 +89,7 @@ fn every_neow_option_a_single_player_run_can_be_offered_is_taken() {
 /// it is standing.
 #[test]
 fn neows_bones_offer_two_of_neows_own_and_charge_a_curse() {
-    let simulator = sts2_content::standard_ironclad_run("N3Z9EE2CXB").expect("the run generates");
+    let simulator = sts2_content::standard_ironclad_run("SEED00002028").expect("the run generates");
     let mut state = simulator.state().clone();
     let option_id = "NEOW.pages.INITIAL.options.NEOWS_BONES".to_owned();
     let option = sts2_engine::EventOption {
@@ -169,7 +169,7 @@ fn neows_bones_wait_for_both_relics_without_holding_the_claimed_relics_body() {
     use sts2_rng::RunStream;
 
     let mut simulator =
-        sts2_content::standard_ironclad_run("N3EWU9Z7TK").expect("the run generates");
+        sts2_content::standard_ironclad_run("N877MP55NMXF").expect("the run generates");
     let bones = simulator.legal_actions().iter().find(|action| {
         matches!(action, Action::ChooseEvent { option_id, .. } if option_id.ends_with(".NEOWS_BONES"))
     }).cloned().expect("Neow offers the bones");
@@ -551,4 +551,59 @@ fn nested_reward_completion_runs_the_acquisition_tail_before_the_parent_body() {
         );
         assert_eq!(simulator.state().run_player.deck.len(), deck + 1);
     }
+}
+
+/// Neow's opening page for seeds whose run start was recorded: the two
+/// relics before the curse are drawn from the positive list, and the curse
+/// list holds Dowsing Rod and Neow's Sacrifice beside the others.
+#[test]
+fn neows_page_is_the_recorded_one() {
+    for (seed, page) in [
+        (
+            "LZYRSTFDEZUV",
+            ["KALEIDOSCOPE", "ARCANE_SCROLL", "NEOWS_SACRIFICE"],
+        ),
+        (
+            "2PHZ9ZG8X0LL",
+            ["PHIAL_HOLSTER", "SCROLL_BOXES", "DOWSING_ROD"],
+        ),
+        (
+            "695EVWB4EGTV",
+            ["STONE_HUMIDIFIER", "LOST_COFFER", "DOWSING_ROD"],
+        ),
+        (
+            "7CM298WJ2J2Y",
+            ["NUTRITIOUS_OYSTER", "KALEIDOSCOPE", "NEOWS_BONES"],
+        ),
+    ] {
+        let expected: Vec<String> = page
+            .iter()
+            .map(|relic| format!("NEOW.pages.INITIAL.options.{relic}"))
+            .collect();
+        assert_eq!(
+            sts2_content::standard_neow_options(seed),
+            expected,
+            "{seed}"
+        );
+    }
+}
+
+/// Neow's Sacrifice hands over a potion and a curse, so a page that charges
+/// it never pairs it with Phial Holster or Lost Coffer.
+#[test]
+fn neows_sacrifice_keeps_the_phial_and_the_coffer_off_its_page() {
+    let mut sacrificed = 0;
+    for index in 0..3000_u32 {
+        let page = sts2_content::standard_neow_options(&format!("SACR{index:08}"));
+        if page[2] == "NEOW.pages.INITIAL.options.NEOWS_SACRIFICE" {
+            sacrificed += 1;
+            for option in &page[..2] {
+                assert!(
+                    !option.ends_with(".PHIAL_HOLSTER") && !option.ends_with(".LOST_COFFER"),
+                    "{page:?}"
+                );
+            }
+        }
+    }
+    assert!(sacrificed > 100, "the curse comes up often enough to test");
 }

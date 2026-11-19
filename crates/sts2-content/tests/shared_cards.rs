@@ -552,8 +552,8 @@ fn a_guilt_counts_the_fights_a_run_has_seen_and_then_leaves() {
 #[test]
 fn the_conjured_tokens_pay_out_once_and_burn() {
     for (model_id, upgrade, energy_gained, cards_drawn) in [
-        ("CARD.FUEL", 0, 1, 1),
-        ("CARD.FUEL", 1, 1, 2),
+        ("CARD.FUEL", 0, 1, 0),
+        ("CARD.FUEL", 1, 2, 0),
         ("CARD.LUMINESCE", 0, 2, 0),
         ("CARD.LUMINESCE", 1, 3, 0),
         ("CARD.SOUL", 0, 0, 2),
@@ -616,7 +616,7 @@ fn the_minion_cards_and_a_shiv_land_what_they_declare() {
         );
         assert_eq!(pile(&simulator, PileName::Exhaust), [model_id]);
     }
-    for (upgrade, block) in [(0, 8), (1, 11)] {
+    for (upgrade, block) in [(0, 7), (1, 10)] {
         let mut simulator = fight(&[("CARD.MINION_SACRIFICE", upgrade)]);
         play(&mut simulator, "CARD.MINION_SACRIFICE");
         assert_eq!(player(&simulator).block, block);
@@ -872,7 +872,7 @@ fn an_apparition_holds_every_blow_to_one() {
     assert!(!apparition.ethereal_at(1));
 }
 
-/// The brightest flame pays a point of maximum HP for energy and cards.
+/// The brightest flame pays two points of maximum HP for energy and cards.
 #[test]
 fn the_brightest_flame_pays_maximum_hp() {
     for (upgrade, gained, cards) in [(0, 2, 2), (1, 3, 3)] {
@@ -888,7 +888,7 @@ fn the_brightest_flame_pays_maximum_hp() {
         play(&mut simulator, "CARD.BRIGHTEST_FLAME");
         assert_eq!(energy(&simulator), before + gained);
         assert_eq!(pile(&simulator, PileName::Hand).len(), cards);
-        assert_eq!(player(&simulator).max_hp, 79);
+        assert_eq!(player(&simulator).max_hp, 78);
     }
 }
 
@@ -986,7 +986,7 @@ fn the_next_turn_powers_pay_out_as_the_turn_opens() {
         );
     }
 
-    for (upgrade, block, cards, gained) in [(0, 15, 2, 2), (1, 17, 3, 3)] {
+    for (upgrade, block, cards, gained) in [(0, 16, 2, 2), (1, 18, 3, 3)] {
         let mut simulator = fight_with_draw(
             &[("CARD.RELAX", upgrade)],
             &[
@@ -1196,7 +1196,7 @@ fn cost_of(simulator: &Simulator, model_id: &str) -> i32 {
 /// A maul grows every maul in the fight, itself included.
 #[test]
 fn a_maul_grows_every_maul_in_the_fight() {
-    for (upgrade, damage, increase) in [(0, 5, 1), (1, 6, 2)] {
+    for (upgrade, damage, increase) in [(0, 5, 2), (1, 6, 3)] {
         let mut simulator = scenario(&[("CARD.MAUL", upgrade), ("CARD.MAUL", upgrade)], &[], 120)
             .build(sts2_content::standard_registry())
             .expect("the scenario builds");
@@ -1930,6 +1930,51 @@ fn a_discovery_offers_three_and_gives_one_free() {
     assert_eq!(hand[0].energy_cost, 0);
 }
 
+/// An abundance offers three upgraded powers of the character's own pool, one
+/// of which must be taken, and the one taken is free for the turn.
+#[test]
+fn an_abundance_offers_three_upgraded_powers() {
+    let registry = sts2_content::standard_registry();
+    let mut simulator = fight(&[("CARD.ABUNDANCE", 0)]);
+    play(&mut simulator, "CARD.ABUNDANCE");
+    let sts2_engine::DecisionContext::ChooseCards {
+        choice_id,
+        minimum,
+        maximum,
+        candidates,
+        ..
+    } = simulator.decision().clone()
+    else {
+        panic!("a screen is up: {:?}", simulator.decision());
+    };
+    assert_eq!((minimum, maximum), (1, 1), "the screen cannot be skipped");
+    assert_eq!(candidates.len(), 3);
+    for candidate in &candidates {
+        let definition = registry
+            .card(&candidate.fingerprint.model_id)
+            .expect("the card is content");
+        assert_eq!(definition.card_type, sts2_engine::CardType::Power);
+        assert_eq!(candidate.fingerprint.upgrade_level, 1);
+    }
+    simulator
+        .step(Action::ChooseCards {
+            choice_id,
+            cards: vec![candidates[0].clone()],
+        })
+        .expect("the choice applies");
+    let hand = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is standing")
+        .player
+        .piles
+        .hand;
+    assert_eq!(hand.len(), 1);
+    assert_eq!(hand[0].energy_cost, 0);
+    assert_eq!(hand[0].fingerprint.upgrade_level, 1);
+}
+
 /// A hidden gem makes one card of the draw pile play twice more.
 #[test]
 fn a_hidden_gem_makes_one_card_play_again() {
@@ -2104,28 +2149,29 @@ fn an_entropy_puts_its_power_on_and_nothing_else() {
 
     // A stream position at which the two filters part ways: with the
     // combat-ineligible cards taken out ahead of the roll, the transform
-    // lands on Refine Blade rather than Reflect.
-    let mut transformed = ScenarioBuilder::new("ZPBUDFAAAA", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
-        .played_as(id("CHARACTER.REGENT"))
-        .player_hp(75, 75)
-        .energy(3, 3)
-        .turn(3, 3)
-        .rng_counter(RunStream::MonsterAi, 0)
-        .rng_counter(RunStream::CombatCardSelection, 0)
-        .power(
-            0,
-            id("POWER.ENTROPY_POWER"),
-            1,
-            sts2_engine::PowerType::Buff,
-        )
-        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
-        .card(PileName::Draw, 10, card("CARD.DEFEND_REGENT", 0), 1)
-        .build(registry)
-        .expect("the transform scenario builds");
+    // lands on Neutron Aegis rather than Orbit.
+    let mut transformed =
+        ScenarioBuilder::new("ZPBUD0000002", id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+            .played_as(id("CHARACTER.REGENT"))
+            .player_hp(75, 75)
+            .energy(3, 3)
+            .turn(3, 3)
+            .rng_counter(RunStream::MonsterAi, 0)
+            .rng_counter(RunStream::CombatCardSelection, 0)
+            .power(
+                0,
+                id("POWER.ENTROPY_POWER"),
+                1,
+                sts2_engine::PowerType::Buff,
+            )
+            .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+            .card(PileName::Draw, 10, card("CARD.DEFEND_REGENT", 0), 1)
+            .build(registry)
+            .expect("the transform scenario builds");
     end_turn(&mut transformed);
     assert_eq!(
         pile(&transformed, PileName::Hand),
-        ["CARD.REFINE_BLADE"],
+        ["CARD.NEUTRON_AEGIS"],
         "the combat-ineligible Royalties is removed before this roll"
     );
     assert_eq!(
@@ -2290,7 +2336,7 @@ fn a_rend_counts_the_debuffs_its_target_carries() {
             .turn(1, 1)
             .rng_counter(RunStream::MonsterAi, 0)
             .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 120, 120, "SHRINKER_MOVE")
-            .card(PileName::Hand, 0, card("CARD.REND", upgrade), 2);
+            .card(PileName::Hand, 0, card("CARD.REND", upgrade), 1);
         for model_id in debuffs {
             scenario = scenario.power(1, id(model_id), 2, sts2_engine::PowerType::Debuff);
         }
@@ -2301,7 +2347,7 @@ fn a_rend_counts_the_debuffs_its_target_carries() {
         play(&mut simulator, "CARD.REND");
         before - creature(&simulator, 1).current_hp
     };
-    for (upgrade, base, per) in [(0, 15, 5), (1, 18, 8)] {
+    for (upgrade, base, per) in [(0, 10, 5), (1, 12, 8)] {
         assert_eq!(rend_damage(&[], upgrade), base);
         assert_eq!(rend_damage(&["POWER.WEAK_POWER"], upgrade), base + per);
         assert_eq!(
@@ -2637,7 +2683,7 @@ fn a_splash_offers_the_other_characters_attacks() {
 fn splash_with_seven_stars(upgrade: u8) -> Simulator {
     let mut simulator = scenario(&[("CARD.SPLASH", upgrade)], &[], 999)
         // This roll offers Seven Stars, so both resource costs are exercised.
-        .rng_counter(RunStream::CombatCardGeneration, 59)
+        .rng_counter(RunStream::CombatCardGeneration, 50)
         .build(sts2_content::standard_registry())
         .expect("the scenario builds");
     play(&mut simulator, "CARD.SPLASH");

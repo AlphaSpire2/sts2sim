@@ -1021,7 +1021,7 @@ impl MapBuilder {
 /// another and lays the answers out differently.
 #[must_use]
 pub fn standard_act_map(seed: &str, act: usize, ascension: u8, has_second_boss: bool) -> ActMap {
-    let run_seed = deterministic_hash(seed) as u32;
+    let run_seed = deterministic_hash(seed);
     let rng = Rng::named(run_seed, &format!("act_{}_map", act + 1));
     MapBuilder::new(rng, act, ascension, has_second_boss).generate_standard()
 }
@@ -1094,7 +1094,7 @@ pub fn golden_path_act_map() -> ActMap {
 /// moves no dice at all.
 #[must_use]
 pub fn spoils_act_map(seed: &str, act: usize, ascension: u8) -> ActMap {
-    let run_seed = deterministic_hash(seed) as u32;
+    let run_seed = deterministic_hash(seed);
     let rng = Rng::named(run_seed, "spoils_map");
     // A spoils map never carries a second boss, however the run is
     // configured.

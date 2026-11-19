@@ -21,15 +21,15 @@ fn act_ids(selection: &sts2_content::ActSelection) -> Vec<String> {
 
 #[test]
 fn seeds_recorded_opening_in_the_overgrowth_roll_it() {
-    // Every one of these seeds opens in the Overgrowth and goes on to the
-    // Hive and Glory; the act list is settled by the seed before any play,
-    // and this is it.
+    // Every one of these seeds was recorded opening in the Overgrowth and
+    // going on to the Hive and Glory; the act list is settled by the seed
+    // before any play, and this is it.
     for seed in [
-        "N3Z9EE2CXB",
-        "QEY5K1P4LY",
-        "R8F8NFB8Y1",
-        "PCJZ1E6BT4",
-        "BPK46736W9",
+        "2Q01FZ2BG4ZC",
+        "695EVWB4EGTV",
+        "4HQ3K5UCCNH2",
+        "LZYRSTFDEZUV",
+        "CBZN7MBMMNR9",
     ] {
         // `Act1` defaults to `random` and the build hides the dropdown that
         // would change it, so this is the setting every run plays under.
@@ -50,10 +50,11 @@ fn seeds_recorded_opening_in_the_overgrowth_roll_it() {
 
 #[test]
 fn a_seed_that_rolls_the_alternate_act_opens_in_underdocks() {
-    // This seed opens in `ACT.UNDERDOCKS`: the act list is settled before
-    // anything else in the run rolls, and this is what the roll reproduces.
+    // This seed was recorded opening in `ACT.UNDERDOCKS`: the act list is
+    // settled before anything else in the run rolls, and this is what the
+    // roll reproduces.
     let selection = pinned_act_selection(
-        "X7JFABM2QS",
+        "7CM298WJ2J2Y",
         ActOneSetting::Random,
         &id("CHARACTER.IRONCLAD"),
     )
@@ -70,7 +71,7 @@ fn the_act_one_setting_names_the_act_and_reads_no_dice() {
     let (unlocks, discovered) = baseline();
     // One seed that rolls Overgrowth and one that rolls Underdocks, so the
     // setting is seen to replace what the roll settled on either way.
-    for seed in ["N3Z9EE2CXB", "X7JFABM2QS"] {
+    for seed in ["2Q01FZ2BG4ZC", "7CM298WJ2J2Y"] {
         for (setting, expected) in [
             (ActOneSetting::Overgrowth, "ACT.OVERGROWTH"),
             (ActOneSetting::Underdocks, "ACT.UNDERDOCKS"),
@@ -102,7 +103,7 @@ fn an_undiscovered_alternate_act_is_taken_without_a_roll() {
     // Index 0 reads no dice, so act two and act three take the draws act one
     // and act two would have taken, and a random character takes the third.
     let selection = select_acts(
-        "N3Z9EE2CXB",
+        "2Q01FZ2BG4ZC",
         ActOneSetting::Random,
         &unlocks,
         &discovered,
@@ -113,13 +114,13 @@ fn an_undiscovered_alternate_act_is_taken_without_a_roll() {
         act_ids(&selection),
         ["ACT.UNDERDOCKS", "ACT.HIVE", "ACT.GLORY"]
     );
-    assert_eq!(selection.character, id("CHARACTER.DEFECT"));
+    assert_eq!(selection.character, id("CHARACTER.IRONCLAD"));
     assert_eq!(selection.counter, 3);
 
     // The setting still overrides what the shortcut took, and still without
     // moving the stream.
     let overridden = select_acts(
-        "N3Z9EE2CXB",
+        "2Q01FZ2BG4ZC",
         ActOneSetting::Overgrowth,
         &unlocks,
         &discovered,
@@ -137,7 +138,7 @@ fn an_undiscovered_alternate_act_is_taken_without_a_roll() {
 fn a_locked_alternate_act_is_no_candidate_at_all() {
     let (mut unlocks, discovered) = baseline();
     unlocks.epochs.retain(|epoch| epoch != "UNDERDOCKS_EPOCH");
-    for seed in ["N3Z9EE2CXB", "X7JFABM2QS"] {
+    for seed in ["2Q01FZ2BG4ZC", "7CM298WJ2J2Y"] {
         let selection = select_acts(
             seed,
             ActOneSetting::Random,
@@ -161,11 +162,11 @@ fn a_locked_alternate_act_is_no_candidate_at_all() {
 fn a_random_character_is_rolled_off_the_same_stream_after_the_acts() {
     let (unlocks, discovered) = baseline();
     for (seed, expected) in [
-        ("N3Z9EE2CXB", "CHARACTER.NECROBINDER"),
-        ("X7JFABM2QS", "CHARACTER.REGENT"),
-        ("QEY5K1P4LY", "CHARACTER.IRONCLAD"),
-        ("R8F8NFB8Y1", "CHARACTER.IRONCLAD"),
-        ("PCJZ1E6BT4", "CHARACTER.REGENT"),
+        ("2Q01FZ2BG4ZC", "CHARACTER.NECROBINDER"),
+        ("7CM298WJ2J2Y", "CHARACTER.REGENT"),
+        ("695EVWB4EGTV", "CHARACTER.IRONCLAD"),
+        ("2PHZ9ZG8X0LL", "CHARACTER.DEFECT"),
+        ("AY86GCFZAJAC", "CHARACTER.SILENT"),
     ] {
         let selection = select_acts(
             seed,
@@ -189,7 +190,7 @@ fn a_random_character_is_rolled_off_the_same_stream_after_the_acts() {
 #[test]
 fn a_run_that_rolls_the_defect_is_stood_up_as_his() {
     let simulator = sts2_content::standard_ironclad_run_with(
-        "06Z9EE2CXB",
+        "2PHZ9ZG8X0LL",
         ActOneSetting::Random,
         &id(RANDOM_CHARACTER),
     )
@@ -209,7 +210,7 @@ fn a_run_that_rolls_the_defect_is_stood_up_as_his() {
 #[test]
 fn a_run_that_rolls_the_regent_is_stood_up_as_his() {
     let simulator = sts2_content::standard_ironclad_run_with(
-        "X7JFABM2QS",
+        "7CM298WJ2J2Y",
         ActOneSetting::Random,
         &id(RANDOM_CHARACTER),
     )
@@ -227,7 +228,7 @@ fn a_run_that_rolls_the_regent_is_stood_up_as_his() {
 #[test]
 fn a_run_that_rolls_the_necrobinder_is_stood_up_as_hers() {
     let simulator = sts2_content::standard_ironclad_run_with(
-        "N3Z9EE2CXB",
+        "2Q01FZ2BG4ZC",
         ActOneSetting::Random,
         &id(RANDOM_CHARACTER),
     )
@@ -245,7 +246,7 @@ fn a_run_that_rolls_the_necrobinder_is_stood_up_as_hers() {
 #[test]
 fn a_run_that_opens_in_the_underdocks_generates() {
     let simulator =
-        sts2_content::standard_ironclad_run("X7JFABM2QS").expect("the seeded run generates");
+        sts2_content::standard_ironclad_run("7CM298WJ2J2Y").expect("the seeded run generates");
     let run = simulator.state().run.as_ref().expect("the run exists");
     assert_eq!(
         run.acts[0].act_model.to_string(),

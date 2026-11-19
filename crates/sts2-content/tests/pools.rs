@@ -180,7 +180,7 @@ fn the_silent_card_pool_is_the_eighty_a_rarity_rolls() {
             "CARD.FINISHER",
             "CARD.FLECHETTES",
             "CARD.FLICK_FLACK",
-            "CARD.SCARE",
+            "CARD.SIDESTEP",
             "CARD.FOOTWORK",
             "CARD.GRAND_FINALE",
             "CARD.HAND_TRICK",
@@ -604,10 +604,11 @@ fn the_deprecated_card_pool_holds_only_the_stand_in() {
 /// The event card pool, whole. The last two are out of alphabetical order in
 /// the build as well.
 #[test]
-fn the_event_card_pool_is_the_twenty_seven_an_event_hands_over() {
+fn the_event_card_pool_is_the_twenty_eight_an_event_hands_over() {
     assert_eq!(
         card_pool("CARD_POOL.EVENT_CARD_POOL"),
         [
+            "CARD.ABUNDANCE",
             "CARD.APOTHEOSIS",
             "CARD.APPARITION",
             "CARD.BRIGHTEST_FLAME",
@@ -641,10 +642,15 @@ fn the_event_card_pool_is_the_twenty_seven_an_event_hands_over() {
 
 /// The quest card pool, whole.
 #[test]
-fn the_quest_card_pool_is_the_three_errands() {
+fn the_quest_card_pool_is_the_four_errands() {
     assert_eq!(
         card_pool("CARD_POOL.QUEST_CARD_POOL"),
-        ["CARD.BYRDONIS_EGG", "CARD.LANTERN_KEY", "CARD.SPOILS_MAP",]
+        [
+            "CARD.BYRDONIS_EGG",
+            "CARD.DOWSING",
+            "CARD.LANTERN_KEY",
+            "CARD.SPOILS_MAP",
+        ]
     );
 }
 
@@ -916,12 +922,12 @@ fn the_defect_relic_pool_is_the_eight_the_character_carries() {
     );
 }
 
-/// The event relic pool, whole: ninety-eight ancients,
+/// The event relic pool, whole: a hundred ancients,
 /// thirty-four relics of the Event rarity, the five refined starters a touch of
 /// Orobas hands over, and three that stand in the shared pool as well.
 #[test]
 #[allow(clippy::too_many_lines, reason = "one line per relic of the pool")]
-fn the_event_relic_pool_is_the_hundred_and_forty_only_an_event_deals() {
+fn the_event_relic_pool_is_the_hundred_and_forty_two_only_an_event_deals() {
     assert_eq!(
         relic_pool("RELIC_POOL.EVENT_RELIC_POOL"),
         [
@@ -953,6 +959,7 @@ fn the_event_relic_pool_is_the_hundred_and_forty_only_an_event_deals() {
             "RELIC.DIAMOND_DIADEM",
             "RELIC.DISTINGUISHED_CAPE",
             "RELIC.DIVINE_DESTINY",
+            "RELIC.DOWSING_ROD",
             "RELIC.DREAM_CATCHER",
             "RELIC.DRIFTWOOD",
             "RELIC.DUSTY_TOME",
@@ -1001,6 +1008,7 @@ fn the_event_relic_pool_is_the_hundred_and_forty_only_an_event_deals() {
             "RELIC.MR_STRUGGLES",
             "RELIC.MUSIC_BOX",
             "RELIC.NEOWS_BONES",
+            "RELIC.NEOWS_SACRIFICE",
             "RELIC.NEOWS_TALISMAN",
             "RELIC.NEOWS_TORMENT",
             "RELIC.NEW_LEAF",
@@ -1210,13 +1218,17 @@ fn the_defect_potion_pool_is_the_three_of_his_epoch() {
     );
 }
 
-/// The event potion pool, whole. Neither carries a rolled
-/// rarity, so no generation reaches them.
+/// The event potion pool, whole. None carries a rolled rarity, so no
+/// generation reaches them.
 #[test]
-fn the_event_potion_pool_is_the_two_an_event_hands_over() {
+fn the_event_potion_pool_is_the_three_an_event_or_a_relic_hands_over() {
     assert_eq!(
         potion_pool("POTION_POOL.EVENT_POTION_POOL"),
-        ["POTION.FOUL_POTION", "POTION.GLOWWATER_POTION",]
+        [
+            "POTION.AMBERGRIS",
+            "POTION.FOUL_POTION",
+            "POTION.GLOWWATER_POTION",
+        ]
     );
 }
 

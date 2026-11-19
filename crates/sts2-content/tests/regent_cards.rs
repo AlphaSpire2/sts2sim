@@ -483,6 +483,19 @@ fn a_knockout_blow_pays_only_for_a_kill() {
     let mut simulator = built(scenario(&[80], &[("CARD.KNOCKOUT_BLOW", 0)], &[], 0));
     play(&mut simulator, "CARD.KNOCKOUT_BLOW");
     assert_eq!(stars(&simulator), 0, "and this one did not");
+
+    // A kill pays whether or not the death counts as fatal: a minion's does
+    // not, and it pays all the same.
+    let mut simulator = built(
+        scenario(&[20, 300], &[("CARD.KNOCKOUT_BLOW", 0)], &[], 0).power(
+            1,
+            id("POWER.MINION_POWER"),
+            1,
+            sts2_engine::PowerType::Buff,
+        ),
+    );
+    play(&mut simulator, "CARD.KNOCKOUT_BLOW");
+    assert_eq!(stars(&simulator), 5, "a minion put down pays too");
 }
 
 // --- the forge ------------------------------------------------------------
@@ -513,8 +526,8 @@ fn a_forge_stands_a_blade_up_once_and_sharpens_it_every_time() {
     play(&mut simulator, "CARD.SOVEREIGN_BLADE");
     assert_eq!(
         hp - hp_of(&simulator, 1),
-        10 + 30 + 9,
-        "ten of its own, thirty from the smith and nine from the refinement"
+        10 + 30 + 8,
+        "ten of its own, thirty from the smith and eight from the refinement"
     );
 }
 
@@ -627,12 +640,12 @@ fn the_cards_that_forge() {
     for (model_id, level, forged) in [
         ("CARD.BULWARK", 0, 10),
         ("CARD.BULWARK", 1, 13),
-        ("CARD.REFINE_BLADE", 0, 9),
-        ("CARD.REFINE_BLADE", 1, 13),
+        ("CARD.REFINE_BLADE", 0, 8),
+        ("CARD.REFINE_BLADE", 1, 12),
         ("CARD.SEEKING_EDGE", 0, 7),
         ("CARD.SEEKING_EDGE", 1, 11),
-        ("CARD.SPOILS_OF_BATTLE", 0, 5),
-        ("CARD.SPOILS_OF_BATTLE", 1, 8),
+        ("CARD.SPOILS_OF_BATTLE", 0, 6),
+        ("CARD.SPOILS_OF_BATTLE", 1, 9),
         ("CARD.THE_SMITH", 0, 30),
         ("CARD.THE_SMITH", 1, 40),
         ("CARD.WROUGHT_IN_WAR", 0, 7),
@@ -732,7 +745,7 @@ fn the_attacks_that_are_one_blow() {
     for (model_id, base, upgraded) in [
         ("CARD.STRIKE_REGENT", 6, 9),
         ("CARD.CELESTIAL_MIGHT", 18, 24),
-        ("CARD.DEVASTATE", 30, 40),
+        ("CARD.DEVASTATE", 35, 45),
         ("CARD.KINGLY_KICK", 27, 35),
         ("CARD.KINGLY_PUNCH", 8, 10),
         ("CARD.BOMBARDMENT", 18, 24),
@@ -774,7 +787,7 @@ fn the_cards_that_are_block() {
 fn the_cards_that_sweep_the_side() {
     for (model_id, base, upgraded) in [
         ("CARD.ASTRAL_PULSE", 12, 16),
-        ("CARD.CRUSH_UNDER", 7, 8),
+        ("CARD.CRUSH_UNDER", 8, 9),
         ("CARD.DYING_STAR", 9, 11),
         ("CARD.METEOR_SHOWER", 14, 21),
         ("CARD.SEVEN_STARS", 49, 49),
@@ -840,13 +853,13 @@ fn the_powers_the_pool_lays_down() {
             "CARD.PILLAR_OF_CREATION",
             0,
             "POWER.PILLAR_OF_CREATION_POWER",
-            3,
+            2,
         ),
         (
             "CARD.PILLAR_OF_CREATION",
             1,
             "POWER.PILLAR_OF_CREATION_POWER",
-            4,
+            3,
         ),
         ("CARD.MONOLOGUE", 0, "POWER.MONOLOGUE_POWER", 1),
         ("CARD.NEUTRON_AEGIS", 0, "POWER.PLATING_POWER", 8),
@@ -864,8 +877,8 @@ fn the_powers_the_pool_lays_down() {
         ("CARD.SEEKING_EDGE", 0, "POWER.SEEKING_EDGE_POWER", 1),
         ("CARD.SPECTRUM_SHIFT", 0, "POWER.SPECTRUM_SHIFT_POWER", 1),
         ("CARD.SWORD_SAGE", 0, "POWER.SWORD_SAGE_POWER", 1),
-        ("CARD.TERRAFORMING", 0, "POWER.VIGOR_POWER", 6),
-        ("CARD.TERRAFORMING", 1, "POWER.VIGOR_POWER", 8),
+        ("CARD.TERRAFORMING", 0, "POWER.VIGOR_POWER", 7),
+        ("CARD.TERRAFORMING", 1, "POWER.VIGOR_POWER", 10),
         (
             "CARD.THE_SEALED_THRONE",
             0,
@@ -905,6 +918,130 @@ fn the_debuffs_the_pool_lands_on_the_side() {
             );
         }
     }
+}
+
+/// A crush under lists the enemies before it swings: the wrigglers a parasite
+/// it kills lets loose were not there to be crushed.
+#[test]
+fn a_crush_under_leaves_what_its_kill_lets_loose_uncrushed() {
+    let mut simulator = built(
+        ScenarioBuilder::new(SEED, id("ENCOUNTER.PHROG_PARASITE_ELITE"))
+            .played_as(id("CHARACTER.REGENT"))
+            .player_hp(75, 75)
+            .energy(9, 9)
+            .turn(1, 1)
+            .rng_counter(RunStream::MonsterAi, 0)
+            .rng_counter(RunStream::CombatTargets, 0)
+            .enemy(1, id("MONSTER.PHROG_PARASITE"), 5, 60, "INFECT_MOVE")
+            .power(
+                1,
+                id("POWER.INFESTED_POWER"),
+                4,
+                sts2_engine::PowerType::Buff,
+            )
+            .card(PileName::Hand, 0, card("CARD.CRUSH_UNDER", 0), 0),
+    );
+    play(&mut simulator, "CARD.CRUSH_UNDER");
+    let wrigglers: Vec<_> = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("a fight is standing")
+        .creatures
+        .iter()
+        .filter(|creature| creature.model_id == id("MONSTER.WRIGGLER"))
+        .collect();
+    assert_eq!(wrigglers.len(), 4, "the parasite let its wrigglers loose");
+    assert!(
+        wrigglers
+            .iter()
+            .all(|wriggler| wriggler.power_amount("POWER.CRUSH_UNDER_POWER") == 0),
+        "and none of them was crushed"
+    );
+}
+
+/// An auto-played shining strike is put down where a play of its own would
+/// put it: a beat down throws it from the discard pile onto the draw pile.
+#[test]
+fn a_beat_down_puts_a_shining_strike_on_top_of_the_draw_pile() {
+    let simulator = built(
+        scenario(
+            &[300],
+            &[("CARD.BEAT_DOWN", 0)],
+            &[("CARD.STRIKE_REGENT", 0)],
+            20,
+        )
+        .card(PileName::Discard, 9, card("CARD.SHINING_STRIKE", 0), 0),
+    );
+    let mut simulator = simulator;
+    play(&mut simulator, "CARD.BEAT_DOWN");
+    let piles = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("a fight")
+        .player
+        .piles;
+    assert_eq!(
+        piles
+            .draw
+            .first()
+            .map(|card| card.fingerprint.model_id.to_string()),
+        Some("CARD.SHINING_STRIKE".to_owned()),
+        "the strike went back on top of the draw pile"
+    );
+    assert!(
+        !piles
+            .discard
+            .iter()
+            .any(|card| card.fingerprint.model_id == id("CARD.SHINING_STRIKE")),
+        "and not to the discard pile"
+    );
+}
+
+/// A make it so called back to a hand that already holds ten cards stays in
+/// the discard pile: a card bound for a full hand goes there instead.
+#[test]
+fn a_make_it_so_called_back_to_a_full_hand_stays_in_the_discard_pile() {
+    let mut builder = scenario(&[300], &[("CARD.BLADE_DANCE", 0)], &[], 20);
+    for next_id in 1..10 {
+        builder = builder.card(PileName::Hand, next_id, card("CARD.STRIKE_REGENT", 0), 0);
+    }
+    let simulator = built(builder.card(PileName::Discard, 10, card("CARD.MAKE_IT_SO", 0), 0));
+    // Two skills already played this turn, so the blade dance is the third.
+    let mut state = simulator.state().clone();
+    let combat = state.combat.as_mut().expect("a fight");
+    for card_id in [100, 101] {
+        combat
+            .player
+            .plays_finished
+            .push(sts2_engine::FinishedPlay {
+                card_id: sts2_core::CardInstanceId::from(card_id),
+                card_type: sts2_engine::CardType::Skill,
+                turn: combat.player.turn,
+                was_dupe: false,
+                was_chosen: true,
+                was_ethereal: false,
+            });
+    }
+    let mut simulator =
+        Simulator::from_scenario(state, sts2_content::standard_registry()).expect("it rebuilds");
+    play(&mut simulator, "CARD.BLADE_DANCE");
+    let piles = &simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("a fight")
+        .player
+        .piles;
+    assert_eq!(piles.hand.len(), 10, "the shivs filled the hand");
+    assert!(
+        piles
+            .discard
+            .iter()
+            .any(|card| card.fingerprint.model_id == id("CARD.MAKE_IT_SO")),
+        "so the make it so stayed in the discard pile"
+    );
 }
 
 /// A know thy place is the two debuffs and nothing else, and the upgrade takes
@@ -1196,16 +1333,20 @@ fn a_prophesize_draws() {
     }
 }
 
-/// A guiding star is a blow and a draw.
+/// A guiding star is a blow and more cards next turn.
 #[test]
-fn a_guiding_star_draws_behind_its_blow() {
+fn a_guiding_star_promises_cards_behind_its_blow() {
     for (level, damage, drawn) in [(0, 12, 2), (1, 13, 3)] {
         let draw = stack("CARD.STRIKE_REGENT", 3);
         let mut simulator = built(scenario(&[200], &[("CARD.GUIDING_STAR", level)], &draw, 20));
         let hp = hp_of(&simulator, 1);
         play(&mut simulator, "CARD.GUIDING_STAR");
         assert_eq!(hp - hp_of(&simulator, 1), damage, "at level {level}");
-        assert_eq!(pile(&simulator, PileName::Hand).len(), drawn);
+        assert_eq!(pile(&simulator, PileName::Hand), Vec::<String>::new());
+        assert_eq!(
+            power_amount(&simulator, 0, "POWER.DRAW_CARDS_NEXT_TURN_POWER"),
+            drawn
+        );
     }
 }
 
@@ -1510,7 +1651,7 @@ fn a_crush_under_that_kills_its_dampener_saps_as_the_upgraded_card() {
     );
     let hp = hp_of(&simulator, 1);
     play(&mut simulator, "CARD.CRUSH_UNDER");
-    assert_eq!(hp - hp_of(&simulator, 1), 7, "the blow is the plain card's");
+    assert_eq!(hp - hp_of(&simulator, 1), 8, "the blow is the plain card's");
     assert_eq!(
         power_amount(&simulator, 1, "POWER.CRUSH_UNDER_POWER"),
         2,

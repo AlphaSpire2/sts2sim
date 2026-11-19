@@ -216,10 +216,10 @@ pub(crate) const DEFECT_RELIC_POOL: [&str; 8] = [
 
 /// The event relic pool, whole: what only an event hands over.
 ///
-/// No bag is filled from it. Ninety-eight of the hundred and forty are ancients,
+/// No bag is filled from it. A hundred of the hundred and forty-two are ancients,
 /// thirty-four carry the Event rarity, five are the refined starters a touch of
 /// Orobas deals, and three stand in the shared pool as well.
-pub(crate) const EVENT_RELIC_POOL: [&str; 140] = [
+pub(crate) const EVENT_RELIC_POOL: [&str; 142] = [
     "RELIC.ALCHEMICAL_COFFER",
     "RELIC.ARCANE_SCROLL",
     "RELIC.ARCHAIC_TOOTH",
@@ -248,6 +248,7 @@ pub(crate) const EVENT_RELIC_POOL: [&str; 140] = [
     "RELIC.DIAMOND_DIADEM",
     "RELIC.DISTINGUISHED_CAPE",
     "RELIC.DIVINE_DESTINY",
+    "RELIC.DOWSING_ROD",
     "RELIC.DREAM_CATCHER",
     "RELIC.DRIFTWOOD",
     "RELIC.DUSTY_TOME",
@@ -296,6 +297,7 @@ pub(crate) const EVENT_RELIC_POOL: [&str; 140] = [
     "RELIC.MR_STRUGGLES",
     "RELIC.MUSIC_BOX",
     "RELIC.NEOWS_BONES",
+    "RELIC.NEOWS_SACRIFICE",
     "RELIC.NEOWS_TALISMAN",
     "RELIC.NEOWS_TORMENT",
     "RELIC.NEW_LEAF",

@@ -390,7 +390,11 @@ fn alchemize_rolls_one_potion_on_the_potion_stream() {
     assert_eq!(counter(&simulator, RunStream::CombatPotionGeneration), 2);
     assert_eq!(
         belt(&simulator),
-        [Some("POTION.ENERGY_POTION".to_owned()), None, None]
+        [
+            Some("POTION.DROPLET_OF_PRECOGNITION".to_owned()),
+            None,
+            None
+        ]
     );
     // The card burns up for having been played.
     assert_eq!(pile(&simulator, PileName::Exhaust), ["CARD.ALCHEMIZE"]);
@@ -560,6 +564,28 @@ fn a_blood_potion_heals_a_fifth_of_the_maximum() {
         .expect("the scenario builds");
     drink(&mut simulator, "POTION.BLOOD_POTION");
     assert_eq!(player(&simulator).current_hp, 46);
+}
+
+/// An ambergris heals half the drinker's maximum and, in a fight, gives them
+/// another turn of their own in place of the enemy's.
+#[test]
+fn an_ambergris_heals_half_and_owes_a_turn() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .player_hp(30, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .potions(vec![Some(id("POTION.AMBERGRIS")), None, None])
+        .rng_counter(RunStream::MonsterAi, 0)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    drink(&mut simulator, "POTION.AMBERGRIS");
+    assert_eq!(player(&simulator).current_hp, 70);
+    assert_eq!(power_amount(&simulator, 0, "POWER.AMBERGRIS_POWER"), 1);
+    end_turn(&mut simulator);
+    let combat = simulator.state().combat.as_ref().expect("the fight stands");
+    assert!(combat.taking_extra_turn, "the player takes the next turn");
+    assert_eq!(power_amount(&simulator, 0, "POWER.AMBERGRIS_POWER"), 0);
 }
 
 /// A fruit juice raises the maximum and heals by as much.

@@ -1,10 +1,11 @@
 //! The ten ascension levels, one rule at a time.
 //!
-//! No recording of this baseline was played above ascension zero, so a scenario
-//! is the evidence for every level: a generated run at each of the eleven
-//! levels for one reference seed, and beside it a focused test of each rule at
-//! the level it starts applying and at the level below it, so that both sides
-//! of every branch are read rather than only the ascended one.
+//! The reference seed's run start was recorded at ascension ten, and its acts,
+//! bosses and second boss are the recorded ones. Below that, a scenario is the
+//! evidence for every level: a generated run at each of the eleven levels for
+//! that seed, and beside it a focused test of each rule at the level it starts
+//! applying and at the level below it, so that both sides of every branch are
+//! read rather than only the ascended one.
 
 use std::collections::BTreeSet;
 
@@ -14,7 +15,7 @@ use sts2_engine::{
     RunState, Simulator,
 };
 
-const SEED: &str = "N3Z9EE2CXB";
+const SEED: &str = "PSQB89LLX5XF";
 
 fn id(value: &str) -> sts2_core::ModelId {
     value.parse().expect("static model ID")
@@ -121,7 +122,7 @@ fn the_reference_seed_generates_the_same_run_at_every_level_but_for_the_rules() 
             [
                 "ENCOUNTER.THE_KIN_BOSS",
                 "ENCOUNTER.KAISER_CRAB_BOSS",
-                "ENCOUNTER.TEST_SUBJECT_BOSS"
+                "ENCOUNTER.QUEEN_BOSS"
             ],
             "bosses at {ascension}"
         );
@@ -173,8 +174,8 @@ fn swarming_elites_puts_eight_elite_points_on_a_map_that_carried_five() {
     ] {
         assert_eq!(count(below, family), count(at, family), "{family:?} points");
     }
-    assert_eq!(count(below, MapPointType::RestSite), [9, 9, 7]);
-    assert_eq!(count(at, MapPointType::RestSite), [9, 9, 5]);
+    assert_eq!(count(below, MapPointType::RestSite), [9, 10, 10]);
+    assert_eq!(count(at, MapPointType::RestSite), [9, 11, 10]);
 }
 
 // --- 2: Weary Traveler ----------------------------------------------------
@@ -224,7 +225,7 @@ fn poverty_pays_three_quarters_of_a_monster_room_s_purse() {
 /// And a chest's own gold, which is rolled and then scaled the same way.
 #[test]
 fn poverty_takes_a_quarter_off_a_chest_s_gold() {
-    for (ascension, gained) in [(2, 50_i32), (3, 37)] {
+    for (ascension, gained) in [(2, 44_i32), (3, 33)] {
         let mut simulator = one_room_run(ascension, RoomChoice::Treasure);
         let before = simulator.state().run_player.gold;
         walk_to(&mut simulator, 4);

@@ -611,8 +611,8 @@ fn regret() -> CardDefinition {
 #[allow(clippy::too_many_lines, reason = "one entry per token")]
 pub(crate) fn token_cards() -> Vec<CardDefinition> {
     vec![
-        // Fuel is a point of energy and a card, and burns for having been
-        // played.
+        // Fuel is a point of energy (two upgraded), and burns for having
+        // been played.
         rarity(
             upgrading(
                 exhausting(card(
@@ -620,9 +620,9 @@ pub(crate) fn token_cards() -> Vec<CardDefinition> {
                     CardType::Skill,
                     TargetType::SelfTarget,
                     0,
-                    vec![energy(1), draw(1)],
+                    vec![energy(1)],
                 )),
-                vec![energy(1), draw(2)],
+                vec![energy(2)],
             ),
             CardRarity::Token,
         ),
@@ -665,9 +665,9 @@ pub(crate) fn token_cards() -> Vec<CardDefinition> {
                         CardType::Skill,
                         TargetType::SelfTarget,
                         0,
-                        vec![block(8)],
+                        vec![block(7)],
                     )),
-                    vec![block(11)],
+                    vec![block(10)],
                 ),
                 &[CardTag::Minion],
             ),
@@ -794,11 +794,10 @@ pub(crate) fn token_cards() -> Vec<CardDefinition> {
 
 /// The quest cards a run carries as errands rather than as plays.
 ///
-/// All three are unplayable cards whose whole behaviour is outside a combat:
-/// one adds an option to a rest site, one bends the last act's map and the
-/// event it leads to, and one plants a treasure on a map it has re-generated.
-/// Only the first of those surfaces exists here, so the other two are
-/// registered for what they are and carry nothing else.
+/// All four are unplayable cards whose whole behaviour is outside a combat:
+/// one adds an option to a rest site, one counts the unknown map points its
+/// owner walks onto, one bends the last act's map and the event it leads to,
+/// and one plants a treasure on a map it has re-generated.
 pub(crate) fn quest_cards() -> Vec<CardDefinition> {
     let mut spoils_map = quest("CARD.SPOILS_MAP", TargetType::SelfTarget);
     // A spoils map is made with its act index already set to one, rather than
@@ -822,9 +821,88 @@ pub(crate) fn quest_cards() -> Vec<CardDefinition> {
     ));
     vec![
         rarity(egg, CardRarity::Quest),
+        rarity(dowsing(), CardRarity::Quest),
         rarity(lantern_key(), CardRarity::Quest),
         rarity(spoils_map, CardRarity::Quest),
     ]
+}
+
+/// Dowsing: while it stands in the deck it counts every unknown map point its
+/// owner walks onto, as the point's room goes on the stack and whatever the
+/// room turns out to be, and at the fifth it becomes an Abundance. A fight an
+/// event walks into is a second room on the stack and is not counted.
+fn dowsing() -> CardDefinition {
+    let mut definition = quest("CARD.DOWSING", TargetType::None);
+    definition.saved_properties = vec![sts2_engine::SavedCardProperty::of("RoomsEntered", 0)];
+    definition.hooks.push(sts2_engine::ModifierHook::every_turn(
+        sts2_engine::HookEvent::BeforeRoomEntered,
+        vec![Command::When {
+            otherwise: Vec::new(),
+            condition: Condition::All(vec![
+                Condition::SourceCardIsInTheDeck,
+                Condition::CurrentRoomCountAtMost(1),
+                Condition::CurrentMapPointIsUnknown,
+            ]),
+            then: vec![
+                Command::Card(CardCmd::ModifyProperty {
+                    cards: CardSelector::Source,
+                    name: "RoomsEntered".to_owned(),
+                    amount: Amount::Fixed(1),
+                    and_the_deck_version: false,
+                }),
+                Command::When {
+                    otherwise: Vec::new(),
+                    condition: Condition::SourceCardPropertyAtLeast {
+                        name: "RoomsEntered".to_owned(),
+                        value: 5,
+                    },
+                    then: vec![Command::Card(CardCmd::TransformDeckCards {
+                        cards: CardSelector::Source,
+                        replacement: sts2_engine::CardTransformReplacement::Named {
+                            model: id("CARD.ABUNDANCE"),
+                            keeps_upgrade: false,
+                            keeps_enchantment: false,
+                        },
+                        one_at_a_time: false,
+                    })],
+                },
+            ],
+        }],
+    ));
+    definition
+}
+
+/// Abundance, played: three distinct upgraded powers of the character's own
+/// pool to choose between, and the one taken goes into the hand free for the
+/// turn. The screen cannot be skipped.
+fn abundance() -> Command {
+    Command::CardSelect(sts2_engine::CardSelectCmd::ChooseAGeneratedCard {
+        semantics: ChoiceSemantics::known(vec![
+            ChoiceOp::new(ChoiceOperationKind::Gain, ChoiceScope::Combat)
+                .to(ChoiceDestination::Hand),
+            ChoiceOp::new(ChoiceOperationKind::SetCost, ChoiceScope::Combat)
+                .amount(0)
+                .lasting(ChoiceDuration::UntilPlayedOrTurnEnds)
+                .including_stars(),
+        ]),
+        pool: sts2_engine::CardPoolRef::OwnCharacter,
+        count: 3,
+        filter: CardFilter::OfType(CardType::Power),
+        upgraded: true,
+        can_skip: false,
+        then: vec![Command::CardPile(CardPileCmd::AddGeneratedToCombat {
+            enchantment: None,
+            card: sts2_engine::CardOrigin::Chosen,
+            grown_by: Amount::Fixed(0),
+            count: Amount::Fixed(1),
+            pile: PileName::Hand,
+            ethereal: false,
+            retain: false,
+            upgraded: false,
+            temporary_cost: Some(sts2_engine::TemporaryCost::free_this_turn()),
+            position: DrawPilePosition::Bottom,
+        })],
+    })
 }
 
 fn quest(model_id: &str, target: TargetType) -> CardDefinition {
@@ -839,13 +917,28 @@ fn tagged(mut definition: CardDefinition, tags: &[CardTag]) -> CardDefinition {
 /// The cards only an event hands over, plus the ancient-rarity cards among
 /// them.
 ///
-/// The build's event pool holds twenty-seven cards, eight of which carry the
+/// The build's event pool holds twenty-eight cards, nine of which carry the
 /// ancient rarity rather than the event one. Neither rarity is ever rolled:
 /// both are filtered out of any roll made in a fight, so nothing in a fight can
 /// conjure one of these.
 #[allow(clippy::too_many_lines, reason = "one entry per event card")]
 pub(crate) fn event_cards() -> Vec<CardDefinition> {
     vec![
+        // An abundance lays three upgraded powers of the character's own pool
+        // out, one of which must be taken, free for the turn.
+        rarity(
+            exhausting(upgrading_cost(
+                card(
+                    "CARD.ABUNDANCE",
+                    CardType::Skill,
+                    TargetType::SelfTarget,
+                    1,
+                    vec![abundance()],
+                ),
+                0,
+            )),
+            CardRarity::Ancient,
+        ),
         // An apotheosis upgrades every other card of the fight and burns.
         rarity(
             upgrading_cost(
@@ -1082,9 +1175,9 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                         CardType::Attack,
                         TargetType::AnyEnemy,
                         1,
-                        maul(1),
+                        maul(2),
                     ),
-                    maul(2),
+                    maul(3),
                 ),
                 5,
                 6,
@@ -1170,9 +1263,9 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                     CardType::Skill,
                     TargetType::SelfTarget,
                     3,
-                    relax(15, 2, 2),
+                    relax(16, 2, 2),
                 )),
-                relax(17, 3, 3),
+                relax(18, 3, 3),
             ),
             CardRarity::Ancient,
         ),
@@ -1268,7 +1361,7 @@ pub(crate) fn event_cards() -> Vec<CardDefinition> {
                     "CARD.WHISTLE",
                     CardType::Attack,
                     TargetType::AnyEnemy,
-                    3,
+                    2,
                     vec![attack(33), stun_target()],
                 )),
                 vec![attack(44), stun_target()],
@@ -1288,14 +1381,14 @@ fn stun_target() -> Command {
     })
 }
 
-/// Brightest Flame, played: energy, then cards, then a point of maximum HP.
+/// Brightest Flame, played: energy, then cards, then two points of maximum HP.
 fn brightest_flame(energy_gained: i32, cards: i32) -> Vec<Command> {
     vec![
         energy(energy_gained),
         draw(cards),
         Command::Creature(CreatureCmd::LoseMaxHp {
             target: CreatureSelector::Owner,
-            amount: Amount::Fixed(1),
+            amount: Amount::Fixed(2),
         }),
     ]
 }
@@ -2061,10 +2154,10 @@ pub(crate) fn offered_colorless_cards() -> Vec<CardDefinition> {
                 "CARD.REND",
                 CardType::Attack,
                 TargetType::AnyEnemy,
-                2,
-                vec![rend(15, 5)],
+                1,
+                vec![rend(10, 5)],
             ),
-            vec![rend(18, 8)],
+            vec![rend(12, 8)],
         ),
         // A salvo swings and keeps the hand for a turn.
         upgrading(

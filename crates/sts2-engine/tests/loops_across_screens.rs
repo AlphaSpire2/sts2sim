@@ -50,6 +50,7 @@ fn card(model_id: &str, effects: Vec<Command>) -> CardDefinition {
         energy_cost: 0,
         star_cost: -1,
         returns_to_hand: false,
+        returns_to_draw_pile_top: false,
         costs_star_x: false,
         costs_x: false,
         innate: false,
@@ -151,6 +152,7 @@ fn cards() -> Vec<CardDefinition> {
             vec![Command::Orb(OrbCmd::Passive {
                 orb: sts2_engine::OrbSelector::All,
                 target: None,
+                counted: false,
             })],
         ),
         // A channel into a full queue, whose make-room evoke asks.

@@ -14,8 +14,8 @@ use sts2_engine::{
     TemporaryPower, ValueProps,
 };
 use sts2_engine::{
-    ChoiceDestination, ChoiceDuration, ChoiceOperation as ChoiceOp, ChoiceOperationKind,
-    ChoiceScope, ChoiceSemantics,
+    ChoiceDestination, ChoiceOperation as ChoiceOp, ChoiceOperationKind, ChoiceScope,
+    ChoiceSemantics,
 };
 
 use crate::id;
@@ -38,6 +38,7 @@ fn power(model_id: &str, power_type: PowerType, stack_type: PowerStackType) -> P
         keeps_block: false,
         stops_draws_outside_hand_draw: false,
         keeps_hand: false,
+        grants_an_extra_turn: false,
         removed_when_applier_dies: false,
         keeps_owners_powers_on_death: false,
         survives_owner_death: false,
@@ -239,8 +240,8 @@ fn damage_shaping_powers() -> Vec<PowerDefinition> {
         }),
         // Vulnerable's multiplier is not a constant: the power offers its own
         // increase to whatever wants to raise it, in order — a Paper Phrog and
-        // a Cruelty on whoever is swinging, and a Debilitate on whoever is
-        // taking it. Two of the three are here: a Cruelty adds its own stacks
+        // a Cruelty on whoever is swinging (or on the owner of the pet that is
+        // swinging), and a Debilitate on whoever is taking it. Two of the three are here: a Cruelty adds its own stacks
         // as hundredths, and a Paper Phrog held by whoever is swinging adds a
         // quarter. Both are additive, so the order they are asked in does not
         // show.
@@ -250,7 +251,11 @@ fn damage_shaping_powers() -> Vec<PowerDefinition> {
                 HookCondition::OwnerTakesPoweredDamage,
                 vec![Command::Modify(ModifierCmd::Scale(debilitated(
                     Amount::Sum(vec![
-                        Amount::per(150, 1, Count::DamageDealerPower(id("POWER.CRUELTY_POWER"))),
+                        Amount::per(
+                            150,
+                            1,
+                            Count::DamageDealerOrPetOwnerPower(id("POWER.CRUELTY_POWER")),
+                        ),
                         Amount::per(0, 25, Count::DamageDealerRelic(id("RELIC.PAPER_PHROG"))),
                     ]),
                 )))],
@@ -394,20 +399,24 @@ fn burrowed_power() -> PowerDefinition {
         keeps_block: true,
         stops_draws_outside_hand_draw: false,
         keeps_hand: false,
-        hooks: vec![ModifierHook::every_turn(
-            HookEvent::AfterBlockBroken,
-            vec![
-                Command::Creature(CreatureCmd::Stun {
-                    target: CreatureSelector::Owner,
-                    next_move: StunFollowUp::Named("BITE_MOVE".to_owned()),
-                    stun_move: Vec::new(),
-                }),
-                remove_self(),
-            ],
-        )],
+        hooks: vec![
+            ModifierHook::every_turn(
+                HookEvent::AfterBlockBroken,
+                vec![
+                    Command::Creature(CreatureCmd::Stun {
+                        target: CreatureSelector::Owner,
+                        next_move: StunFollowUp::Named("BITE_MOVE".to_owned()),
+                        stun_move: Vec::new(),
+                    }),
+                    remove_self(),
+                ],
+            )
+            .when(HookCondition::OwnersBlockBroke),
+        ],
         on_removed: vec![Command::Creature(CreatureCmd::LoseBlock {
             target: CreatureSelector::Owner,
             amount: Amount::Fixed(999_999_999),
+            remover: None,
         })],
         ..single("POWER.BURROWED_POWER", PowerType::Buff)
     }
@@ -589,6 +598,17 @@ fn possession(model_id: &str, stat: &str) -> PowerDefinition {
 fn reacting_powers() -> Vec<PowerDefinition> {
     vec![
         flex_potion_power(),
+        // Ambergris owes its owner a turn of their own in place of the enemy's
+        // while it has stacks left, and one stack is spent for every such turn
+        // taken.
+        PowerDefinition {
+            grants_an_extra_turn: true,
+            hooks: vec![ModifierHook::every_turn(
+                HookEvent::AfterTakingExtraTurn,
+                vec![decrement()],
+            )],
+            ..counter("POWER.AMBERGRIS_POWER", PowerType::Buff)
+        },
         // An illusion holds the field when it dies and comes back whole, and
         // marks its owner a minion as it lands.
         PowerDefinition {
@@ -661,6 +681,7 @@ fn reacting_powers() -> Vec<PowerDefinition> {
                     (0..4)
                         .map(|slot| {
                             Command::Creature(CreatureCmd::Add {
+                                hp_bonus: None,
                                 monster: id("MONSTER.WRIGGLER"),
                                 // The wriggler slots are named in order.
                                 slot: sts2_engine::SpawnSlot::Named(format!(
@@ -797,6 +818,15 @@ fn reacting_powers() -> Vec<PowerDefinition> {
                         otherwise: Vec::new(),
                         condition: Condition::ListeningPowerAmountAbove(0),
                         then: vec![Command::Creature(CreatureCmd::Add {
+                            // The replacement carries one stock less, and it
+                            // stands up ten stronger for every time a bot has
+                            // been replaced: ten for each of the two stocks
+                            // it no longer holds.
+                            hp_bonus: Some(Amount::Scaled {
+                                base: 30,
+                                per: -10,
+                                count: Count::ListeningPowerAmount,
+                            }),
                             monster: id("MONSTER.AXEBOT"),
                             slot: sts2_engine::SpawnSlot::SameAsOwner,
                             // A bot built with a stock of its own opens on
@@ -1830,7 +1860,7 @@ fn chains_of_binding_power() -> PowerDefinition {
 }
 
 /// A rampart puts its block up in front of the gunner as the player's turn
-/// opens.
+/// opens, though not as an extra turn opens.
 ///
 /// The build names the turret operator outright; the only encounter that
 /// carries a rampart is the one with a living shield standing in front of one,
@@ -1846,7 +1876,10 @@ fn rampart_power() -> PowerDefinition {
                     props: ValueProps::UNPOWERED,
                 })],
             )
-            .when(HookCondition::PlayerSideTurn),
+            .when(HookCondition::All(vec![
+                HookCondition::PlayerSideTurn,
+                HookCondition::Not(Box::new(HookCondition::PlayersTakingAnExtraTurn)),
+            ])),
         ],
         ..counter("POWER.RAMPART_POWER", PowerType::Buff)
     }
@@ -2026,13 +2059,14 @@ fn free_attack_power() -> PowerDefinition {
     }
 }
 
-/// Regeneration heals its owner at the end of every turn it takes part in, and
-/// counts itself down for it.
+/// Regeneration heals its owner as every turn it takes part in begins to end,
+/// ahead of the orbs, the cards still held and Doom, and counts itself down
+/// for it.
 fn regen_power() -> PowerDefinition {
     PowerDefinition {
         hooks: vec![
             ModifierHook::every_turn(
-                HookEvent::AfterSideTurnEnd,
+                HookEvent::BeforeSideTurnEndEarly,
                 vec![
                     Command::Creature(CreatureCmd::Heal {
                         target: CreatureSelector::Owner,
@@ -2045,6 +2079,22 @@ fn regen_power() -> PowerDefinition {
         ],
         ..counter("POWER.REGEN_POWER", PowerType::Buff)
     }
+}
+
+/// Doom's kill: the first doomed creature of its owner's side takes the whole
+/// doomed list down with it, unless the fight is already over or ending.
+fn doom_kill() -> Vec<Command> {
+    vec![Command::When {
+        otherwise: Vec::new(),
+        condition: Condition::All(vec![
+            Condition::CombatIsNotOverOrEnding,
+            Condition::OwnerIsAlive,
+            Condition::OwnerIsTheFirstDoomedOnItsSide,
+        ]),
+        then: vec![Command::Creature(CreatureCmd::DoomKill {
+            target: CreatureSelector::DoomedOnOwnersSide,
+        })],
+    }]
 }
 
 /// A speed potion lends dexterity for the turn, the way flex lends strength.
@@ -2422,7 +2472,7 @@ fn unmovable_power() -> PowerDefinition {
 
 /// Juggling counts the attacks its owner has played this turn — starting from
 /// what the history already holds when it lands — and hands back copies of the
-/// third one.
+/// third one as that one is played, before its own body runs.
 fn juggling_power() -> PowerDefinition {
     PowerDefinition {
         hooks: vec![
@@ -2434,7 +2484,7 @@ fn juggling_power() -> PowerDefinition {
                 })],
             ),
             ModifierHook::every_turn(
-                HookEvent::AfterCardPlayed,
+                HookEvent::BeforeCardPlayed,
                 vec![
                     Command::Power(PowerCmd::ModifyCounter {
                         power: PowerRef::listening(),
@@ -2818,25 +2868,6 @@ pub fn item_powers() -> Vec<PowerDefinition> {
                 })],
             )],
             ..single("POWER.CONFUSED_POWER", PowerType::Debuff)
-        },
-        // A diamond diadem halves what reaches its owner, and comes off at the
-        // end of the enemy's turn.
-        PowerDefinition {
-            hooks: vec![
-                modifies(
-                    HookEvent::ModifyDamageMultiplicative,
-                    HookCondition::OwnerTakesPoweredDamage,
-                    vec![Command::Modify(ModifierCmd::Scale(Amount::Fixed(50)))],
-                ),
-                ModifierHook::every_turn(
-                    HookEvent::AfterSideTurnEnd,
-                    vec![Command::Power(PowerCmd::Remove {
-                        power: PowerRef::listening(),
-                    })],
-                )
-                .when(HookCondition::EnemySideTurn),
-            ],
-            ..single("POWER.DIAMOND_DIADEM_POWER", PowerType::Buff)
         },
         // Clarity is a bigger hand for each of the next few turns, one stack
         // spent per turn it paid for.
@@ -3433,38 +3464,13 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
         // Poison costs its owner what it is worth as their turn opens, and one
         // of it wears off for every time it bit. An accelerant on the other
         // side buys extra bites, and the amount comes down between them, so the
-        // second is worth one less than the first.
+        // second is worth one less than the first. An outbreak sets the same
+        // bites off whenever it is played.
         PowerDefinition {
             hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::AfterSideTurnStart,
-                    vec![Command::Repeat {
-                        times: Amount::Least(vec![
-                            stacks(),
-                            Amount::Sum(vec![
-                                Amount::Fixed(1),
-                                Amount::counting(Count::LivingOpponentsPower(id(
-                                    "POWER.ACCELERANT_POWER",
-                                ))),
-                            ]),
-                        ]),
-                        then: vec![
-                            Command::Creature(CreatureCmd::Damage {
-                                target: CreatureSelector::Owner,
-                                amount: stacks(),
-                                props: ValueProps::UNBLOCKABLE,
-                            }),
-                            // The stack only comes off if the owner survived
-                            // the blow.
-                            Command::When {
-                                otherwise: Vec::new(),
-                                condition: Condition::OwnerIsAlive,
-                                then: vec![decrement()],
-                            },
-                        ],
-                    }],
-                )
-                .when(HookCondition::OwnerIsParticipant),
+                ModifierHook::every_turn(HookEvent::AfterSideTurnStart, poison_bites())
+                    .when(HookCondition::OwnerIsParticipant),
+                ModifierHook::every_turn(HookEvent::PowerTriggered, poison_bites()),
             ],
             ..counter("POWER.POISON_POWER", PowerType::Debuff)
         },
@@ -3683,39 +3689,6 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
             ],
             ..counter("POWER.NOXIOUS_FUMES_POWER", PowerType::Buff)
         },
-        // An outbreak counts the times its owner has worked poison on anything,
-        // and every third one it burns everything for what it is worth. The
-        // count is the power's own, and it is kept modulo three.
-        PowerDefinition {
-            hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::AfterPowerAmountChanged,
-                    vec![
-                        Command::Power(PowerCmd::ModifyCounter {
-                            power: PowerRef::listening(),
-                            amount: Amount::Fixed(1),
-                        }),
-                        Command::When {
-                            otherwise: Vec::new(),
-                            condition: Condition::ListeningPowerCounterAtLeast(3),
-                            then: vec![
-                                Command::Creature(CreatureCmd::Damage {
-                                    target: CreatureSelector::AllOpponents,
-                                    amount: stacks(),
-                                    props: ValueProps::UNPOWERED,
-                                }),
-                                Command::Power(PowerCmd::ModifyCounter {
-                                    power: PowerRef::listening(),
-                                    amount: Amount::Fixed(-3),
-                                }),
-                            ],
-                        },
-                    ],
-                )
-                .when(HookCondition::OwnerWorkedPower(id("POWER.POISON_POWER"))),
-            ],
-            ..counter("POWER.OUTBREAK_POWER", PowerType::Buff)
-        },
         // Phantom blades make every Shiv keep itself, and put their whole worth
         // behind the first Shiv of a turn and nothing behind the rest.
         PowerDefinition {
@@ -3878,7 +3851,8 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
             ],
             ..counter("POWER.TOOLS_OF_THE_TRADE_POWER", PowerType::Buff)
         },
-        // Tracking multiplies what its owner's cards deal to anything shaken.
+        // Tracking raises what its owner's cards deal to anything weakened by
+        // its own amount in percent: fifty is half as much again.
         PowerDefinition {
             hooks: vec![modifies(
                 HookEvent::ModifyDamageMultiplicative,
@@ -3887,46 +3861,18 @@ pub fn silent_powers() -> Vec<PowerDefinition> {
                     otherwise: Vec::new(),
                     condition: Condition::TargetHasPower(id("POWER.WEAK_POWER")),
                     then: vec![Command::Modify(ModifierCmd::Scale(Amount::per(
-                        0,
                         100,
+                        1,
                         Count::ListeningPowerAmount,
                     )))],
                 }],
             )],
             ..counter("POWER.TRACKING_POWER", PowerType::Buff)
         },
-        // Well laid plans keeps back as many cards of the hand as it is worth.
-        // It asks on `BeforeFlushLate` — deliberately the late pass, so that
-        // the player sees what every other before-flush effect has done to the
-        // hand before choosing what to keep. Every listener on that pass gets
-        // to act before any of them finishes, so the engine banks the screen
-        // and opens it once the whole before-flush pass has run and before the
-        // hand goes down.
+        // Well-laid plans keep the whole hand where it is at every turn's end.
         PowerDefinition {
-            hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::BeforeFlushLate,
-                    vec![Command::CardSelect(CardSelectCmd::FromHand {
-                        semantics: ChoiceSemantics::known(vec![
-                            ChoiceOp::new(ChoiceOperationKind::GrantKeyword, ChoiceScope::Combat)
-                                .keyword(sts2_engine::CardKeyword::Retain)
-                                .lasting(ChoiceDuration::Turn),
-                        ]),
-                        prefs: SelectorPrefs::unbounded_range(),
-                        maximum: Some(stacks()),
-                        exact_count: None,
-                        filter: CardFilter::NotRetainingThisTurn,
-                        then: vec![Command::Card(CardCmd::ApplySingleTurnKeyword {
-                            cards: CardSelector::Chosen,
-                            keyword: sts2_engine::CardKeyword::Retain,
-                        })],
-                    })],
-                )
-                // Only a hand that is about to be discarded is asked; a hand
-                // a pyramid keeps up is not.
-                .when(HookCondition::TheHandWouldFlush),
-            ],
-            ..counter("POWER.WELL_LAID_PLANS_POWER", PowerType::Buff)
+            keeps_hand: true,
+            ..single("POWER.WELL_LAID_PLANS_POWER", PowerType::Buff)
         },
         // A wraith form costs its owner dexterity every turn, for good: it
         // never takes itself off.
@@ -3996,11 +3942,20 @@ pub fn defect_powers() -> Vec<PowerDefinition> {
             )],
             ..counter("POWER.FOCUS_POWER", PowerType::Buff)
         },
-        // The three temporary-Focus wrappers: each lends Focus as it lands
+        // The three temporary-Focus buffs: each lends Focus as it lands
         // and gives it back at the end of a turn its owner took part in.
         temporary_focus("POWER.FOCUSED_STRIKE_POWER"),
         temporary_focus("POWER.HOTFIX_POWER"),
         temporary_focus("POWER.SYNCHRONIZE_POWER"),
+        // A hyperbeam's focus down takes Focus for the turn instead, and
+        // gives it back at the end of a turn its owner took part in.
+        PowerDefinition {
+            temporary: Some(TemporaryPower {
+                internally_applied_power: id("POWER.FOCUS_POWER"),
+                positive: false,
+            }),
+            ..counter("POWER.HYPERBEAM_FOCUS_DOWN_POWER", PowerType::Debuff)
+        },
         // A lightning rod channels one orb as the energy is reset rather than
         // as the turn opens, so what an orb evoked to make room pays out is not
         // lost to the reset or to the block clear. One stack goes with it.
@@ -4165,6 +4120,7 @@ pub fn defect_powers() -> Vec<PowerDefinition> {
                         then: vec![Command::Orb(sts2_engine::OrbCmd::Passive {
                             orb: sts2_engine::OrbSelector::Front,
                             target: None,
+                            counted: false,
                         })],
                     }],
                 }],
@@ -4411,18 +4367,26 @@ fn gremlin_merc_powers() -> Vec<PowerDefinition> {
             hooks: vec![
                 ModifierHook::every_turn(
                     HookEvent::AfterDeath,
+                    // The fat gremlin is rolled first and carries its heist
+                    // before it joins; the sneaky one is brought in ahead of
+                    // it, rolling its health without the fat one's.
                     vec![
+                        Command::Creature(CreatureCmd::Reserve {
+                            monster: id("MONSTER.FAT_GREMLIN"),
+                            slot: sts2_engine::SpawnSlot::Named("fat".to_owned()),
+                        }),
                         Command::Creature(CreatureCmd::Add {
+                            hp_bonus: None,
                             monster: id("MONSTER.SNEAKY_GREMLIN"),
                             slot: sts2_engine::SpawnSlot::Named("sneaky".to_owned()),
                             initial_state: None,
                             then: Vec::new(),
                         }),
-                        Command::Creature(CreatureCmd::Add {
+                        Command::Creature(CreatureCmd::AddReserved {
                             monster: id("MONSTER.FAT_GREMLIN"),
-                            slot: sts2_engine::SpawnSlot::Named("fat".to_owned()),
                             initial_state: None,
-                            then: vec![Command::Power(PowerCmd::Apply {
+                            then: Vec::new(),
+                            prepare: vec![Command::Power(PowerCmd::Apply {
                                 // The heist is aimed at the same purse the
                                 // thievery was, which is what it hands back.
                                 marks: Some(CreatureSelector::AllOpponents),
@@ -4769,21 +4733,39 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
             ],
             ..counter("POWER.ORBIT_POWER", PowerType::Buff)
         },
-        // A pale blue dot deals its owner more cards, but only on a turn that
-        // follows one they played at least five on.
+        // A pale blue dot promises its owner more cards next turn the first
+        // time in a turn that five of their plays have finished; the latch
+        // keeps it to once a turn and comes off as their turn ends.
         PowerDefinition {
-            hooks: vec![modifies(
-                HookEvent::ModifyHandDraw,
-                HookCondition::Always,
-                vec![Command::When {
-                    otherwise: Vec::new(),
-                    condition: Condition::CountAtLeast {
-                        count: Count::OwnerCardPlaysLastTurn,
-                        at_least: 5,
-                    },
-                    then: vec![Command::Modify(ModifierCmd::Add(stacks()))],
-                }],
-            )],
+            hooks: vec![
+                ModifierHook::every_turn(
+                    HookEvent::AfterCardPlayed,
+                    vec![Command::When {
+                        otherwise: Vec::new(),
+                        condition: Condition::All(vec![
+                            Condition::Not(Box::new(Condition::ListeningPowerIsLatched)),
+                            Condition::CountAtLeast {
+                                count: Count::OwnerCardPlaysFinishedThisTurn,
+                                at_least: 5,
+                            },
+                        ]),
+                        then: vec![
+                            Command::Power(PowerCmd::SetLatch(true)),
+                            applied_to(
+                                "POWER.DRAW_CARDS_NEXT_TURN_POWER",
+                                CreatureSelector::Owner,
+                                stacks(),
+                            ),
+                        ],
+                    }],
+                )
+                .when(HookCondition::OwnerPlayedTheCard),
+                ModifierHook::every_turn(
+                    HookEvent::AfterSideTurnEnd,
+                    vec![Command::Power(PowerCmd::SetLatch(false))],
+                )
+                .when(HookCondition::OwnerIsParticipant),
+            ],
             ..counter("POWER.PALE_BLUE_DOT_POWER", PowerType::Buff)
         },
         // A parry has no body at all: the Sovereign Blade reads the amount off
@@ -4939,9 +4921,22 @@ pub fn regent_powers() -> Vec<PowerDefinition> {
             ..counter("POWER.TYRANNY_POWER", PowerType::Buff)
         },
         // A void form makes the first cards of every turn free, of energy and
-        // of stars alike, and counts what its owner has played itself.
+        // of stars alike, and counts what its owner has played itself: each
+        // play they chose, once its last pass is over, from its own place
+        // among the after-card-played listeners.
         PowerDefinition {
             card_cost_rule: Some(sts2_engine::CardCostRule::FreeInHandOrPlayUnderCount),
+            hooks: vec![
+                ModifierHook::every_turn(
+                    HookEvent::AfterCardPlayed,
+                    vec![Command::Player(PlayerCmd::CountAFinishedChosenPlay)],
+                )
+                .when(HookCondition::All(vec![
+                    HookCondition::OwnerPlayedTheCard,
+                    HookCondition::PlayWasChosen,
+                    HookCondition::LastPassOfThePlay,
+                ])),
+            ],
             ..counter("POWER.VOID_FORM_POWER", PowerType::Buff)
         },
     ]
@@ -5089,23 +5084,24 @@ pub fn necrobinder_powers() -> Vec<PowerDefinition> {
         // Doom is a countdown on somebody else's life: as the side it is on
         // ends its turn, every creature there carrying at least as much of it
         // as it has HP left goes down, and the whole list goes down from the
-        // first of them rather than one at a time.
+        // first of them rather than one at a time. The enemy side's falls
+        // before that side's turn ends; the player's falls once the player's
+        // turn has ended, behind the orbs, the cards still held and the
+        // flush, so a fight those won is already over.
         PowerDefinition {
             hooks: vec![
-                ModifierHook::every_turn(
-                    HookEvent::BeforeSideTurnEnd,
-                    vec![Command::When {
-                        otherwise: Vec::new(),
-                        condition: Condition::All(vec![
-                            Condition::OwnerIsAlive,
-                            Condition::OwnerIsTheFirstDoomedOnItsSide,
-                        ]),
-                        then: vec![Command::Creature(CreatureCmd::DoomKill {
-                            target: CreatureSelector::DoomedOnOwnersSide,
-                        })],
-                    }],
-                )
-                .when(HookCondition::OwnerIsParticipant),
+                ModifierHook::every_turn(HookEvent::BeforeSideTurnEnd, doom_kill()).when(
+                    HookCondition::All(vec![
+                        HookCondition::OwnerIsParticipant,
+                        HookCondition::EnemySideTurn,
+                    ]),
+                ),
+                ModifierHook::every_turn(HookEvent::AfterSideTurnEnd, doom_kill()).when(
+                    HookCondition::All(vec![
+                        HookCondition::OwnerIsParticipant,
+                        HookCondition::PlayerSideTurn,
+                    ]),
+                ),
             ],
             ..counter("POWER.DOOM_POWER", PowerType::Debuff)
         },
@@ -5462,4 +5458,33 @@ pub(crate) fn shivs_into_hand(count: Amount, upgraded: bool) -> Command {
         temporary_cost: None,
         position: DrawPilePosition::Bottom,
     })
+}
+
+/// Poison's bites: as many as the amount allows, one more for every
+/// accelerant on the other side, each worth what is left, and a stack off for
+/// each one its owner survived.
+fn poison_bites() -> Vec<Command> {
+    vec![Command::Repeat {
+        times: Amount::Least(vec![
+            stacks(),
+            Amount::Sum(vec![
+                Amount::Fixed(1),
+                Amount::counting(Count::LivingOpponentsPower(id("POWER.ACCELERANT_POWER"))),
+            ]),
+        ]),
+        then: vec![
+            Command::Creature(CreatureCmd::Damage {
+                target: CreatureSelector::Owner,
+                amount: stacks(),
+                props: ValueProps::UNBLOCKABLE,
+            }),
+            // The stack only comes off if the owner survived
+            // the blow.
+            Command::When {
+                otherwise: Vec::new(),
+                condition: Condition::OwnerIsAlive,
+                then: vec![decrement()],
+            },
+        ],
+    }]
 }

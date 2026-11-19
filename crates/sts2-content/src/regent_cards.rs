@@ -285,9 +285,9 @@ fn commons() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 0,
-                collision_course(11),
+                collision_course(10),
             ),
-            collision_course(15),
+            collision_course(14),
         ),
         upgrading(
             card(
@@ -320,9 +320,9 @@ fn commons() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AllEnemies,
                 1,
-                crush_under(7, 1),
+                crush_under(8, 1),
             ),
-            crush_under(8, 2),
+            crush_under(9, 2),
         ),
         upgrading(
             card(
@@ -361,11 +361,11 @@ fn commons() -> Vec<CardDefinition> {
                     CardType::Attack,
                     TargetType::AnyEnemy,
                     1,
-                    vec![attack(12), draw(2)],
+                    vec![attack(12), buff("POWER.DRAW_CARDS_NEXT_TURN_POWER", 2)],
                 ),
-                vec![attack(13), draw(3)],
+                vec![attack(13), buff("POWER.DRAW_CARDS_NEXT_TURN_POWER", 3)],
             ),
-            2,
+            1,
         ),
         upgrading(
             card(
@@ -411,9 +411,9 @@ fn commons() -> Vec<CardDefinition> {
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                vec![forge(9), buff("POWER.ENERGY_NEXT_TURN_POWER", 1)],
+                vec![forge(8), buff("POWER.ENERGY_NEXT_TURN_POWER", 1)],
             ),
-            vec![forge(13), buff("POWER.ENERGY_NEXT_TURN_POWER", 1)],
+            vec![forge(12), buff("POWER.ENERGY_NEXT_TURN_POWER", 1)],
         ),
         striking(upgrading(
             card(
@@ -431,9 +431,9 @@ fn commons() -> Vec<CardDefinition> {
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                vec![forge(5), draw(2)],
+                vec![forge(6), draw(2)],
             ),
-            vec![forge(8), draw(2)],
+            vec![forge(9), draw(2)],
         ),
         upgrading(
             card(
@@ -511,11 +511,15 @@ fn crescent_spear(per_card: i32) -> Command {
 /// Crush Under, played: one blow over the whole enemy side, and then the
 /// strength each of them loses for a turn.
 fn crush_under(damage: i32, strength: i32) -> Vec<Command> {
+    // The enemies are noted before the swing, so whatever its kills bring
+    // into the fight is not crushed. One command a place, so a play that
+    // gets its upgrade back mid-swing saps as the upgraded card.
     vec![
+        Command::NoteOpponents,
         sweep(damage, 1),
         apply_power(
             "POWER.CRUSH_UNDER_POWER",
-            CreatureSelector::AllOpponents,
+            CreatureSelector::Noted,
             Amount::Fixed(strength),
         ),
     ]
@@ -586,7 +590,7 @@ fn uncommons() -> Vec<CardDefinition> {
                 ),
                 vec![gain_energy(3)],
             ),
-            3,
+            2,
         ),
         upgrading(
             card(
@@ -627,9 +631,9 @@ fn uncommons() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 1,
-                vec![buff("POWER.PILLAR_OF_CREATION_POWER", 3)],
+                vec![buff("POWER.PILLAR_OF_CREATION_POWER", 2)],
             ),
-            vec![buff("POWER.PILLAR_OF_CREATION_POWER", 4)],
+            vec![buff("POWER.PILLAR_OF_CREATION_POWER", 3)],
         ),
         upgrading(
             card(
@@ -668,9 +672,9 @@ fn uncommons() -> Vec<CardDefinition> {
                     CardType::Attack,
                     TargetType::AnyEnemy,
                     1,
-                    vec![attack(30)],
+                    vec![attack(35)],
                 ),
-                vec![attack(40)],
+                vec![attack(45)],
             ),
             4,
         ),
@@ -890,7 +894,7 @@ fn uncommons() -> Vec<CardDefinition> {
                 ),
                 resonance(2),
             ),
-            3,
+            2,
         ),
         // Five stars for nine, and the upgrade keeps it in hand.
         costing_stars(
@@ -903,16 +907,18 @@ fn uncommons() -> Vec<CardDefinition> {
             )))),
             5,
         ),
-        striking(upgrading(
+        // A shining strike is put back on top of the draw pile wherever a play
+        // would have discarded it.
+        crate::cards::back_on_the_draw_pile(striking(upgrading(
             card(
                 "CARD.SHINING_STRIKE",
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 1,
-                shining_strike(8),
+                vec![attack(8), gain_stars(2)],
             ),
-            shining_strike(11),
-        )),
+            vec![attack(11), gain_stars(2)],
+        ))),
         upgrading_cost(
             card(
                 "CARD.SPECTRUM_SHIFT",
@@ -961,9 +967,9 @@ fn uncommons() -> Vec<CardDefinition> {
                 CardType::Skill,
                 TargetType::SelfTarget,
                 1,
-                vec![buff("POWER.VIGOR_POWER", 6)],
+                vec![buff("POWER.VIGOR_POWER", 7)],
             ),
-            vec![buff("POWER.VIGOR_POWER", 8)],
+            vec![buff("POWER.VIGOR_POWER", 10)],
         ),
     ]
 }
@@ -1041,14 +1047,20 @@ fn kingly_punch() -> Command {
 
 /// Knockout Blow, played: the blow, and five stars if it put something down.
 fn knockout_blow(damage: i32) -> Vec<Command> {
-    vec![
-        attack(damage),
-        Command::When {
-            condition: Condition::AFatalKillHappenedThisPlay,
+    // Any kill pays, a minion's or a segment's that will reattach included:
+    // what is asked is whether the swing put its target down, not whether
+    // the death counts as fatal.
+    vec![Command::Strike {
+        amount: Amount::Fixed(damage),
+        hits: Amount::Fixed(1),
+        target: CreatureSelector::Target,
+        props: ValueProps::NONE,
+        then: vec![Command::When {
+            condition: Condition::TheSwingKilledSomething,
             then: vec![gain_stars(5)],
             otherwise: Vec::new(),
-        },
-    ]
+        }],
+    }]
 }
 
 /// Lunar Blast's hit count: one hit for every skill play its owner has
@@ -1142,24 +1154,6 @@ fn resonance(strength: i32) -> Vec<Command> {
             CreatureSelector::AllOpponents,
             Amount::Fixed(-1),
         ),
-    ]
-}
-
-/// Shining Strike, played: the blow, two stars, and the card itself back on top
-/// of the draw pile unless it is about to burn up.
-fn shining_strike(damage: i32) -> Vec<Command> {
-    vec![
-        attack(damage),
-        gain_stars(2),
-        Command::When {
-            condition: Condition::Not(Box::new(Condition::SourceCardBurnsUp)),
-            then: vec![Command::CardPile(CardPileCmd::MoveToPile {
-                cards: CardSelector::Source,
-                pile: PileName::Draw,
-                position: DrawPilePosition::Top,
-            })],
-            otherwise: Vec::new(),
-        },
     ]
 }
 

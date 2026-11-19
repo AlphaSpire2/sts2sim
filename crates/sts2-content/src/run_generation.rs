@@ -83,8 +83,14 @@ const OVERGROWTH_NORMAL: [Encounter; 12] = [
     encounter("ENCOUNTER.OVERGROWTH_CRAWLERS", &["shrinker", "crawler"]),
     encounter("ENCOUNTER.RUBY_RAIDERS_NORMAL", &[]),
     encounter("ENCOUNTER.SLIMES_NORMAL", &["slimes"]),
-    encounter("ENCOUNTER.SLITHERING_STRANGLER_NORMAL", &[]),
-    encounter("ENCOUNTER.SNAPPING_JAXFRUIT_NORMAL", &["mushroom"]),
+    encounter(
+        "ENCOUNTER.SLITHERING_STRANGLER_NORMAL",
+        &["jaxfruit", "slimes"],
+    ),
+    encounter(
+        "ENCOUNTER.SNAPPING_JAXFRUIT_NORMAL",
+        &["mushroom", "jaxfruit"],
+    ),
     encounter("ENCOUNTER.VINE_SHAMBLER_NORMAL", &[]),
 ];
 const OVERGROWTH_ELITE: [Encounter; 3] = [

@@ -402,9 +402,9 @@ fn commons() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 1,
-                vec![attack(10), free_for_the_combat()],
+                vec![attack(11), free_for_the_combat()],
             ),
-            vec![attack(13), free_for_the_combat()],
+            vec![attack(15), free_for_the_combat()],
         )),
         upgrading(
             card(
@@ -467,6 +467,16 @@ fn weaken_an_attacker(amount: i32) -> Command {
     }
 }
 
+/// Synchronize, played: as much temporary Focus as `per` for every distinct
+/// kind of orb its owner is holding.
+fn synchronize(per: i32) -> Command {
+    apply_power(
+        "POWER.SYNCHRONIZE_POWER",
+        CreatureSelector::Owner,
+        Amount::per(0, per, Count::DistinctOrbModelsHeld),
+    )
+}
+
 /// The card that issued it becomes free for the rest of the fight.
 fn free_for_the_combat() -> Command {
     Command::Card(CardCmd::SetTemporaryCost {
@@ -491,10 +501,7 @@ fn rocket_punch() -> CardDefinition {
             HookEvent::AfterCardGeneratedForCombat,
             vec![Command::Card(CardCmd::SetTemporaryCost {
                 cards: CardSelector::Source,
-                lifetime: TemporaryCost {
-                    clears_when_played: true,
-                    ..TemporaryCost::this_combat(0)
-                },
+                lifetime: TemporaryCost::added_until_played(-1),
             })],
         )
         .when(HookCondition::All(vec![
@@ -779,9 +786,9 @@ fn uncommons() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 2,
-                vec![attack(10), debuff("POWER.WEAK_POWER", 2), channel(DARK)],
+                vec![attack(10), debuff("POWER.WEAK_POWER", 1), channel(DARK)],
             ),
-            vec![attack(13), debuff("POWER.WEAK_POWER", 3), channel(DARK)],
+            vec![attack(13), debuff("POWER.WEAK_POWER", 2), channel(DARK)],
         )),
         uncommon(upgrading(
             card(
@@ -801,12 +808,12 @@ fn uncommons() -> Vec<CardDefinition> {
                 TargetType::AnyEnemy,
                 3,
                 vec![
-                    multi_attack(Amount::Fixed(9), Amount::Fixed(2)),
+                    multi_attack(Amount::Fixed(10), Amount::Fixed(2)),
                     channel_times(GLASS, 2),
                 ],
             ),
             vec![
-                multi_attack(Amount::Fixed(12), Amount::Fixed(2)),
+                multi_attack(Amount::Fixed(13), Amount::Fixed(2)),
                 channel_times(GLASS, 2),
             ],
         )),
@@ -895,23 +902,23 @@ fn uncommons() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AnyEnemy,
                 3,
-                vec![energy_for_a_kill(24, 3)],
+                vec![energy_for_a_kill(26, 3)],
             ),
-            vec![energy_for_a_kill(32, 3)],
+            vec![energy_for_a_kill(34, 3)],
         )),
-        // Focus worth two for every distinct kind of orb its owner is
-        // holding, as a power that gives it back at the end of the turn.
-        uncommon(upgrade_drops_exhaust(exhausting(upgrading_in_place(card(
-            "CARD.SYNCHRONIZE",
-            CardType::Skill,
-            TargetType::SelfTarget,
-            1,
-            vec![apply_power(
-                "POWER.SYNCHRONIZE_POWER",
-                CreatureSelector::Owner,
-                Amount::per(0, 2, Count::DistinctOrbModelsHeld),
-            )],
-        ))))),
+        // Focus worth one (two upgraded) for every distinct kind of orb its
+        // owner is holding, as a power that gives it back at the end of the
+        // turn.
+        uncommon(upgrading(
+            card(
+                "CARD.SYNCHRONIZE",
+                CardType::Skill,
+                TargetType::SelfTarget,
+                1,
+                vec![synchronize(1)],
+            ),
+            vec![synchronize(2)],
+        )),
         uncommon(upgrading(
             card(
                 "CARD.SYNTHESIS",
@@ -963,9 +970,9 @@ fn uncommons() -> Vec<CardDefinition> {
                 CardType::Power,
                 TargetType::SelfTarget,
                 1,
-                vec![buff("POWER.THUNDER_POWER", 6)],
+                vec![buff("POWER.THUNDER_POWER", 8)],
             ),
-            vec![buff("POWER.THUNDER_POWER", 8)],
+            vec![buff("POWER.THUNDER_POWER", 11)],
         )),
         uncommon(upgrading_cost(
             exhausting(card(
@@ -1002,6 +1009,7 @@ fn fire_every_dark_orb(times: i32) -> Command {
             then: vec![Command::Orb(OrbCmd::Passive {
                 orb: OrbSelector::Bound,
                 target: None,
+                counted: false,
             })],
         }],
     }
@@ -1017,6 +1025,7 @@ fn fire_every_lightning_orb_at_the_target(times: i32) -> Command {
             then: vec![Command::Orb(OrbCmd::Passive {
                 orb: OrbSelector::Bound,
                 target: Some(CreatureSelector::Target),
+                counted: false,
             })],
         }],
     }
@@ -1238,23 +1247,9 @@ fn rares() -> Vec<CardDefinition> {
                 CardType::Attack,
                 TargetType::AllEnemies,
                 2,
-                vec![
-                    sweep(28, 1),
-                    apply_power(
-                        "POWER.FOCUS_POWER",
-                        CreatureSelector::Owner,
-                        Amount::Fixed(-3),
-                    ),
-                ],
+                vec![sweep(24, 1), buff("POWER.HYPERBEAM_FOCUS_DOWN_POWER", 3)],
             ),
-            vec![
-                sweep(36, 1),
-                apply_power(
-                    "POWER.FOCUS_POWER",
-                    CreatureSelector::Owner,
-                    Amount::Fixed(-3),
-                ),
-            ],
+            vec![sweep(30, 1), buff("POWER.HYPERBEAM_FOCUS_DOWN_POWER", 3)],
         )),
         rare(upgrading(
             card(
@@ -1297,7 +1292,7 @@ fn rares() -> Vec<CardDefinition> {
         ))),
         // Every orb evoked twice, front first, and taken out of the queue on
         // the second of the two. The count is taken before the loop opens.
-        rare(upgrading(
+        rare(exhausting(upgrading(
             card(
                 "CARD.SHATTER",
                 CardType::Attack,
@@ -1306,7 +1301,7 @@ fn rares() -> Vec<CardDefinition> {
                 vec![sweep(7, 1), evoke_every_orb_twice()],
             ),
             vec![sweep(11, 1), evoke_every_orb_twice()],
-        )),
+        ))),
         rare(exhausting(upgrading_cost(
             card(
                 "CARD.SIGNAL_BOOST",
@@ -1339,13 +1334,16 @@ fn rares() -> Vec<CardDefinition> {
             ),
             vec![energy(6)],
         ))),
-        rare(innate_when_upgraded(upgrading_in_place(card(
-            "CARD.TRASH_TO_TREASURE",
-            CardType::Power,
-            TargetType::SelfTarget,
-            1,
-            vec![buff("POWER.TRASH_TO_TREASURE_POWER", 1)],
-        )))),
+        rare(upgrading_cost(
+            card(
+                "CARD.TRASH_TO_TREASURE",
+                CardType::Power,
+                TargetType::SelfTarget,
+                1,
+                vec![buff("POWER.TRASH_TO_TREASURE_POWER", 1)],
+            ),
+            0,
+        )),
         // One Lightning orb for every Lightning orb its owner has already
         // channelled in this fight.
         rare(upgrade_drops_exhaust(exhausting(upgrading_in_place(card(
@@ -1514,12 +1512,12 @@ fn ancients_and_multiplayer() -> Vec<CardDefinition> {
                 TargetType::SelfTarget,
                 1,
                 vec![
-                    buff("POWER.FOCUS_POWER", 4),
+                    buff("POWER.FOCUS_POWER", 5),
                     buff("POWER.BIASED_COGNITION_POWER", 1),
                 ],
             ),
             vec![
-                buff("POWER.FOCUS_POWER", 5),
+                buff("POWER.FOCUS_POWER", 6),
                 buff("POWER.BIASED_COGNITION_POWER", 1),
             ],
         )),
@@ -1583,7 +1581,7 @@ fn ancients_and_multiplayer() -> Vec<CardDefinition> {
                 1,
                 vec![channel(PLASMA)],
             )))),
-            sts2_engine::CardRarity::Rare,
+            sts2_engine::CardRarity::Uncommon,
         ),
         rarity(
             exhausting(upgrading(

@@ -463,3 +463,76 @@ fn a_tesla_coil_aims_every_lightning_orb_at_its_target() {
     assert_eq!(creature(&simulator, 1).current_hp, 30);
     assert_eq!(creature(&simulator, 2).current_hp, 39);
 }
+
+/// A player carrying enough Doom to die of it, whose Lightning orb takes the
+/// last enemy as the turn ends, wins: the orb fires before the player's Doom
+/// is read, and Doom finds the fight already over.
+#[test]
+fn a_turn_end_orb_wins_before_the_players_doom_is_read() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[3],
+        orbs: &["ORB.LIGHTNING_ORB"],
+        powers: &[(0, "POWER.DOOM_POWER", 80, PowerType::Debuff)],
+        ..Fight::default()
+    });
+    end_turn(&mut simulator);
+    assert_ne!(
+        simulator.state().terminal,
+        Some(sts2_engine::RunResult::Defeat)
+    );
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is held");
+    assert!(combat.has_ended, "the orb won the fight");
+}
+
+/// A fight the turn end's orbs won never reaches the pass before the flush:
+/// a Well-Laid Plans never asks what to keep.
+#[test]
+fn a_turn_end_win_skips_the_pass_before_the_flush() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[3],
+        orbs: &["ORB.LIGHTNING_ORB"],
+        hand: &[("CARD.ZAP", 0)],
+        powers: &[(0, "POWER.WELL_LAID_PLANS_POWER", 1, PowerType::Buff)],
+        ..Fight::default()
+    });
+    end_turn(&mut simulator);
+    assert!(
+        !matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::ChooseCards { .. }
+        ),
+        "{:?}",
+        simulator.decision()
+    );
+    let combat = simulator
+        .state()
+        .combat
+        .as_ref()
+        .expect("the fight is held");
+    assert!(combat.has_ended, "the orb won the fight");
+}
+
+/// Regeneration heals as the turn begins to end, before Doom is read: two of
+/// it lifts a player standing at seventy over seventy-one Doom.
+#[test]
+fn regeneration_heals_before_doom_is_read() {
+    let mut simulator = ScenarioBuilder::new(SEED, id("ENCOUNTER.SHRINKER_BEETLE_WEAK"))
+        .played_as(id("CHARACTER.DEFECT"))
+        .player_hp(70, 80)
+        .energy(9, 9)
+        .turn(1, 1)
+        .orb_slots(3)
+        .rng_counter(RunStream::MonsterAi, 0)
+        .power(0, id("POWER.REGEN_POWER"), 2, PowerType::Buff)
+        .power(0, id("POWER.DOOM_POWER"), 71, PowerType::Debuff)
+        .enemy(1, id("MONSTER.SHRINKER_BEETLE"), 39, 39, "SHRINKER_MOVE")
+        .build(sts2_content::standard_registry())
+        .expect("the scenario builds");
+    end_turn(&mut simulator);
+    assert_eq!(simulator.state().terminal, None);
+    assert_eq!(creature(&simulator, 0).current_hp, 72);
+}

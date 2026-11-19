@@ -198,6 +198,6 @@ fn a_generated_scythe_deals_the_damage_a_fresh_one_holds() {
     // The damage is thirteen plus what the card has grown by.
     assert_eq!(
         exhausted(&simulator).properties.get("CurrentDamage"),
-        Some(&serde_json::Value::from(17))
+        Some(&serde_json::Value::from(18))
     );
 }

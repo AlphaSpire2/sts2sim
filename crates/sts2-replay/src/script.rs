@@ -734,6 +734,9 @@ mod tests {
             ScriptWriter::open(&walked, "test/1", "NLD6VZXP94", 0).expect("the run opens");
         let mut pick = 0x2545_f491_u64;
         let mut written = 0_usize;
+        // A pick that leaves its selection standing writes no record of its
+        // own; the pick that fills the screen writes the whole selection.
+        let mut silent_picks = 0_usize;
         while walked.state().terminal.is_none() && written < 400 {
             pick = pick.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let legal = walked.legal_actions();
@@ -745,8 +748,18 @@ mod tests {
             writer
                 .record(&walked, &action)
                 .expect("the walk stays scriptable");
+            let picked = match &action {
+                sts2_engine::Action::PickCard { choice_id, .. } => Some(*choice_id),
+                _ => None,
+            };
             walked.step(action).expect("the action applies");
             written += 1;
+            if picked.is_some_and(|choice| {
+                matches!(walked.decision(), sts2_engine::DecisionContext::ChooseCards { choice_id, .. }
+                    if *choice_id == choice)
+            }) {
+                silent_picks += 1;
+            }
         }
         let script = writer.finish();
 
@@ -771,7 +784,11 @@ mod tests {
             }
         }
         assert!(written > 50, "the walk covers more than the opening");
-        assert_eq!(applied, written, "every written action applies");
+        assert_eq!(
+            applied,
+            written - silent_picks,
+            "every written action applies"
+        );
         assert_eq!(
             adapter.simulator().state_key().expect("state key"),
             walked.state_key().expect("state key"),

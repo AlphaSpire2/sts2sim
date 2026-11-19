@@ -397,8 +397,8 @@ fn a_tyranny_deals_more_and_burns_as_many() {
     );
 }
 
-/// A pale blue dot deals its owner more cards, but only on a turn that follows
-/// one they played at least five on.
+/// A pale blue dot promises its owner more cards next turn the moment the fifth
+/// of their plays this turn finishes, and only once a turn.
 #[test]
 fn a_pale_blue_dot_only_pays_after_a_busy_turn() {
     let quiet = &[
@@ -449,9 +449,19 @@ fn a_pale_blue_dot_only_pays_after_a_busy_turn() {
         ],
         ..Fight::default()
     });
-    for _ in 0..5 {
+    for _ in 0..4 {
         play(&mut simulator, "CARD.STRIKE_REGENT");
     }
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.DRAW_CARDS_NEXT_TURN_POWER"),
+        0
+    );
+    play(&mut simulator, "CARD.STRIKE_REGENT");
+    assert_eq!(
+        power_amount(&simulator, 0, "POWER.DRAW_CARDS_NEXT_TURN_POWER"),
+        2,
+        "the fifth play lays the promise down"
+    );
     end_turn(&mut simulator);
     assert_eq!(hand(&simulator).len(), 7, "five plays buys the two");
 }
@@ -652,6 +662,58 @@ fn a_void_form_makes_the_first_cards_free_of_both_pools() {
         energy(&simulator),
         held - 4,
         "and it pays what it costs again"
+    );
+}
+
+/// A void form counts a play once it has finished: while the play that will
+/// use up the last free play is still asking its question, the hand is free.
+#[test]
+fn a_void_form_counts_a_play_once_it_has_finished() {
+    let mut simulator = scenario(&Fight {
+        enemies: &[300],
+        powers: &[(0, "POWER.VOID_FORM_POWER", 2, PowerType::Buff)],
+        hand: &[
+            ("CARD.STRIKE_REGENT", 0),
+            ("CARD.DISCOVERY", 0),
+            ("CARD.KINGLY_KICK", 0),
+        ],
+        stars: 0,
+        ..Fight::default()
+    });
+    let kick_cost = |simulator: &Simulator| {
+        simulator
+            .agent_observation()
+            .hand
+            .iter()
+            .find(|card| card.fingerprint.model_id.to_string() == "CARD.KINGLY_KICK")
+            .expect("the kick is in hand")
+            .face
+            .energy_cost
+    };
+    play(&mut simulator, "CARD.STRIKE_REGENT");
+    play(&mut simulator, "CARD.DISCOVERY");
+    assert!(
+        matches!(
+            simulator.decision(),
+            sts2_engine::DecisionContext::ChooseCards { .. }
+        ),
+        "the discovery is asking"
+    );
+    assert_eq!(
+        kick_cost(&simulator),
+        0,
+        "and the second play has not finished"
+    );
+    let pick = simulator
+        .legal_actions()
+        .iter()
+        .find(|action| matches!(action, sts2_engine::Action::ChooseCards { .. }))
+        .cloned()
+        .expect("the discovery offers a card");
+    simulator.step(pick).expect("the pick applies");
+    assert!(
+        kick_cost(&simulator) > 0,
+        "once it has, the kick costs again"
     );
 }
 

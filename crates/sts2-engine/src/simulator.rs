@@ -774,6 +774,14 @@ impl ContentRegistry {
 pub struct Snapshot(GameState);
 
 /// Constructors for the arguments a dispatch site hands its listeners.
+/// How one call fires the passives of the orbs it names.
+#[derive(Clone, Copy, Debug)]
+struct OrbPassiveRounds {
+    target: Option<CreatureCombatId>,
+    counted: bool,
+    repeats_left: Option<i32>,
+}
+
 trait HookContextExt {
     fn none() -> Self;
     fn side(side: CombatSide) -> Self;
@@ -870,6 +878,14 @@ const fn screen_name(screen: &CardSelectCmd) -> &'static str {
         CardSelectCmd::FromDeckForEnchantment { .. } => "CardSelectCmd::FromDeckForEnchantment",
         CardSelectCmd::ChooseAGeneratedBundle { .. } => "CardSelectCmd::FromChooseABundleScreen",
     }
+}
+
+/// The hits a repeat-per-kill swing has landed, while it runs.
+#[derive(Clone, Debug)]
+struct SwingHits {
+    card: Option<CardInstanceId>,
+    pass: usize,
+    landed: Vec<(usize, CreatureCombatId, DamageResult)>,
 }
 
 /// The semantic selection surface a screen corresponds to.
@@ -1063,17 +1079,15 @@ pub struct Simulator {
     /// apply and the write that follows it — so it is not part of the exact
     /// state.
     just_applied_power: Option<(CreatureCombatId, u64)>,
-    /// The next application of a temporary power does not work the stat it
-    /// stands for onto its owner. A Misery sets this on every copy it takes, so
-    /// a copied wrapper lends nothing. It is live only inside the copy loop that
-    /// set it, so it is not part of the exact state.
-    ignore_next_lent_stat: bool,
     /// While an automated selector stands, a screen answers itself with the
     /// first cards it offers rather than being put to the player. One relic
     /// pushes one for the burst it plays its owner's opening turn with, and
     /// nothing else in the pinned build does. It is live only inside that burst,
     /// so it is not part of the exact state.
     automated_selector: bool,
+    /// The hits a repeat-per-kill swing has landed so far, while one is
+    /// running: the card dealing them, and each hit's pass number beside it.
+    swing_hits: Option<SwingHits>,
     /// The arguments of the hook currently dispatching, which is what the
     /// listener bodies' own tests read.
     hook_context: HookContext,
@@ -1183,6 +1197,20 @@ enum OrbEnd {
     Back,
 }
 
+impl PendingReward {
+    /// Whether a late listener let this card offer be rerolled before it was
+    /// rolled.
+    const fn rerollable(&self) -> bool {
+        match self {
+            Self::CardOffer { rerollable, .. }
+            | Self::CardOfferOfOtherColours { rerollable, .. }
+            | Self::CreatedCardOffer { rerollable, .. }
+            | Self::OwnCardOffer { rerollable, .. } => *rerollable,
+            _ => false,
+        }
+    }
+}
+
 /// A reward a listener put on a set that is still being built, before anything
 /// has been rolled for it.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1201,15 +1229,21 @@ enum PendingReward {
     CardOffer {
         room: crate::ResolvedRoom,
         count: usize,
+        /// A late listener (a driftwood) let the set's card offers be
+        /// rerolled while this one stood on it, not yet rolled.
+        rerollable: bool,
     },
     /// An offer off the character's own pool that no room paid for: regular
     /// base odds, and the run's drifting ones left alone.
-    OwnCardOffer { count: usize },
+    OwnCardOffer { count: usize, rerollable: bool },
     /// An offer whose creation the body named itself.
-    CreatedCardOffer(crate::CardCreation),
+    CreatedCardOffer {
+        creation: crate::CardCreation,
+        rerollable: bool,
+    },
     /// One card from each of this many character colours other than the
     /// owner's, rolled off the niche stream.
-    CardOfferOfOtherColours { colours: usize },
+    CardOfferOfOtherColours { colours: usize, rerollable: bool },
     /// A relic reward for a relic already marked wax.
     WaxRelic,
 }
@@ -1229,6 +1263,8 @@ struct RewardOptions {
     from_an_encounter: bool,
     /// Whether the creation is a card reward.
     is_card_reward: bool,
+    /// Whether the offer is the card reward a combat room pays for itself.
+    is_from_combat: bool,
 }
 
 impl Simulator {
@@ -1267,8 +1303,8 @@ impl Simulator {
             rest_option_owed_this_step: false,
             modifier: None,
             just_applied_power: None,
-            ignore_next_lent_stat: false,
             automated_selector: false,
+            swing_hits: None,
             hook_context: HookContext::none(),
             hook_screens_owed: None,
             last_screen_request: None,
@@ -3041,7 +3077,7 @@ impl Simulator {
             .collect();
         // The stream is built fresh from the relic's owner and identity for
         // every marking, so it reads the same dice each time it is asked.
-        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed()) as u32;
+        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed());
         let model_entry = self.state.run_player.relics[relic_index]
             .model_id
             .entry()
@@ -3986,7 +4022,7 @@ impl Simulator {
     /// so it is the same whenever the run walks in and never moves a run
     /// counter.
     fn event_rng(&self, model_id: &ModelId) -> Rng {
-        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed()) as u32;
+        let run_seed = sts2_rng::deterministic_hash(self.state.rng.string_seed());
         Rng::content_local(run_seed, 0, model_id.entry(), 0)
     }
 
@@ -4007,10 +4043,7 @@ impl Simulator {
             .ok_or_else(|| EngineError::new(ErrorCode::WrongDecisionContext))?
             .current_act;
         let mut options = Vec::new();
-        for group in groups
-            .iter()
-            .filter(|group| group.only_in_act.is_none_or(|only| only == act))
-        {
+        for group in groups.iter().filter(|group| group.acts.includes(act)) {
             let Some(relic) = rng
                 .next_item(&group.relics)
                 .map_err(|error| {
@@ -4254,8 +4287,8 @@ impl Simulator {
             .as_ref()
             .ok_or_else(|| EngineError::new(ErrorCode::WrongDecisionContext))?;
         let seed = sts2_rng::deterministic_hash(self.state.rng.string_seed())
-            .wrapping_add(i32::try_from(run.floor).unwrap_or(i32::MAX))
-            .wrapping_add(sts2_rng::deterministic_hash(model_id.entry())) as u32;
+            .wrapping_add(u64::from(run.floor))
+            .wrapping_add(sts2_rng::deterministic_hash(model_id.entry()));
         let mut rng = Rng::new(seed);
         let spawns = match &encounter.generation {
             crate::MonsterGeneration::Placed(spawns) => {
@@ -5136,16 +5169,13 @@ impl Simulator {
         let Some(combat) = self.state.combat.as_ref() else {
             return;
         };
-        // Every creature that joins with a monster model behind it is written
-        // down, which is every enemy and every pet. The enemies are written
-        // first, as the encounter lays them out, and a pet only ever joins after
-        // that, so the enemy side is walked first here whatever order the
-        // creature list happens to hold.
+        // Every enemy-side creature is written down, as the encounter lays them
+        // out and then as each one arrives. A player's pet is on the player's
+        // side and is never written down.
         let present: Vec<_> = combat
             .creatures
             .iter()
             .filter(|creature| creature.side == CombatSide::Enemy)
-            .chain(combat.creatures.iter().filter(|creature| creature.is_pet()))
             .map(|creature| (creature.id, creature.model_id.clone()))
             .collect();
         if let Some(room) = self
@@ -5232,6 +5262,9 @@ impl Simulator {
                 resume,
             });
         }
+        // The fight is on the stack above the event, and nothing of it stands
+        // yet.
+        self.dispatch_hooks(&[crate::HookEvent::BeforeRoomEntered], &HookContext::none())?;
         self.start_combat(combat)?;
         // What the option handed over is offered along with the fight's own, in
         // the order the reward screen sorts them.
@@ -5241,6 +5274,8 @@ impl Simulator {
 
     pub(crate) fn enter_room(&mut self, definition: RoomDefinition) -> Result<(), EngineError> {
         self.record_room_visit(&definition);
+        // The room is on the stack and nothing of it stands yet.
+        self.dispatch_hooks(&[crate::HookEvent::BeforeRoomEntered], &HookContext::none())?;
         let mut fill_the_chest = false;
         let active = match definition {
             RoomDefinition::Event {
@@ -5458,7 +5493,9 @@ impl Simulator {
             played_card: None,
             played_card_energy_spent: 0,
             played_card_play_index: 0,
+            played_card_play_count: 1,
             taking_extra_turn: false,
+            reserved_arrivals: Vec::new(),
             round: 1,
             side: CombatSide::Player,
             player: PlayerCombatState {
@@ -5492,6 +5529,7 @@ impl Simulator {
                 play_types_started_this_turn: Vec::new(),
                 powers_applied_this_turn: Vec::new(),
                 card_plays_finished: 0,
+                chosen_plays_finished_this_turn: 0,
                 plays_finished: Vec::new(),
                 attack_or_skill_plays_this_turn: 0,
                 attacks_played_this_turn: 0,
@@ -5537,6 +5575,7 @@ impl Simulator {
             rewards_open: false,
             finish_owed: false,
             next_choice_id: 1,
+            noted_opponents: Vec::new(),
             next_reward_set_id: 1,
             escaped_creatures: Vec::new(),
             escaped_stolen_gold: 0,
@@ -5732,7 +5771,25 @@ impl Simulator {
         slot: &crate::SpawnSlot,
         initial_state: Option<&str>,
         owner: Option<CreatureCombatId>,
+        hp_bonus: i32,
     ) -> Result<Option<CreatureCombatId>, EngineError> {
+        let Some(arrival) = self.reserve_arrival(model_id, slot, owner, hp_bonus)? else {
+            return Ok(None);
+        };
+        self.attach_arrival(arrival, initial_state, None).map(Some)
+    }
+
+    /// The first half of bringing a monster in: the slot it stands in, its
+    /// health rolled against the enemies already standing, and the next
+    /// identifier. Nothing is put down yet. A lay that finds no slot to lay
+    /// into rolls nothing.
+    fn reserve_arrival(
+        &mut self,
+        model_id: &ModelId,
+        slot: &crate::SpawnSlot,
+        owner: Option<CreatureCombatId>,
+        hp_bonus: i32,
+    ) -> Result<Option<crate::ReservedArrival>, EngineError> {
         let slots = self.encounter_slots();
         let slot_name = match slot {
             crate::SpawnSlot::Unslotted => None,
@@ -5777,12 +5834,42 @@ impl Simulator {
             .monster(model_id)
             .cloned()
             .ok_or_else(|| unsupported_content(model_id))?;
-        let initial_hp = self.roll_initial_hp(&monster, &spawned_hp)?;
+        let initial_hp = self.roll_initial_hp_shifted(&monster, &spawned_hp, hp_bonus)?;
         // The combat hands out the next identifier it has and moves on, so an
         // arrival never takes a dead creature's id.
         let next_id = self.combat()?.next_creature_id;
         self.combat_mut()?.next_creature_id += 1;
-        let id = CreatureCombatId::from(next_id);
+        Ok(Some(crate::ReservedArrival {
+            model_id: model_id.clone(),
+            id: CreatureCombatId::from(next_id),
+            hp: initial_hp,
+            slot,
+            slot_name,
+        }))
+    }
+
+    /// The second half: the arrival stands in the fight. What `prepare` names
+    /// runs on it once it stands and before its own arrival is settled, with
+    /// the caller as owner and the arrival as target.
+    fn attach_arrival(
+        &mut self,
+        arrival: crate::ReservedArrival,
+        initial_state: Option<&str>,
+        prepare: Option<(&[Command], &CommandContext)>,
+    ) -> Result<CreatureCombatId, EngineError> {
+        let crate::ReservedArrival {
+            model_id,
+            id,
+            hp: initial_hp,
+            slot,
+            slot_name,
+        } = arrival;
+        let model_id = &model_id;
+        let monster = self
+            .content
+            .monster(model_id)
+            .cloned()
+            .ok_or_else(|| unsupported_content(model_id))?;
         let opening = initial_state.map_or_else(|| monster.initial_state.clone(), str::to_owned);
         let logged = monster
             .state(&opening)
@@ -5826,9 +5913,12 @@ impl Simulator {
         if slot >= 0 {
             self.sort_enemies_by_slot()?;
         }
+        let mut joining_events = Vec::new();
+        if let Some((commands, caller)) = prepare {
+            self.run_commands(commands, &caller.clone().at(id), &mut joining_events)?;
+        }
         let player_id = self.combat()?.player.creature_id;
         let context = CommandContext::by(id).at(player_id);
-        let mut joining_events = Vec::new();
         self.run_commands(&monster.on_added, &context, &mut joining_events)?;
         // Record the arrival before later effects can remove the creature.
         // One multi-hit attack can spawn and kill an entire second phase
@@ -5852,7 +5942,7 @@ impl Simulator {
             self.roll_enemy_move(id)?;
         }
         self.refresh_intent_damage()?;
-        Ok(Some(id))
+        Ok(id)
     }
 
     /// The creature standing as this player's pet, alive or down.
@@ -6299,21 +6389,6 @@ impl Simulator {
         Ok(stopped || self.combat_is_over())
     }
 
-    /// One orb's passive, fired outside its turn trigger. A passive asked for
-    /// this way does nothing once the fight is over or ending.
-    fn run_orb_passive(
-        &mut self,
-        orb: sts2_core::OrbInstanceId,
-        target: Option<CreatureCombatId>,
-        context: &CommandContext,
-        events: &mut Vec<SemanticEvent>,
-    ) -> Result<bool, EngineError> {
-        if self.combat_is_over_or_ending() {
-            return Ok(false);
-        }
-        self.fire_orb_passive(orb, target, context, events)
-    }
-
     /// One orb's passive, run as its own turn trigger runs it: nothing short
     /// of the fight being gone stops it, so an orb behind the one whose passive
     /// won the fight still fires.
@@ -6368,6 +6443,23 @@ impl Simulator {
                 return Ok(());
             }
             let orb = frame.orbs[frame.index];
+            // An orb answers one of the two turn triggers and does nothing at
+            // all for the other: an orb that answers the opposite trigger is
+            // walked past without being counted. Every orb the build declares
+            // answers exactly one, and each answers it by counting its triggers
+            // and running its own passive that many times. The walk goes on past
+            // a passive that won the fight, and stops only once the fight is
+            // gone.
+            let answers = self
+                .orb_queue()?
+                .get(orb)
+                .and_then(|held| self.content.orb(&held.model_id))
+                .is_some_and(|definition| definition.turn_trigger == frame.trigger);
+            if !answers {
+                frame.index += 1;
+                frame.triggers_left = None;
+                continue;
+            }
             let triggers = if let Some(left) = frame.triggers_left {
                 left
             } else {
@@ -6382,21 +6474,7 @@ impl Simulator {
                 }
                 left
             };
-            // An orb answers one of the two turn triggers and does nothing at
-            // all for the other, so an orb that answers the opposite trigger is
-            // walked to, counted for, and then does nothing. Every orb the build
-            // declares answers exactly one, and each answers it by running its
-            // own passive. The walk goes on past a passive that won the fight,
-            // and stops only once the fight is gone.
-            let answers = self
-                .orb_queue()?
-                .get(orb)
-                .and_then(|held| self.content.orb(&held.model_id))
-                .is_some_and(|definition| definition.turn_trigger == frame.trigger);
             for remaining in (0..triggers).rev() {
-                if !answers {
-                    break;
-                }
                 let context = CommandContext::default();
                 self.fire_orb_passive(orb, None, &context, events)?;
                 if self.state.combat.is_none() && !self.suspended() {
@@ -6513,7 +6591,11 @@ impl Simulator {
             crate::OrbCmd::EvokeLast { dequeue } => {
                 self.evoke_orb_at(OrbEnd::Back, *dequeue, context, events)
             }
-            crate::OrbCmd::Passive { orb, target } => {
+            crate::OrbCmd::Passive {
+                orb,
+                target,
+                counted,
+            } => {
                 let target = match target {
                     Some(selector) => self
                         .resolve_creatures(selector.clone(), context)?
@@ -6522,7 +6604,12 @@ impl Simulator {
                     None => None,
                 };
                 let orbs = self.select_orbs(orb, context)?;
-                self.run_orb_passive_rounds(&orbs, target, context, events)
+                let rounds = OrbPassiveRounds {
+                    target,
+                    counted: *counted,
+                    repeats_left: None,
+                };
+                self.run_orb_passive_rounds(&orbs, rounds, context, events)
             }
             crate::OrbCmd::SetValue { orb, field, amount } => {
                 let amount = self.resolve_amount(amount, context)?;
@@ -6668,12 +6755,26 @@ impl Simulator {
         monster: &MonsterDefinition,
         taken: &[i32],
     ) -> Result<i32, EngineError> {
-        let candidates: Vec<i32> = (monster.min_initial_hp..=monster.max_initial_hp)
+        self.roll_initial_hp_shifted(monster, taken, 0)
+    }
+
+    /// The same roll over a range shifted by `bonus` at both ends.
+    fn roll_initial_hp_shifted(
+        &mut self,
+        monster: &MonsterDefinition,
+        taken: &[i32],
+        bonus: i32,
+    ) -> Result<i32, EngineError> {
+        let (minimum, maximum) = (
+            monster.min_initial_hp + bonus,
+            monster.max_initial_hp + bonus,
+        );
+        let candidates: Vec<i32> = (minimum..=maximum)
             .filter(|value| !taken.contains(value))
             .collect();
         let niche = self.state.rng.stream_mut(RunStream::Niche);
         let rolled = if candidates.is_empty() {
-            niche.next_int_range(monster.min_initial_hp, monster.max_initial_hp + 1)
+            niche.next_int_range(minimum, maximum + 1)
         } else {
             niche
                 .next_index(candidates.len())
@@ -6987,6 +7088,7 @@ impl Simulator {
                         no_upgrade_roll: true,
                         is_card_reward: true,
                         no_card_pool_modifications: true,
+                        is_from_combat: false,
                     },
                 };
                 let offered = self.create_card_reward_offer(&creation, true)?;
@@ -7044,6 +7146,7 @@ impl Simulator {
                     odds: crate::RarityOdds::Uniform,
                     from_an_encounter: false,
                     is_card_reward: false,
+                    is_from_combat: false,
                 })?;
                 let id = self.allocate_choice_id()?;
                 let run = self.state.run.as_mut().expect("event implies run");
@@ -7236,6 +7339,7 @@ impl Simulator {
                         no_upgrade_roll: true,
                         is_card_reward: false,
                         no_card_pool_modifications: true,
+                        is_from_combat: false,
                     },
                 };
                 self.run_out_of_combat(&Command::CardSelect(
@@ -7445,6 +7549,40 @@ impl Simulator {
             }
             // What the dummy pays out, where the fight was won rather than timed
             // out.
+            EventEffect::OfferWithTheFightsExtras {
+                rolled_potion_from,
+                relic,
+            } => {
+                let mut rewards = Vec::new();
+                if !rolled_potion_from.is_empty() {
+                    let rolled = self
+                        .state
+                        .player_rng
+                        .stream_mut(PlayerStream::Rewards)
+                        .next_index(rolled_potion_from.len())
+                        .map_err(|error| {
+                            EngineError::new(ErrorCode::InternalInvariant)
+                                .with_detail("event_potion", error.to_string())
+                        })?;
+                    if let Some(index) = rolled {
+                        rewards.push(
+                            crate::RewardFingerprint::of("potion")
+                                .with_model(rolled_potion_from[index].clone()),
+                        );
+                    }
+                }
+                // Named here and pulled as the set is populated.
+                if relic {
+                    rewards.push(crate::RewardFingerprint::of("relic"));
+                }
+                if let Some(combat) = self.state.combat.as_ref() {
+                    rewards.extend(combat.victory_rewards.iter().cloned());
+                }
+                if !rewards.is_empty() {
+                    self.run_out_of_combat(&Command::Rewards(RewardsCmd::OfferCustom(rewards)))?;
+                    finish_room = false;
+                }
+            }
             EventEffect::UnlessTheFightTimedOut(effects) => {
                 let timed_out = self
                     .state
@@ -7717,8 +7855,8 @@ impl Simulator {
             } else {
                 0.0
             };
-        // A white beast statue makes the answer yes whatever the roll came to,
-        // and the roll still happens.
+        // A white beast statue makes the answer yes before anything is rolled:
+        // no draw is spent and the odds stay where they were.
         let forced = self.potion_reward_is_forced();
         // The gold proportion, which only a monster room's purse is held to: an
         // elite and a boss pay their whole purse however many of their monsters
@@ -7746,10 +7884,11 @@ impl Simulator {
         };
         let (minimum_gold, maximum_gold) = (scaled(spec.minimum_gold), scaled(spec.maximum_gold));
         let rng = self.state.player_rng.stream_mut(PlayerStream::Rewards);
-        let potion_roll = rng
-            .next_float(0.0, 1.0)
-            .expect("ordered unit range is valid");
-        let include_potion = forced || potion_roll < potion_threshold;
+        let include_potion = forced
+            || rng
+                .next_float(0.0, 1.0)
+                .expect("ordered unit range is valid")
+                < potion_threshold;
         // A purse held to nothing is not built at all, so nothing is rolled for
         // it either.
         let gold = proportion
@@ -7764,11 +7903,14 @@ impl Simulator {
         let potion = include_potion
             .then(|| generate_reward_potion(rng, pools))
             .transpose()?;
-        self.state
-            .run_player
-            .odds
-            .record_potion_reward(include_potion);
-        let creation = reward_creation(pools, spec.rarity_odds, true);
+        if !forced {
+            self.state
+                .run_player
+                .odds
+                .record_potion_reward(include_potion);
+        }
+        let mut creation = reward_creation(pools, spec.rarity_odds, true);
+        creation.flags.is_from_combat = true;
         let offered_cards = self.create_cards(&creation)?;
         let listed = self.creation_pool_ids(&creation);
         let relic = if spec.offers_relic {
@@ -8814,10 +8956,7 @@ impl Simulator {
             .map(|card| &card.model_id);
         let mut candidates: Vec<usize> = (0..deck.len())
             .filter(|index| match offered_model {
-                None => self
-                    .content
-                    .pooled_card(&deck[*index].model_id)
-                    .is_some_and(|card| card.rarity != crate::CardRarity::Basic),
+                None => self.card_rarity(&deck[*index]) != crate::CardRarity::Basic,
                 Some(model) => deck[*index].model_id != *model,
             })
             .filter(removable)
@@ -9272,7 +9411,7 @@ impl Simulator {
         for index in indexes.into_iter().rev() {
             self.take_deck_card(index);
         }
-        self.gain_max_hp_out_of_combat(9);
+        self.gain_max_hp_out_of_combat(5);
     }
 
     /// Gaining maximum HP outside a fight: the maximum rises and the same amount
@@ -9565,6 +9704,7 @@ impl Simulator {
                     card_id: card.id,
                     target: announced_target,
                     play_index,
+                    play_count,
                 });
             // The card's own body is queued as one entry and resolved where it
             // is reached, because a pass of this loop can change what the next
@@ -9712,7 +9852,29 @@ impl Simulator {
     fn run_pending_reactions(&mut self) -> Result<(), EngineError> {
         let pending: Vec<Effect> = self.combat()?.queue.iter().cloned().collect();
         let mut events = Vec::new();
+        // A pass of a card's play that has not yet been announced does not
+        // begin once the fight is over: its body, its enchantment and its
+        // after-card-played pass are dropped, up to where the card is put down.
+        let mut unbegun_passes_of: Option<CardInstanceId> = None;
         for effect in pending {
+            match &effect {
+                Effect::AnnounceCardPlay { card_id, .. } => {
+                    unbegun_passes_of = Some(*card_id);
+                }
+                Effect::RunCardBody { card_id, .. }
+                | Effect::RunEnchantmentOnPlay { card_id, .. }
+                    if unbegun_passes_of == Some(*card_id) =>
+                {
+                    continue;
+                }
+                Effect::DispatchModifierHooks(crate::HookEvent::AfterCardPlayed)
+                    if unbegun_passes_of.is_some() =>
+                {
+                    continue;
+                }
+                Effect::MovePlayedCard { .. } => unbegun_passes_of = None,
+                _ => {}
+            }
             match effect {
                 // A command still reads its own dice; what it would hand over
                 // does not arrive, because each command that has an
@@ -9954,10 +10116,12 @@ impl Simulator {
                 card_id,
                 target,
                 play_index,
+                play_count,
             } => {
                 // Which pass of the play loop is running is written at the top
                 // of the pass, before anything the pass runs can read it.
                 self.combat_mut()?.played_card_play_index = play_index;
+                self.combat_mut()?.played_card_play_count = play_count;
                 let card = self
                     .combat()?
                     .player
@@ -10668,12 +10832,6 @@ impl Simulator {
         applier: Option<CreatureCombatId>,
         card: Option<CardInstanceId>,
     ) -> Result<(), EngineError> {
-        // A latch the caller sets and the next application spends, so that one
-        // lent stat goes unmatched.
-        if self.ignore_next_lent_stat {
-            self.ignore_next_lent_stat = false;
-            return Ok(());
-        }
         let Some(temporary) = &definition.temporary else {
             return Ok(());
         };
@@ -10797,7 +10955,8 @@ impl Simulator {
                 standing,
                 then,
                 context,
-            } => self.run_repeat_per_kill_rounds(owed, Some(standing), &then, &context, events),
+                landed,
+            } => self.run_repeat_per_kill(owed, Some(standing), landed, &then, &context, events),
             Loop::ForEachOrb {
                 rest,
                 then,
@@ -10812,7 +10971,16 @@ impl Simulator {
                 rest,
                 target,
                 context,
-            } => self.run_orb_passive_rounds(&rest, target, &context, events),
+                counted,
+                repeats_left,
+            } => {
+                let rounds = OrbPassiveRounds {
+                    target,
+                    counted,
+                    repeats_left,
+                };
+                self.run_orb_passive_rounds(&rest, rounds, &context, events)
+            }
             Loop::Channel { model_id } => self.finish_channel(&model_id, events),
             Loop::AutoPlayCards {
                 rest,
@@ -10899,6 +11067,49 @@ impl Simulator {
         Ok(false)
     }
 
+    /// `Command::RepeatPerKill` as the one attack it is: its passes' hits are
+    /// gathered, and once the last pass is done the swing is announced to the
+    /// after-attack listeners once, with every hit it landed. A swing a screen
+    /// interrupted carries what it has landed on its frame and is announced
+    /// where it finishes.
+    fn run_repeat_per_kill(
+        &mut self,
+        owed: usize,
+        interrupted: Option<Vec<CreatureCombatId>>,
+        landed: Vec<(usize, CreatureCombatId, DamageResult)>,
+        then: &[Command],
+        context: &CommandContext,
+        events: &mut Vec<SemanticEvent>,
+    ) -> Result<bool, EngineError> {
+        let pass = landed.iter().map(|(pass, _, _)| *pass).max().unwrap_or(0);
+        let outer = self.swing_hits.replace(SwingHits {
+            card: context.card,
+            pass,
+            landed,
+        });
+        let outcome = self.run_repeat_per_kill_rounds(owed, interrupted, then, context, events);
+        let swing = std::mem::replace(&mut self.swing_hits, outer);
+        let stopped = outcome?;
+        if self.queue_is_held() || self.state.combat.is_none() {
+            return Ok(stopped);
+        }
+        let announced = HookContext {
+            attack_results: swing.map(|swing| swing.landed).unwrap_or_default(),
+            ..HookContext::over(ValueContext {
+                dealer: context.owner,
+                card: context.card,
+                props: ValueProps::NONE,
+                ..ValueContext::default()
+            })
+        };
+        self.without_suspension(
+            "a listener answering for a finished swing",
+            true,
+            |engine| engine.dispatch_hooks(&[crate::HookEvent::AfterAttack], &announced),
+        )?;
+        Ok(stopped || self.combat_is_ending())
+    }
+
     /// `Command::RepeatPerKill`'s rounds. The enemies standing are listed
     /// before each round, and the kills among them are counted after it; a
     /// round a screen interrupted has not been counted yet, so its snapshot
@@ -10927,6 +11138,9 @@ impl Simulator {
         }
         while owed > 0 {
             owed -= 1;
+            if let Some(swing) = self.swing_hits.as_mut() {
+                swing.pass += 1;
+            }
             let standing: Vec<CreatureCombatId> = self
                 .combat()?
                 .creatures
@@ -10944,6 +11158,11 @@ impl Simulator {
                         standing,
                         then: then.to_vec(),
                         context: context.clone(),
+                        landed: self
+                            .swing_hits
+                            .as_ref()
+                            .map(|swing| swing.landed.clone())
+                            .unwrap_or_default(),
                     }),
                 ))))?;
                 return Ok(false);
@@ -11040,29 +11259,54 @@ impl Simulator {
 
     /// The passive over the orbs one call fires. The target was resolved before
     /// the pass began, so the frame carries it resolved.
+    ///
+    /// Each orb is asked whether the fight is over or ending once, before its
+    /// passive. A counted passive then fires as many times as the trigger-count
+    /// pass says, without asking again between them; an uncounted one fires
+    /// once.
     fn run_orb_passive_rounds(
         &mut self,
         orbs: &[sts2_core::OrbInstanceId],
-        target: Option<CreatureCombatId>,
+        rounds: OrbPassiveRounds,
         context: &CommandContext,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<bool, EngineError> {
         for (index, orb) in orbs.iter().enumerate() {
-            if self.run_orb_passive(*orb, target, context, events)? {
-                return Ok(true);
-            }
-            if self.queue_is_held() {
-                let rest = orbs[index + 1..].to_vec();
-                if !rest.is_empty() {
-                    self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::Loop(
-                        Box::new(crate::LoopFrame::OrbPassive {
-                            rest,
-                            target,
-                            context: context.clone(),
-                        }),
-                    ))))?;
+            let resumed = if index == 0 {
+                rounds.repeats_left
+            } else {
+                None
+            };
+            let repeats = match resumed {
+                Some(left) => left,
+                None if self.combat_is_over_or_ending() => continue,
+                None if rounds.counted => self.modify_orb_trigger_count(*orb)?,
+                None => 1,
+            };
+            for fired in 0..repeats {
+                if self.fire_orb_passive(*orb, rounds.target, context, events)? {
+                    return Ok(true);
                 }
-                return Ok(false);
+                if self.queue_is_held() {
+                    let left = repeats - fired - 1;
+                    let rest = if left > 0 {
+                        orbs[index..].to_vec()
+                    } else {
+                        orbs[index + 1..].to_vec()
+                    };
+                    if !rest.is_empty() {
+                        self.push_resume(Effect::Resume(Box::new(crate::ResumeFrame::Loop(
+                            Box::new(crate::LoopFrame::OrbPassive {
+                                rest,
+                                target: rounds.target,
+                                context: context.clone(),
+                                counted: rounds.counted,
+                                repeats_left: (left > 0).then_some(left),
+                            }),
+                        ))))?;
+                    }
+                    return Ok(false);
+                }
             }
         }
         Ok(false)
@@ -11496,6 +11740,7 @@ impl Simulator {
                 self.add_pending_reward(PendingReward::CardOffer {
                     room: *room,
                     count: usize::try_from(*count).unwrap_or(0),
+                    rerollable: false,
                 });
                 Ok(false)
             }
@@ -11519,6 +11764,7 @@ impl Simulator {
             Command::Rewards(RewardsCmd::AddOwnCardOffer { count }) => {
                 self.add_pending_reward(PendingReward::OwnCardOffer {
                     count: usize::try_from(*count).unwrap_or(0),
+                    rerollable: false,
                 });
                 Ok(false)
             }
@@ -11545,12 +11791,16 @@ impl Simulator {
                 Ok(false)
             }
             Command::Rewards(RewardsCmd::AddCreatedCardOffer { creation }) => {
-                self.add_pending_reward(PendingReward::CreatedCardOffer(creation.clone()));
+                self.add_pending_reward(PendingReward::CreatedCardOffer {
+                    creation: creation.clone(),
+                    rerollable: false,
+                });
                 Ok(false)
             }
             Command::Rewards(RewardsCmd::AddCardOfferOfOtherColours { colours }) => {
                 self.add_pending_reward(PendingReward::CardOfferOfOtherColours {
                     colours: *colours,
+                    rerollable: false,
                 });
                 Ok(false)
             }
@@ -11646,7 +11896,7 @@ impl Simulator {
             // lands on everything hittable — is the count of results that
             // killed what they landed on.
             Command::RepeatPerKill { then } => {
-                self.run_repeat_per_kill_rounds(1, None, then, context, events)
+                self.run_repeat_per_kill(1, None, Vec::new(), then, context, events)
             }
             // The local a body binds before it acts: the amount is worked out
             // once and the commands inside it read it back rather than working
@@ -11659,9 +11909,11 @@ impl Simulator {
             }
             // Every lasting debuff the target carries, copied as it stands and
             // taken before anything the body does can change what the target is
-            // carrying.
+            // carrying. A temporary debuff's amount is folded into the stat it
+            // lends, where that stat is among the copies too: the temporary
+            // power lends it again as it lands on whoever it is copied onto.
             Command::WithTargetsDebuffs { then } => {
-                let bound = match context.target {
+                let mut bound: Vec<crate::BoundDebuff> = match context.target {
                     Some(target) => self
                         .creature(target)?
                         .powers
@@ -11675,6 +11927,22 @@ impl Simulator {
                         .collect(),
                     None => Vec::new(),
                 };
+                let folds: Vec<(ModelId, i32)> = bound
+                    .iter()
+                    .filter_map(|debuff| {
+                        self.content
+                            .power(&debuff.model_id)
+                            .and_then(|definition| definition.temporary.as_ref())
+                            .map(|temporary| {
+                                (temporary.internally_applied_power.clone(), debuff.amount)
+                            })
+                    })
+                    .collect();
+                for (lent, amount) in folds {
+                    if let Some(stat) = bound.iter_mut().find(|debuff| debuff.model_id == lent) {
+                        stat.amount += amount;
+                    }
+                }
                 let mut inner = context.clone();
                 inner.bound_debuffs = bound;
                 self.run_commands(then, &inner, events)
@@ -11690,6 +11958,11 @@ impl Simulator {
             }
             // The local a body names a resolved set of creatures in, so that
             // what it damages and what it hands back are the same creatures.
+            Command::NoteOpponents => {
+                let standing = self.resolve_creatures(CreatureSelector::AllOpponents, context)?;
+                self.combat_mut()?.noted_opponents = standing;
+                Ok(false)
+            }
             Command::WithCreatures { creatures, then } => {
                 let bound = self.resolve_creatures(creatures.clone(), context)?;
                 let context = CommandContext {
@@ -11826,18 +12099,63 @@ impl Simulator {
                 monster,
                 slot,
                 initial_state,
+                hp_bonus,
                 then,
             } => {
                 if self.combat_is_ending() {
                     return Ok(false);
                 }
-                if let Some(arrival) =
-                    self.summon_monster(monster, slot, initial_state.as_deref(), context.owner)?
-                    && !then.is_empty()
+                let hp_bonus = match hp_bonus {
+                    Some(amount) => self.resolve_amount(amount, context)?,
+                    None => 0,
+                };
+                if let Some(arrival) = self.summon_monster(
+                    monster,
+                    slot,
+                    initial_state.as_deref(),
+                    context.owner,
+                    hp_bonus,
+                )? && !then.is_empty()
                 {
                     // What follows a creature being added, with the caller still
                     // the owner and what it just made the target.
                     let inner = context.clone().at(arrival);
+                    return self.run_commands(then, &inner, events);
+                }
+            }
+            CreatureCmd::Reserve { monster, slot } => {
+                if self.combat_is_ending() {
+                    return Ok(false);
+                }
+                if let Some(arrival) = self.reserve_arrival(monster, slot, context.owner, 0)? {
+                    self.combat_mut()?.reserved_arrivals.push(arrival);
+                }
+            }
+            CreatureCmd::AddReserved {
+                monster,
+                initial_state,
+                prepare,
+                then,
+            } => {
+                let held = self
+                    .combat()?
+                    .reserved_arrivals
+                    .iter()
+                    .position(|arrival| arrival.model_id == *monster);
+                let Some(index) = held else {
+                    return Ok(false);
+                };
+                let arrival = self.combat_mut()?.reserved_arrivals.remove(index);
+                if self.combat_is_ending() {
+                    return Ok(false);
+                }
+                let arrived = self.attach_arrival(
+                    arrival,
+                    initial_state.as_deref(),
+                    Some((prepare, context)),
+                )?;
+                if !then.is_empty() {
+                    let inner = context.clone().at(arrived);
                     return self.run_commands(then, &inner, events);
                 }
             }
@@ -11877,7 +12195,7 @@ impl Simulator {
                 if let Some(owner) = context.owner {
                     self.creature_mut(owner)?.last_spawned = Some(rolled.clone());
                 }
-                if let Some(arrival) = self.summon_monster(&rolled, slot, None, context.owner)?
+                if let Some(arrival) = self.summon_monster(&rolled, slot, None, context.owner, 0)?
                     && !then.is_empty()
                 {
                     let inner = context.clone().at(arrival);
@@ -11937,7 +12255,7 @@ impl Simulator {
                     return Ok(false);
                 }
                 let targets = self.resolve_creatures(target.clone(), context)?;
-                self.run_damage(
+                let landed = self.run_damage(
                     crate::DamageFrame {
                         targets,
                         dealer: context.owner,
@@ -11950,6 +12268,16 @@ impl Simulator {
                     },
                     events,
                 )?;
+                if let Some(swing) = self.swing_hits.as_mut()
+                    && swing.card == context.card
+                {
+                    let pass = swing.pass;
+                    swing.landed.extend(
+                        landed
+                            .into_iter()
+                            .map(|(target, result)| (pass, target, result)),
+                    );
+                }
                 // Settling the dead is the last thing a damaging call does, so a
                 // blow settles its own dead where it was struck from rather than
                 // leaving them for whatever the call happens to be nested
@@ -12028,11 +12356,22 @@ impl Simulator {
             {
                 return Ok(false);
             }
-            CreatureCmd::LoseBlock { target, amount } => {
+            CreatureCmd::LoseBlock {
+                target,
+                amount,
+                remover,
+            } => {
                 let amount = self.resolve_amount(amount, context)?;
                 if amount <= 0 {
                     return Ok(false);
                 }
+                let remover = match remover {
+                    Some(selector) => self
+                        .resolve_creatures(selector.clone(), context)?
+                        .first()
+                        .copied(),
+                    None => None,
+                };
                 for creature in self.resolve_creatures(target.clone(), context)? {
                     if !self.creature(creature)?.alive() {
                         continue;
@@ -12046,7 +12385,11 @@ impl Simulator {
                     if before > 0 && self.creature(creature)?.block <= 0 {
                         self.dispatch_hooks(
                             &[crate::HookEvent::AfterBlockBroken],
-                            &HookContext::about(creature),
+                            &HookContext::over(ValueContext {
+                                dealer: remover,
+                                target: Some(creature),
+                                ..ValueContext::default()
+                            }),
                         )?;
                     }
                 }
@@ -13408,13 +13751,19 @@ impl Simulator {
         let play_count = self.generate_play_count(&card, &definition, Some(target))?;
         self.combat_mut()?.player.first_plays_started_this_turn += 1;
         // A copy made to be played once, and a power, both go to no pile at all
-        // and leave the fight for good.
+        // and leave the fight for good. Otherwise an auto-played card is put
+        // down where a play of its own would put it: a particle wall back in
+        // the hand, a shining strike on top of the draw pile.
         let destination = if card.dupe
             || self.content.card_type_of(&card.fingerprint) == Some(crate::CardType::Power)
         {
             crate::PlayedCardDestination::Removed
         } else if exhausts {
             crate::PlayedCardDestination::Exhaust
+        } else if definition.returns_to_hand {
+            crate::PlayedCardDestination::Hand
+        } else if definition.returns_to_draw_pile_top {
+            crate::PlayedCardDestination::DrawPileTop
         } else {
             crate::PlayedCardDestination::Discard
         };
@@ -13444,6 +13793,10 @@ impl Simulator {
     /// what is owed is held on a frame of its own rather than queued up front
     /// the way a manual play queues its tail; the frame says how many passes
     /// are left and where in the interrupted one it stopped.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one loop over a pass's body, enchantment and announcement"
+    )]
     fn run_auto_play_body(
         &mut self,
         frame: &crate::AutoPlayFrame,
@@ -13492,6 +13845,11 @@ impl Simulator {
         let mut won = false;
         let mut step = step;
         for index in 0..play_count {
+            // A pass that has not begun does not begin once the fight is over
+            // or ending; one a screen interrupted runs on from where it stood.
+            if step == crate::AutoPlayStep::Body && self.combat_is_over_or_ending() {
+                break;
+            }
             let plays_left = play_count - index;
             let (card, commands) = self.card_as_this_pass_reads_it(&card, &commands);
             if step == crate::AutoPlayStep::Body {
@@ -14415,6 +14773,33 @@ impl Simulator {
         )
     }
 
+    /// Whether a screen of this kind spends its choice id before it asks
+    /// whether a question is needed at all: the hand, pile and plain-grid
+    /// screens do, so one the build answers on its own still spends one, and
+    /// the rewards grid does once it has cards to show. None does under an
+    /// automated selector. `None` when the fight is ending (for the hand
+    /// screens, also once it is over): those screens hand back nothing before
+    /// they reserve.
+    fn reserves_choice_id_up_front(&self, screen_kind: ChoiceScreen) -> Option<bool> {
+        if self.automated_selector
+            || !matches!(
+                screen_kind,
+                ChoiceScreen::Hand
+                    | ChoiceScreen::CombatPile
+                    | ChoiceScreen::CardGrid
+                    | ChoiceScreen::RewardGrid
+            )
+        {
+            return Some(false);
+        }
+        let ending = if matches!(screen_kind, ChoiceScreen::Hand) {
+            self.combat_is_over_or_ending()
+        } else {
+            self.combat_is_ending()
+        };
+        (!ending).then_some(true)
+    }
+
     /// The same, for a screen whose candidates are grouped into bundles and
     /// which is answered with one whole bundle.
     #[allow(clippy::too_many_arguments, reason = "one argument per screen field")]
@@ -14434,11 +14819,23 @@ impl Simulator {
         semantics.validate().map_err(|error| {
             EngineError::new(ErrorCode::InvalidConfig).with_detail("choice_semantics", error)
         })?;
+        let Some(up_front) = self.reserves_choice_id_up_front(screen_kind) else {
+            return Ok(Some(Vec::new()));
+        };
         let candidates = self.selection_candidates(source, filters, only)?;
+        // The rewards grid hands back an empty offer before it reserves.
+        let up_front =
+            up_front && !(matches!(screen_kind, ChoiceScreen::RewardGrid) && candidates.is_empty());
         if candidates.is_empty() {
+            if up_front {
+                self.allocate_choice_id()?;
+            }
             return Ok(Some(Vec::new()));
         }
         if !prefs.require_manual_confirmation && candidates.len() <= prefs.minimum {
+            if up_front {
+                self.allocate_choice_id()?;
+            }
             // A screen the build answers on its own, because the pile holds no
             // more than it asks for, hands the pile over as it stands. The
             // sort by rarity and name is the screen's own order, and no screen
@@ -14723,6 +15120,9 @@ impl Simulator {
                 let amount = self.resolve_amount(amount, context)?;
                 self.gain_stars(amount)?;
             }
+            PlayerCmd::CountAFinishedChosenPlay => {
+                self.combat_mut()?.player.chosen_plays_finished_this_turn += 1;
+            }
             // Losing stars refuses while the fight is ending and does nothing
             // else: the pool comes down and no listener hears about it.
             PlayerCmd::LoseStars(amount) => {
@@ -14773,25 +15173,16 @@ impl Simulator {
                 let creatures = self.resolve_creatures(targets.clone(), context)?;
                 let bound = context.bound_debuffs.clone();
                 for creature in creatures {
-                    for debuff in &bound {
-                        // A temporary power copied this way does not lend its
-                        // stat again: the copy is marked so that the next
-                        // application of it lends nothing.
-                        let temporary = self
-                            .content
-                            .power(&debuff.model_id)
-                            .is_some_and(|definition| definition.temporary.is_some());
-                        let outer = std::mem::replace(&mut self.ignore_next_lent_stat, temporary);
-                        let applied = self.apply_power(
+                    // A copy that folded down to nothing is not worked on.
+                    for debuff in bound.iter().filter(|debuff| debuff.amount != 0) {
+                        self.apply_power(
                             creature,
                             debuff.applier,
                             &debuff.model_id,
                             debuff.amount,
                             None,
                             context.card,
-                        );
-                        self.ignore_next_lent_stat = outer;
-                        applied?;
+                        )?;
                     }
                 }
             }
@@ -14987,6 +15378,36 @@ impl Simulator {
             }
             PowerCmd::SetLatch(value) => {
                 self.with_listening_power(context, |instance| instance.latched = *value)?;
+            }
+            PowerCmd::Trigger { target, power } => {
+                for creature in self.resolve_creatures(target.clone(), context)? {
+                    let Some(instance) = self
+                        .creature(creature)?
+                        .powers
+                        .iter()
+                        .find(|held| held.model_id == *power)
+                        .map(|held| held.instance)
+                    else {
+                        continue;
+                    };
+                    let listener = Listener {
+                        owner: creature,
+                        source: ListenerSource::Power,
+                        power_instance: Some(instance),
+                        model_id: power.clone(),
+                    };
+                    let bodies: Vec<Vec<Command>> = self
+                        .content
+                        .listener_hooks(&listener)
+                        .iter()
+                        .filter(|hook| hook.event == crate::HookEvent::PowerTriggered)
+                        .map(|hook| hook.commands.clone())
+                        .collect();
+                    let triggered = self.listener_command_context(&listener);
+                    for body in bodies {
+                        self.run_commands(&body, &triggered, events)?;
+                    }
+                }
             }
             // The three calls a body makes on its own per-play tally. Each acts
             // on the one instance whose listener is running.
@@ -15278,6 +15699,9 @@ impl Simulator {
             // The particle wall's own answer: the base one, and the hand
             // wherever that would have been the discard pile.
             crate::PlayedCardDestination::Hand
+        } else if definition.returns_to_draw_pile_top {
+            // A shining strike's, the same way, onto the draw pile.
+            crate::PlayedCardDestination::DrawPileTop
         } else {
             crate::PlayedCardDestination::Discard
         };
@@ -15446,7 +15870,7 @@ impl Simulator {
         // does, whatever order the listeners themselves came in.
         rules.sort_by_key(|(rule, _)| rule.runs_late());
         let plays_this_turn =
-            i32::try_from(combat.player.cards_played_this_turn).unwrap_or(i32::MAX);
+            i32::try_from(combat.player.chosen_plays_finished_this_turn).unwrap_or(i32::MAX);
         let costs: Vec<(CardInstanceId, i32)> = [
             PileName::Draw,
             PileName::Hand,
@@ -15548,9 +15972,9 @@ impl Simulator {
                         cost
                     }
                 }
-                // The card is free while its owner has played fewer cards this
-                // turn than the rule is worth. The count is the plays the
-                // player chose, which is what the build's own tally counts.
+                // The card is free while fewer of the plays its owner chose
+                // this turn have finished than the rule is worth, which is what
+                // the build's own tally counts.
                 crate::CardCostRule::FreeInHandOrPlayUnderCount => {
                     if matches!(pile, PileName::Hand | PileName::Play)
                         && i64::from(plays_this_turn) < i64::from(*amount)
@@ -16278,6 +16702,17 @@ impl Simulator {
         if selector == CreatureSelector::Bound {
             return Ok(context.bound_creatures.clone());
         }
+        if selector == CreatureSelector::Noted {
+            let Ok(combat) = self.combat() else {
+                return Ok(Vec::new());
+            };
+            return Ok(combat
+                .noted_opponents
+                .iter()
+                .copied()
+                .filter(|id| combat.creatures.iter().any(|c| c.id == *id && c.alive()))
+                .collect());
+        }
         // The creatures the evoked orb named, less any that has since gone down.
         if selector == CreatureSelector::EvokedOrbTargets {
             let announced = self.hook_context.evoked_orb_targets.clone();
@@ -16321,6 +16756,7 @@ impl Simulator {
             | CreatureSelector::DoomedAmongOpponents(_)
             | CreatureSelector::ListeningPowerTarget
             | CreatureSelector::Bound
+            | CreatureSelector::Noted
             | CreatureSelector::EvokedOrbTargets
             | CreatureSelector::TargetOrRandomOpponent
             // Only a `PowerRef` names it, and it is resolved there.
@@ -16824,6 +17260,23 @@ impl Simulator {
                     .map_or(0, |creature| creature.power_amount(&model_id.to_string())),
                 None => 0,
             },
+            Count::DamageDealerOrPetOwnerPower(model_id) => {
+                let carrier = self.hook_context.value.dealer.and_then(|dealer| {
+                    let creature = self.creature(dealer).ok()?;
+                    if creature
+                        .powers
+                        .iter()
+                        .any(|power| power.model_id == *model_id)
+                    {
+                        Some(dealer)
+                    } else {
+                        creature.pet_owner
+                    }
+                });
+                carrier
+                    .and_then(|carrier| self.creature(carrier).ok())
+                    .map_or(0, |creature| creature.power_amount(&model_id.to_string()))
+            }
             // The relic is looked for on the player behind the dealer: a relic
             // belongs to the player, so this only ever answers for a blow the
             // player is dealing.
@@ -17495,6 +17948,7 @@ impl Simulator {
         Ok(match condition {
             // Whether the pet is standing at all, which is the whole of the
             // test: it is there, and it is alive.
+            Condition::CombatIsNotOverOrEnding => !self.combat_is_over_or_ending(),
             Condition::PetIsStanding => context
                 .owner
                 .and_then(|owner| self.pet_of(owner))
@@ -17770,6 +18224,11 @@ impl Simulator {
                     );
                 current * 100 > maximum * *percent
             }
+            Condition::CurrentRoomCountAtMost(most) => self
+                .state
+                .run
+                .as_ref()
+                .is_some_and(|run| run.room_count() <= *most),
             Condition::CurrentMapPointIsUnknown => self.state.run.as_ref().is_some_and(|run| {
                 run.map()
                     .points
@@ -17909,6 +18368,15 @@ impl Simulator {
                 .reward_options
                 .as_ref()
                 .is_some_and(|options| options.is_card_reward),
+            Condition::CardOfferIsFromCombat => self
+                .reward_options
+                .as_ref()
+                .is_some_and(|options| options.is_from_combat),
+            Condition::OfferedRewardsHoldACard => self.current_reward_set()?.is_some_and(|set| {
+                set.rewards
+                    .iter()
+                    .any(|reward| reward.fingerprint.reward_type == "card")
+            }),
             Condition::CurrentRoomIs(room) => {
                 let point_type = match room {
                     crate::ResolvedRoom::Monster => crate::MapPointType::Monster,
@@ -18012,10 +18480,18 @@ impl Simulator {
                         card.enchantment_status == crate::EnchantmentStatus::Normal
                     })
             }
-            Condition::SourceCardTargetsAllEnemies => self
-                .source_card(context)
-                .and_then(|card| self.content.card(&card.fingerprint.model_id).cloned())
-                .is_some_and(|definition| definition.target == crate::TargetType::AllEnemies),
+            // What the card aims at as worked out, so a Shiv under a fan of
+            // knives counts as aimed at everything.
+            Condition::SourceCardTargetsAllEnemies => {
+                self.source_card(context).is_some_and(|card| {
+                    self.content
+                        .card(&card.fingerprint.model_id)
+                        .is_some_and(|definition| {
+                            self.card_target(definition, &card.fingerprint)
+                                == crate::TargetType::AllEnemies
+                        })
+                })
+            }
             Condition::SourceCardIsUpgraded => self
                 .source_card(context)
                 .is_some_and(|card| card.fingerprint.upgrade_level > 0),
@@ -18214,6 +18690,9 @@ impl Simulator {
                     })
             }
             Condition::TargetHasPower(model_id) => self.carries_power(context.target, model_id),
+            Condition::PowerTargetHasPower(model_id) => {
+                self.carries_power(self.hook_context.value.target, model_id)
+            }
             Condition::OwnerHasPower(model_id) => self.carries_power(context.owner, model_id),
             Condition::DamageDealerHasPower(model_id) => {
                 self.carries_power(self.hook_context.value.dealer, model_id)
@@ -18565,6 +19044,33 @@ impl Simulator {
                         fingerprint: fingerprint.clone(),
                     })
                     .collect())
+            }
+            CardSelector::ShuffledFromDeckEnchantableBy {
+                enchantment,
+                take,
+                stream,
+            } => {
+                let Some(definition) = self.content.enchantment(enchantment) else {
+                    return Err(unsupported_content(enchantment));
+                };
+                let take = usize::try_from(self.resolve_amount(take, context)?.max(0)).unwrap_or(0);
+                let mut candidates: Vec<ChosenCard> = self
+                    .state
+                    .run_player
+                    .deck
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, fingerprint)| {
+                        self.content.can_enchant(definition, fingerprint, true)
+                    })
+                    .map(|(index, fingerprint)| ChosenCard::Deck {
+                        index,
+                        fingerprint: fingerprint.clone(),
+                    })
+                    .collect();
+                self.shuffle_on(*stream, &mut candidates)?;
+                candidates.truncate(take);
+                Ok(candidates)
             }
             CardSelector::DeckCards { filters } => Ok(self
                 .state
@@ -19031,6 +19537,13 @@ impl Simulator {
                         .card(&card.fingerprint.model_id)
                         .is_some_and(|definition| definition.costs_x)
             }
+            CardFilter::EtherealAndPlayable => {
+                self.card_is_ethereal(card)
+                    && self
+                        .content
+                        .card(&card.fingerprint.model_id)
+                        .is_some_and(|definition| !definition.unplayable)
+            }
             CardFilter::CostsNothingNow => {
                 card.energy_cost == 0
                     && self
@@ -19061,6 +19574,7 @@ impl Simulator {
             | CardFilter::NotEthereal
             | CardFilter::CostsEnergyNow
             | CardFilter::CostsSomethingNowOrX
+            | CardFilter::EtherealAndPlayable
             | CardFilter::CostsNothingNow
             | CardFilter::CostsAnything
             | CardFilter::CostsAnythingNow
@@ -19099,6 +19613,12 @@ impl Simulator {
             CardFilter::NotInnate => !self
                 .content
                 .card_has_keyword(fingerprint, crate::CardKeyword::Innate),
+            CardFilter::NotInnateOfType(card_type) => {
+                self.content.card_type_of(fingerprint) == Some(*card_type)
+                    && !self
+                        .content
+                        .card_has_keyword(fingerprint, crate::CardKeyword::Innate)
+            }
             CardFilter::NotOfType(card_type) => {
                 definition.is_some() && self.content.card_type_of(fingerprint) != Some(*card_type)
             }
@@ -19432,12 +19952,16 @@ impl Simulator {
         self.state.run_player.potions[slot] = None;
         // A potion that uses itself is still a potion used: the before and
         // after passes run around its body, inline, as for any other, and the
-        // hand is looked at for being empty once it is done.
+        // hand is looked at for being empty once it is done — unless its owner
+        // is still dead behind it.
         self.announce_play_target(crate::HookEvent::BeforePotionUsed, target_id)?;
         let context = CommandContext::by(target_id).at(target_id);
         self.run_commands(&definition.effects, &context, events)?;
-        self.dispatch_hooks(&[crate::HookEvent::AfterPotionUsed], &HookContext::none())?;
-        self.check_for_empty_hand()?;
+        let player_id = self.combat()?.player.creature_id;
+        if self.creature(player_id)?.alive() {
+            self.dispatch_hooks(&[crate::HookEvent::AfterPotionUsed], &HookContext::none())?;
+            self.check_for_empty_hand()?;
+        }
         self.emit(
             "combat.use_potion",
             BTreeMap::from([("potion".to_owned(), json!(model_id.to_string()))]),
@@ -19744,7 +20268,7 @@ impl Simulator {
     /// stops it where it stands: the build reads the answer off whether the
     /// fight is still in progress, in the guard around the next step, so a fight
     /// won at the end of a turn never reaches the enemy's. The points are the
-    /// two inside phase one, the one the turn start makes before the enemy side
+    /// three inside phase one, the one the turn start makes before the enemy side
     /// acts, the one the enemy turn makes after each enemy, the one the enemy
     /// turn end makes before it switches back, and the one the turn start makes
     /// as the player's own turn opens. Phase two makes none of its own.
@@ -19863,9 +20387,11 @@ impl Simulator {
     /// the before-turn-end listeners, and what the hand does to whoever still
     /// holds it. Nothing has been put down yet.
     ///
-    /// Two of the chain's win checks are here: one right after the
+    /// Three of the chain's win checks are here: one right after the
     /// before-turn-end passes, which is what keeps the hand from acting in a
-    /// fight that is already over, and one as the last thing the phase does.
+    /// fight that is already over, one once the turn end is done, which keeps
+    /// a fight it won from reaching the pass before the flush, and one as the
+    /// last thing the phase does.
     fn end_player_turn_phase_one(
         &mut self,
         from: crate::EndTurnPhaseOneStep,
@@ -19914,6 +20440,7 @@ impl Simulator {
                     }
                     CombatOutcome::Unsettled
                 }
+                Step::TurnEndWinCheck => self.check_win_condition()?,
                 Step::BeforeFlush => {
                     self.dispatch_hooks(
                         &[
@@ -20093,20 +20620,29 @@ impl Simulator {
     }
 
     /// Whether an extra player turn is owed, which the build asks of every
-    /// player just as the player side is about to hand over. The only listener
-    /// that answers it is a relic, and it answers off what it declares rather
-    /// than a body of its own.
+    /// player just as the player side is about to hand over. A relic answers
+    /// off what it declares rather than a body of its own, and a power answers
+    /// yes while it stands on the player with stacks left.
     fn owes_an_extra_player_turn(&self) -> Result<bool, EngineError> {
         let turn = self.combat()?.player.turn;
-        Ok(self.state.run_player.relics.iter().any(|relic| {
-            !relic.melted
-                && !relic.latched
+        let player_id = self.combat()?.player.creature_id;
+        let by_a_power = self.creature(player_id)?.powers.iter().any(|instance| {
+            instance.amount > 0
                 && self
                     .content
-                    .relic(&relic.model_id)
-                    .and_then(|definition| definition.grants_an_extra_turn.as_ref())
-                    .is_some_and(|rule| !self.owner_has_played_a_card_this_turn(turn, rule))
-        }))
+                    .power(&instance.model_id)
+                    .is_some_and(|definition| definition.grants_an_extra_turn)
+        });
+        Ok(by_a_power
+            || self.state.run_player.relics.iter().any(|relic| {
+                !relic.melted
+                    && !relic.latched
+                    && self
+                        .content
+                        .relic(&relic.model_id)
+                        .and_then(|definition| definition.grants_an_extra_turn.as_ref())
+                        .is_some_and(|rule| !self.owner_has_played_a_card_this_turn(turn, rule))
+            }))
     }
 
     /// Whether the player has played a card this turn, as the extra-turn relic
@@ -20448,21 +20984,41 @@ impl Simulator {
     /// turn start to run while the question is still standing; the auto-pre-play
     /// phase is what waits, because it opens by waiting for the setup to
     /// finish.
+    /// Whether a creature takes part in the turn a hook context is about: it
+    /// stands on that side, and on an extra turn it is the player.
+    fn takes_part(
+        &self,
+        creature: CreatureCombatId,
+        context: &HookContext,
+    ) -> Result<bool, EngineError> {
+        Ok(context.side == Some(self.creature(creature)?.side)
+            && (!context.players_only || creature == self.combat()?.player.creature_id))
+    }
+
+    /// The context a side's turn start runs its passes with. An extra turn is
+    /// the players' alone: what stands beside them neither starts a turn nor
+    /// loses its block.
+    fn turn_start_context(&self, side: CombatSide) -> Result<HookContext, EngineError> {
+        Ok(HookContext {
+            players_only: side == CombatSide::Player && self.combat()?.taking_extra_turn,
+            ..HookContext::side(side)
+        })
+    }
+
     fn start_turn(&mut self, events: &mut Vec<SemanticEvent>) -> Result<(), EngineError> {
         let side = self.combat()?.side;
         // Nobody is in a phase while the sides are handing over.
         self.combat_mut()?.player.phase = crate::PlayerTurnPhase::None;
-        self.snapshot_power_amounts(side)?;
-        self.dispatch_hooks(
-            &[crate::HookEvent::BeforeSideTurnStart],
-            &HookContext::side(side),
-        )?;
+        let context = self.turn_start_context(side)?;
+        self.snapshot_power_amounts(&context)?;
+        self.dispatch_hooks(&[crate::HookEvent::BeforeSideTurnStart], &context)?;
         if side == CombatSide::Player {
             {
                 let combat = self.combat_mut()?;
                 combat.player.phase = crate::PlayerTurnPhase::Start;
                 combat.player.ready_to_end_turn = false;
                 combat.player.cards_played_this_turn = 0;
+                combat.player.chosen_plays_finished_this_turn = 0;
                 combat.player.cards_discarded_this_turn = 0;
                 combat.player.attacks_played_this_turn = 0;
                 combat.player.attack_or_skill_plays_this_turn = 0;
@@ -20496,7 +21052,7 @@ impl Simulator {
                 self.roll_enemy_moves()?;
             }
         }
-        self.clear_block_for_side(side)?;
+        self.clear_block_for_side(&context)?;
         let setup_pending = if side == CombatSide::Player {
             self.run_setup_player_turn(
                 crate::SetupPlayerTurnStep::EnergyReset,
@@ -20558,12 +21114,13 @@ impl Simulator {
         setup_pending: bool,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<(), EngineError> {
+        let context = self.turn_start_context(side)?;
         self.dispatch_hooks(
             &[
                 crate::HookEvent::AfterSideTurnStart,
                 crate::HookEvent::AfterSideTurnStartLate,
             ],
-            &HookContext::side(side),
+            &context,
         )?;
         // The orbs that fire as a turn opens, once for every player starting
         // one, after the side's own listeners and before the auto-pre-play
@@ -20666,6 +21223,9 @@ impl Simulator {
                 )?,
                 Step::AutoPrePlay => {
                     self.combat_mut()?.player.phase = crate::PlayerTurnPhase::AutoPrePlay;
+                    self.check_for_empty_hand()?;
+                }
+                Step::AutoPrePlayHooks => {
                     self.dispatch_hooks(
                         &[
                             crate::HookEvent::AfterAutoPrePlayPhaseEnteredEarly,
@@ -20762,15 +21322,19 @@ impl Simulator {
     /// loop is also the wider of the two: it has no test on it at all, so a
     /// player who kept their block because it is their first turn is announced
     /// anyway.
-    fn clear_block_for_side(&mut self, side: CombatSide) -> Result<(), EngineError> {
+    fn clear_block_for_side(&mut self, context: &HookContext) -> Result<(), EngineError> {
+        let side = context.side.unwrap_or(CombatSide::Player);
         let player_id = self.combat()?.player.creature_id;
         let first_turn = self.combat()?.player.turn <= 1;
         let creatures: Vec<_> = self
             .combat()?
             .creatures
             .iter()
-            .filter(|creature| creature.side == side && creature.alive())
+            .filter(|creature| creature.alive())
             .map(|creature| creature.id)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|id| self.takes_part(*id, context).unwrap_or(false))
             .collect();
         // A player keeps whatever block they walked into the fight with on
         // their first turn. The test is on the creature, not on the side, so
@@ -20803,6 +21367,10 @@ impl Simulator {
     /// shuffled together, which is what a body that asks for a shuffle outright
     /// gets. `shuffle_if_necessary` is the guarded form the draw runs itself.
     fn shuffle_whole_draw_pile(&mut self) -> Result<(), EngineError> {
+        // A fight that is over or ending shuffles nothing.
+        if self.combat_is_over_or_ending() {
+            return Ok(());
+        }
         let standing = self.combat()?.player.piles.clone();
         let mut draw = {
             let combat = self.combat_mut()?;
@@ -20820,9 +21388,30 @@ impl Simulator {
         // told that this is not the fight's opening shuffle, and the
         // after-shuffle pass follows it.
         self.dispatch_shuffle_order_pass(&standing)?;
+        self.announce_shuffled_cards(&standing)?;
         // The after-shuffle pass is the last thing a shuffle does, once every
         // card is standing in the draw pile.
         self.dispatch_hooks(&[crate::HookEvent::AfterShuffle], &HookContext::none())
+    }
+
+    /// The cards a shuffle brought over from the discard pile each change
+    /// piles, announced in the order they now stand in once the whole draw pile
+    /// is down. The cards that were in the draw pile already stay where they
+    /// were and say nothing.
+    fn announce_shuffled_cards(&mut self, standing: &crate::Piles) -> Result<(), EngineError> {
+        let moved: Vec<CardInstanceId> = self
+            .combat()?
+            .player
+            .piles
+            .draw
+            .iter()
+            .filter(|card| standing.discard.iter().any(|before| before.id == card.id))
+            .map(|card| card.id)
+            .collect();
+        for card_id in moved {
+            self.announce_card_changed_piles(card_id, Some(PileName::Discard))?;
+        }
+        Ok(())
     }
 
     /// An empty draw pile takes the discard pile, shuffled. Returns whether the
@@ -20832,7 +21421,7 @@ impl Simulator {
         if !self.combat()?.player.piles.draw.is_empty() {
             return Ok(true);
         }
-        if self.combat()?.player.piles.discard.is_empty() {
+        if self.combat()?.player.piles.discard.is_empty() || self.combat_is_over_or_ending() {
             return Ok(false);
         }
         let standing = self.combat()?.player.piles.clone();
@@ -20847,6 +21436,7 @@ impl Simulator {
             .shuffle(&mut draw);
         self.combat_mut()?.player.piles.draw = draw;
         self.dispatch_shuffle_order_pass(&standing)?;
+        self.announce_shuffled_cards(&standing)?;
         self.dispatch_hooks(&[crate::HookEvent::AfterShuffle], &HookContext::none())?;
         // A listener on the shuffle may have taken back what the shuffle put
         // down — a Stratagem with as many stacks as the pile has cards empties
@@ -22482,6 +23072,10 @@ impl Simulator {
                 .collect(),
             disallow_skipping: false,
         });
+        self.dispatch_hooks(
+            &[crate::HookEvent::BeforeCombatRewardOffered],
+            &HookContext::none(),
+        )?;
         self.emit("reward.offered", BTreeMap::new(), events);
         self.push_checkpoint("reward.offered")?;
         // A set with nothing on it is complete the moment it is put up, so the
@@ -23644,6 +24238,10 @@ impl Simulator {
         card: Option<CardInstanceId>,
         events: &mut Vec<SemanticEvent>,
     ) -> Result<i32, EngineError> {
+        // A creature that has died gains nothing, and nothing hears of it.
+        if !self.creature(target)?.alive() {
+            return Ok(0);
+        }
         let amount = self.modify_block(target, amount, props, card)?;
         self.creature_mut(target)?.block += amount.max(0);
         // The block-gain history takes a gain that came to something. Only a
@@ -24230,12 +24828,16 @@ impl Simulator {
                 damage: Some(result),
             };
             if !frame.given {
-                // Block broken, over the combat list, carrying only the creature
-                // it happened to.
+                // Block broken, over the combat list, carrying the creature it
+                // happened to and the one whose blow broke it.
                 if result.block_broken() {
                     self.dispatch_hooks(
                         &[crate::HookEvent::AfterBlockBroken],
-                        &HookContext::about(target),
+                        &HookContext::over(ValueContext {
+                            dealer: frame.dealer,
+                            target: Some(target),
+                            ..ValueContext::default()
+                        }),
                     )?;
                 }
                 // The blow is written into the damage history, and the count of
@@ -24404,6 +25006,13 @@ impl Simulator {
         {
             self.combat_mut()?.fatal_kill_this_play = true;
         }
+        // Read while the dead still carry their powers: a minion is no primary
+        // enemy.
+        let primary_enemy_died = newly_dead.iter().any(|id| {
+            self.creature(*id).is_ok_and(|creature| {
+                creature.side == CombatSide::Enemy && !self.is_secondary_enemy(creature)
+            })
+        });
         for id in &reviving {
             if !self.creature(*id)?.death_handled {
                 self.hold_dead_creature(*id)?;
@@ -24499,6 +25108,29 @@ impl Simulator {
                 || reviving.contains(&creature.id)
         });
         self.emit("creature.death", BTreeMap::new(), events);
+        // A primary enemy going down with nothing but minions left beside it
+        // takes them with it, inside its own death, so nothing that runs after
+        // the blow finds one standing. Their deaths settle the same way.
+        if primary_enemy_died {
+            let left: Vec<CreatureCombatId> = self
+                .combat()?
+                .creatures
+                .iter()
+                .filter(|creature| creature.side == CombatSide::Enemy && creature.alive())
+                .map(|creature| creature.id)
+                .collect();
+            let only_minions = !left.is_empty()
+                && left.iter().all(|id| {
+                    self.creature(*id)
+                        .is_ok_and(|creature| self.is_secondary_enemy(creature))
+                });
+            if only_minions {
+                for id in left {
+                    self.creature_mut(id)?.current_hp = 0;
+                }
+                return self.cleanup_dead(events);
+            }
+        }
         self.combat_is_won()
     }
 
@@ -25179,11 +25811,9 @@ impl Simulator {
                     .and_then(|run| run.active_room.as_ref()),
                 Some(ActiveRoom::Shop { .. })
             ),
-            crate::HookCondition::OwnerIsParticipant => {
-                context.side == Some(self.creature(owner)?.side)
-            }
+            crate::HookCondition::OwnerIsParticipant => self.takes_part(owner, context)?,
             crate::HookCondition::OwnerIsNotParticipant => {
-                context.side.is_some() && context.side != Some(self.creature(owner)?.side)
+                context.side.is_some() && !self.takes_part(owner, context)?
             }
             // The orb belongs to the listener's own owner. Every orb in a fight
             // belongs to the one player here, so what this asks is that the
@@ -25451,6 +26081,11 @@ impl Simulator {
                     if context.moved_card == Some(card_id))
             }
             crate::HookCondition::PlayerSideTurn => context.side == Some(CombatSide::Player),
+            crate::HookCondition::PlayersTakingAnExtraTurn => self
+                .state
+                .combat
+                .as_ref()
+                .is_some_and(|combat| combat.taking_extra_turn),
             crate::HookCondition::EnemySideTurn => context.side == Some(CombatSide::Enemy),
             crate::HookCondition::OwnerSideIsActing => {
                 self.creature(owner)?.side == self.combat()?.side
@@ -25461,6 +26096,11 @@ impl Simulator {
                 .combat
                 .as_ref()
                 .is_some_and(|combat| combat.played_card_was_chosen),
+            crate::HookCondition::LastPassOfThePlay => {
+                self.state.combat.as_ref().is_some_and(|combat| {
+                    combat.played_card_play_index + 1 >= combat.played_card_play_count
+                })
+            }
             crate::HookCondition::PlayedCardIsOfType(card_type) => {
                 context.played_card_type == Some(*card_type)
             }
@@ -25682,6 +26322,11 @@ impl Simulator {
             crate::HookCondition::OwnerTakesDamage | crate::HookCondition::PowerAppliedToOwner => {
                 value.target == Some(owner)
             }
+            // The block-broken pass names the creature whose block broke as
+            // its target.
+            crate::HookCondition::OwnersBlockBroke => {
+                value.target.is_some_and(|broken| broken == owner)
+            }
             crate::HookCondition::PowerAppliedToOwnerIs(model_id) => {
                 value.target == Some(owner)
                     && value
@@ -25706,13 +26351,15 @@ impl Simulator {
             crate::HookCondition::OwnerDealtFullyBlockedDamage => {
                 value.dealer == Some(owner) && value.damage.is_some_and(DamageResult::fully_blocked)
             }
-            crate::HookCondition::OwnerBrokeAnOpponentsBlock => {
-                value.dealer == Some(owner)
-                    && value.target.is_some_and(|target| {
-                        self.creature(target)
-                            .is_ok_and(|creature| creature.side == CombatSide::Enemy)
-                    })
-                    && value.damage.is_some_and(DamageResult::block_broken)
+            crate::HookCondition::OwnerOrPetBrokeANonPlayersBlock => {
+                let by_owner = value.dealer.is_some_and(|breaker| {
+                    breaker == owner
+                        || self
+                            .creature(breaker)
+                            .is_ok_and(|creature| creature.pet_owner == Some(owner))
+                });
+                let player = self.combat()?.player.creature_id;
+                by_owner && value.target.is_some_and(|target| target != player)
             }
             // Block off a card belongs to whoever played it; block from
             // anywhere else to whoever is gaining it.
@@ -26333,30 +26980,43 @@ impl Simulator {
         // adds each card in turn, so the order they land in is the caller's
         // rather than the order the piles happened to hold them in. A body that
         // shuffled its selection therefore hands the cards over shuffled.
+        //
+        // A card bound for a hand that already holds the most cards a hand can
+        // goes to the discard pile instead, and the hand is counted again for
+        // every card. One already in the discard pile goes to its end.
         let mut announced = Vec::new();
         let piles = &mut self.combat_mut()?.player.piles;
-        let mut moved = Vec::new();
         for card_id in cards {
-            for pile in [
+            let standing = [
                 PileName::Draw,
                 PileName::Hand,
                 PileName::Discard,
                 PileName::Exhaust,
                 PileName::Play,
-            ] {
-                if pile == destination {
-                    continue;
-                }
-                let held = pile_of_mut(piles, pile);
-                if let Some(at) = held.iter().position(|card| card.id == *card_id) {
-                    let card = held.remove(at);
-                    announced.push((card.id, pile));
-                    moved.push(card);
-                    break;
-                }
+            ]
+            .into_iter()
+            .find_map(|pile| {
+                pile_of(piles, pile)
+                    .iter()
+                    .position(|card| card.id == *card_id)
+                    .map(|at| (pile, at))
+            });
+            let Some((from, at)) = standing else {
+                continue;
+            };
+            if from == destination {
+                continue;
             }
+            let target =
+                if destination == PileName::Hand && piles.hand.len() >= Self::MAX_CARDS_IN_HAND {
+                    PileName::Discard
+                } else {
+                    destination
+                };
+            let card = pile_of_mut(piles, from).remove(at);
+            announced.push((card.id, from));
+            pile_of_mut(piles, target).push(card);
         }
-        pile_of_mut(piles, destination).extend(moved);
         for (card_id, from) in announced {
             self.announce_card_changed_piles(card_id, Some(from))?;
         }
@@ -27461,6 +28121,7 @@ impl Simulator {
                 odds: creation.odds,
                 from_an_encounter: creation.from_an_encounter,
                 is_card_reward: creation.flags.is_card_reward,
+                is_from_combat: creation.flags.is_from_combat,
             };
             let modified = self.modify_card_offer_for_relic(options, &listener)?;
             if let Some(reward) = self
@@ -27504,7 +28165,10 @@ impl Simulator {
         result?;
         let mut rolled = Vec::new();
         for reward in pending.unwrap_or_default() {
-            rolled.push(self.populate_pending_reward(reward)?);
+            let rerollable = reward.rerollable();
+            let mut populated = self.populate_pending_reward(reward)?;
+            populated.can_reroll |= rerollable;
+            rolled.push(populated);
         }
         Ok(rolled)
     }
@@ -27518,6 +28182,17 @@ impl Simulator {
                 if reward.reward_type == "card" {
                     reward.can_reroll = true;
                 }
+            }
+        }
+        // A card offer an earlier listener added is on the set already, only
+        // not rolled yet: it may be rerolled too.
+        for pending in self.pending_rewards.iter_mut().flatten() {
+            if let PendingReward::CardOffer { rerollable, .. }
+            | PendingReward::CardOfferOfOtherColours { rerollable, .. }
+            | PendingReward::CreatedCardOffer { rerollable, .. }
+            | PendingReward::OwnCardOffer { rerollable, .. } = pending
+            {
+                *rerollable = true;
             }
         }
         self.reward_edits += 1;
@@ -27563,7 +28238,7 @@ impl Simulator {
                 })?;
                 Ok(crate::RewardFingerprint::of("relic").with_model(relic))
             }
-            PendingReward::OwnCardOffer { count } => {
+            PendingReward::OwnCardOffer { count, .. } => {
                 let mut spec = self.card_reward_pools(&self.reward_spec()?);
                 spec.card_option_count = count;
                 let creation = reward_creation(&spec, crate::RarityOdds::RegularEncounter, false);
@@ -27577,7 +28252,7 @@ impl Simulator {
                     .from_creation(creation)
                     .from_source(crate::RewardSource::Other))
             }
-            PendingReward::CardOfferOfOtherColours { colours } => {
+            PendingReward::CardOfferOfOtherColours { colours, .. } => {
                 // The pools other than the owner's own are sorted by model ID
                 // and then walked by a Fisher-Yates over the niche stream, and
                 // the first few are taken.
@@ -27613,6 +28288,7 @@ impl Simulator {
                             no_upgrade_roll: false,
                             is_card_reward: false,
                             no_card_pool_modifications: true,
+                            is_from_combat: false,
                         },
                     };
                     cards.extend(self.create_cards(&creation)?);
@@ -27626,7 +28302,7 @@ impl Simulator {
                     .with_cards(cards, Vec::new(), crate::RarityOdds::Uniform)
                     .from_source(crate::RewardSource::Other))
             }
-            PendingReward::CreatedCardOffer(creation) => {
+            PendingReward::CreatedCardOffer { creation, .. } => {
                 let odds = creation.odds;
                 let cards = self.create_cards(&creation)?;
                 // An offer built out of cards that already exist carries no
@@ -27638,7 +28314,7 @@ impl Simulator {
                     .from_creation(creation)
                     .from_source(crate::RewardSource::Other))
             }
-            PendingReward::CardOffer { room, count } => {
+            PendingReward::CardOffer { room, count, .. } => {
                 let mut spec = self.card_reward_pools(&self.reward_spec()?);
                 spec.card_option_count = count;
                 // A combat room's offer is an encounter's, and rolls with the
@@ -27785,6 +28461,7 @@ impl Simulator {
             odds: creation.odds,
             from_an_encounter: creation.from_an_encounter,
             is_card_reward: creation.flags.is_card_reward,
+            is_from_combat: creation.flags.is_from_combat,
         })
     }
 
@@ -28197,9 +28874,18 @@ impl Simulator {
         Ok(())
     }
 
-    fn snapshot_power_amounts(&mut self, side: CombatSide) -> Result<(), EngineError> {
+    fn snapshot_power_amounts(&mut self, context: &HookContext) -> Result<(), EngineError> {
+        let starting: Vec<CreatureCombatId> = self
+            .combat()?
+            .creatures
+            .iter()
+            .map(|creature| creature.id)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter(|id| self.takes_part(*id, context).unwrap_or(false))
+            .collect();
         for creature in &mut self.combat_mut()?.creatures {
-            if creature.side == side {
+            if starting.contains(&creature.id) {
                 for power in &mut creature.powers {
                     power.amount_on_turn_start = power.amount;
                 }
@@ -29525,10 +30211,12 @@ fn roll_card_rarity(
                 crate::CardRarity::Common
             }
         }
+        // The base odds stack the same way: an uncommon is anything under the
+        // two shares together.
         None => {
             if roll < base_rare {
                 crate::CardRarity::Rare
-            } else if roll < base_uncommon {
+            } else if roll < base_uncommon + base_rare {
                 crate::CardRarity::Uncommon
             } else {
                 crate::CardRarity::Common
@@ -31194,6 +31882,26 @@ fn enchant_fingerprint(
             ));
             true
         }
+    }
+}
+
+#[cfg(test)]
+mod rarity_roll_tests {
+    use super::roll_card_rarity;
+    use sts2_rng::Rng;
+
+    /// The base odds stack the uncommon share on top of the rare one: an
+    /// elite's rare tenth and uncommon four tenths put a roll of 0.43 among
+    /// the uncommons.
+    #[test]
+    fn base_odds_stack_the_uncommon_share_on_the_rare_one() {
+        // This seed's first roll is 0.4277.
+        let mut rng = Rng::new(23);
+        assert_eq!(
+            roll_card_rarity(&mut rng, crate::RarityOdds::EliteEncounter, None, 0),
+            crate::CardRarity::Uncommon
+        );
+        assert_eq!(rng.counter(), 1);
     }
 }
 

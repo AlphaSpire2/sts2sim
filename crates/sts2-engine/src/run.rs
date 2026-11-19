@@ -732,6 +732,13 @@ impl RunState {
             .or(self.current_room_type)
     }
 
+    /// How many rooms the run's room stack holds: the map point's own room,
+    /// and a fight an event walked into on top of it.
+    #[must_use]
+    pub fn room_count(&self) -> u32 {
+        1 + u32::from(self.pushed_room.is_some())
+    }
+
     #[must_use]
     pub fn map(&self) -> &ActMap {
         &self.maps[self.current_act]
@@ -1503,8 +1510,28 @@ impl EventAmount {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AncientRelicGroup {
     pub relics: Vec<ModelId>,
-    /// Some groups belong to one act only.
-    pub only_in_act: Option<usize>,
+    /// The acts, by zero-based index, the group is offered in.
+    pub acts: AncientActs,
+}
+
+/// Which acts an ancient's relic group is offered in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AncientActs {
+    Any,
+    Only(usize),
+    From(usize),
+}
+
+impl AncientActs {
+    #[must_use]
+    pub const fn includes(self, act: usize) -> bool {
+        match self {
+            Self::Any => true,
+            Self::Only(only) => act == only,
+            Self::From(first) => act >= first,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1740,6 +1767,17 @@ pub enum EventEffect {
     /// of time as it walks out of the fight, so the guard here is whether
     /// anything escaped it.
     UnlessTheFightTimedOut(Vec<EventEffect>),
+    /// One reward set after a fight the event walked into: a potion rolled out
+    /// of `rolled_potion_from` on the rewards stream where that list holds
+    /// any, a relic off the front of the bag where `relic` says so, and then
+    /// whatever the fight itself added to its rewards. Nothing is offered
+    /// where all three come to nothing.
+    OfferWithTheFightsExtras {
+        #[serde(default)]
+        rolled_potion_from: Vec<ModelId>,
+        #[serde(default)]
+        relic: bool,
+    },
     /// This many upgradable cards of the deck, upgraded one at a time: the
     /// deck's upgradable cards sorted, then stably shuffled on the event's own
     /// stream, and the first few taken.

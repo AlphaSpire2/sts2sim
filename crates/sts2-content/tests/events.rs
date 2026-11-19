@@ -1373,15 +1373,26 @@ fn a_battleworn_dummy_fights_the_setting_it_was_put_on_and_pays_for_the_win() {
         won.decision()
     );
     // The fight pays nothing, and proceeding past it goes back to the event
-    // rather than to the map: the event pays the setting's prize on a page
-    // that is finished, and what is left to do is walk on.
+    // rather than to the map: the event offers the setting's prize as a
+    // reward on a page that is finished, and once it is taken what is left to
+    // do is walk on.
     proceed(&mut won);
     assert!(won.state().combat.is_none(), "the proceed ended the fight");
+    assert!(!holds_relic(&won, "RELIC.LANTERN"), "the relic is offered");
+    let claim = won
+        .legal_actions()
+        .iter()
+        .find(|action| {
+            matches!(action, Action::ClaimReward { fingerprint, .. }
+                if fingerprint.model_id == Some(id("RELIC.LANTERN")))
+        })
+        .cloned()
+        .expect("the relic is on the reward screen");
+    won.step(claim).expect("claiming applies");
     assert!(holds_relic(&won, "RELIC.LANTERN"));
-    assert_only_the_map_is_left(&won);
-    // The fight itself laid out no reward set; the relic came straight off
-    // the event, so no identifier was spent on the way.
-    assert_eq!(next_reward_set_id(&won), sets_before);
+    // The fight itself laid out no reward set; the event's set is the one
+    // identifier spent on the way.
+    assert_eq!(next_reward_set_id(&won), sets_before + 1);
 }
 
 /// The finished dummy page: still the room the run is standing in, with
@@ -1596,7 +1607,10 @@ fn grab_on_the_belt(simulator: &Simulator) -> (Vec<EventEffect>, i32) {
 
 #[test]
 fn an_endless_conveyor_rolls_a_dish_and_puts_the_next_one_up_behind_it() {
-    let mut simulator = Visit::new("EVENT.ENDLESS_CONVEYOR").gold(200).enter();
+    let mut simulator = Visit::new("EVENT.ENDLESS_CONVEYOR")
+        .gold(200)
+        .seed("PSQB89LLX5XF")
+        .enter();
     let page = option_ids(&simulator);
     assert_eq!(page.len(), 2);
     assert!(
@@ -2403,6 +2417,25 @@ fn a_slippery_bridge_rolls_a_card_and_charges_more_for_every_hold() {
     assert!(!deck_holds(&simulator, &taken));
 }
 
+/// A slippery bridge rolls among the deck's cards that are not basic, by the
+/// card's own rarity: an Ancient that no rolled pool holds is one of them, so
+/// beside nothing but basics it is the card rolled.
+#[test]
+fn a_slippery_bridge_rolls_an_ancient_beside_basics() {
+    let simulator = Visit::new("EVENT.SLIPPERY_BRIDGE")
+        .hp(80, 80)
+        .deck(&[
+            "CARD.STRIKE_IRONCLAD",
+            "CARD.DEFEND_IRONCLAD",
+            "CARD.BASH",
+            "CARD.SUPPRESS",
+            "CARD.STRIKE_IRONCLAD",
+        ])
+        .enter();
+    let (rolled, _) = bridge_page(&simulator);
+    assert_eq!(rolled, "CARD.SUPPRESS");
+}
+
 /// The Stone of All Time's push: six unblockable HP, and a Vigorous worth eight
 /// worked onto an attack of the deck. With one attack in the deck the screen
 /// takes it without asking.
@@ -3054,4 +3087,72 @@ fn a_crystal_spheres_gold_costs_the_boards_stream_a_read() {
     assert_eq!(offered.rewards[0].fingerprint.reward_type, "gold");
     assert_eq!(offered.rewards[0].fingerprint.gold_amount, 10);
     assert_eq!(event_die(&with_gold) - before, 1, "one read for the gold");
+}
+
+/// Darv offers Ectoplasm and Sozu in the second act only, each as a slot of
+/// its own, and Philosopher's Stone and Velvet Choker from the second act on.
+#[test]
+fn darv_offers_each_act_relic_in_the_acts_it_belongs_to() {
+    const SEEDS: [&str; 40] = [
+        "DARV00000000",
+        "DARV00000001",
+        "DARV00000002",
+        "DARV00000003",
+        "DARV00000004",
+        "DARV00000005",
+        "DARV00000006",
+        "DARV00000007",
+        "DARV00000008",
+        "DARV00000009",
+        "DARV00000010",
+        "DARV00000011",
+        "DARV00000012",
+        "DARV00000013",
+        "DARV00000014",
+        "DARV00000015",
+        "DARV00000016",
+        "DARV00000017",
+        "DARV00000018",
+        "DARV00000019",
+        "DARV00000020",
+        "DARV00000021",
+        "DARV00000022",
+        "DARV00000023",
+        "DARV00000024",
+        "DARV00000025",
+        "DARV00000026",
+        "DARV00000027",
+        "DARV00000028",
+        "DARV00000029",
+        "DARV00000030",
+        "DARV00000031",
+        "DARV00000032",
+        "DARV00000033",
+        "DARV00000034",
+        "DARV00000035",
+        "DARV00000036",
+        "DARV00000037",
+        "DARV00000038",
+        "DARV00000039",
+    ];
+    let offered = |act: usize| -> std::collections::BTreeSet<String> {
+        SEEDS
+            .iter()
+            .flat_map(|seed| option_ids(&Visit::new("EVENT.DARV").seed(seed).act(act).enter()))
+            .collect()
+    };
+    let has = |options: &std::collections::BTreeSet<String>, relic: &str| {
+        options.contains(&format!("DARV.pages.INITIAL.options.{relic}"))
+    };
+    let second = offered(1);
+    for relic in ["ECTOPLASM", "SOZU", "PHILOSOPHERS_STONE", "VELVET_CHOKER"] {
+        assert!(has(&second, relic), "{relic} in the second act");
+    }
+    let third = offered(2);
+    for relic in ["PHILOSOPHERS_STONE", "VELVET_CHOKER"] {
+        assert!(has(&third, relic), "{relic} in the third act");
+    }
+    for relic in ["ECTOPLASM", "SOZU"] {
+        assert!(!has(&third, relic), "{relic} stays in the second act");
+    }
 }
